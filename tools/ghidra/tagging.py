@@ -659,6 +659,9 @@ def finish(b):
             r["edx_in"] = True
         if f.entry in b.alt:
             r["alt_entries"] = dict(b.alt[f.entry])
+            # the interior addresses themselves: the translator seeds each as an
+            # alternate entry (kit_export.py "alternate_entries")
+            r["alt_vas"] = {hx(t): k for t, k in sorted(b.alt_at[f.entry].items())}
         if f.entry in sw:
             r["switch"] = sw[f.entry]
         if f.seeded:
