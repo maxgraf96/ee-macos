@@ -7,6 +7,8 @@ and boot it headless, in strict mode, with a fresh user directory, and require
   - the threads the game starts, with the x87 control word legion measured:
     0x027f everywhere but the render thread (EXE+0x10fe16), which sets 0x007f
     itself,
+  - frames presented through the kit's DirectDraw 7 (software renderer); the
+    last one is kept as build/boot/main-menu.ppm, the main menu at 1024x768,
   - a clean exit on WM_CLOSE (exit code 0),
   - no strict-mode stop, and no import called without an implementation except
     the ones boot.md §5 lists as known (sockets, Phase 5),
@@ -73,8 +75,10 @@ def main():
         seed_user.main(["--user", str(user)])
         before = game_snapshot()
         env = dict(os.environ, RECOMP_STRICT="1")
+        frames = user / "frames"
         result = subprocess.run([str(ROOT / "build/recomp/ee_boot"), "--user", str(user),
-                                 "--seconds", str(args.seconds)],
+                                 "--seconds", str(args.seconds), "--frames", str(frames),
+                                 "--frame-every", "60"],
                                 cwd=ROOT, capture_output=True, text=True, timeout=args.seconds + 120,
                                 env=env)
         out = result.stdout + result.stderr
@@ -101,6 +105,18 @@ def main():
         starts = [first for _, _, first, _ in threads if first != "027f"]
         if others or starts:
             problems.append("threads not at CW 027f: %s" % others)
+        presented = re.search(r"^frames presented: (\d+)", out, re.M)
+        if not presented or int(presented.group(1)) == 0:
+            problems.append("no frame was presented")
+        dumped = sorted(frames.glob("frame-*.ppm")) if frames.is_dir() else []
+        if dumped:
+            keep = ROOT / "build/boot/main-menu.ppm"
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(dumped[-1], keep)
+            size = dumped[-1].read_bytes()[:20].split(b"\n")[1].decode()
+            print("last frame (%s): %s" % (size, keep))
+            if size != "1024 768":
+                problems.append("the last frame is %s, not the menu's 1024x768" % size)
         if before != game_snapshot():
             problems.append("the game folder changed")
         if not (user / "registry.json").is_file():

@@ -2,7 +2,7 @@
 // translated, booted from the PE entry point (WinMainCRTStartup).
 //
 //   ee_boot [--game DIR] [--user DIR] [--seconds S] [--trace FILE] [--no-strict]
-//           [--play-movies]
+//           [--play-movies] [--frames DIR [--frame-every N]]
 //
 // The boot itself is the kit's (host/boot.cpp): mem_init, the loader (the
 // executable plus every [modules.aux.*] DLL at its base-map address), the
@@ -20,16 +20,18 @@
 //   - Strict mode on by default (RECOMP_STRICT=1): an undeliverable call, a
 //     call through an import of unknown argument count, or a divide error stops
 //     the run with a diagnostic.
-//   - Null devices, headless: nothing is drawn, played or read from a real
-//     keyboard. Escape is pressed through the intro movies (--play-movies
-//     turns that off), as a player does to reach the menu in seconds.
+//   - Headless: DirectDraw 7 / Direct3D 7 are the kit's (game.toml [runtime]
+//     ddraw7, P3-B) drawing with the software reference renderer
+//     (RECOMP_D3D7_SOFTWARE=1 unless set), and --frames writes presented
+//     frames; sound and input are null. Escape is pressed through the intro
+//     movies (--play-movies turns that off), as a player does to reach the
+//     menu in seconds.
 //   - TEMPORARY stand-ins for gaps other workstreams own, each registered so
 //     the kit's own shim wins as soon as it exists (docs/reference/boot.md §5):
 //     user32/gdi32 (pending_win32.cpp: thread messages and per-thread
 //     PeekMessage, LoadStringA/LoadBitmapA from any module, ANSI text, hooks),
-//     a null DirectDraw 7 / Direct3D 7 (pending_ddraw.cpp), the Miles calls
-//     the sound plugin makes (pending_mss32.cpp), an inert DirectMusic
-//     (pending_dmusic.cpp).
+//     the Miles calls the sound plugin makes (pending_mss32.cpp), an inert
+//     DirectMusic (pending_dmusic.cpp).
 //   - The game's window, not the splash screen's, gets the activation a window
 //     manager sends, and the deadline's WM_CLOSE.
 //   - A boot report: the milestones reached, the threads the game started and
@@ -53,6 +55,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <set>
@@ -61,7 +64,6 @@
 
 void ee_pending_win32_register(); // pending_win32.cpp
 void ee_pending_win32_over_kit();
-void ee_pending_ddraw_register(); // pending_ddraw.cpp
 void ee_pending_mss32_register(); // pending_mss32.cpp
 void ee_pending_mss32_over_kit();
 void ee_pending_dmusic_register(); // pending_dmusic.cpp
@@ -71,6 +73,9 @@ namespace {
 double g_seconds = 120.0;
 FILE *g_trace = nullptr;
 bool g_skip_movies = true;
+std::string g_frames_dir;
+uint32_t g_frame_every = 60;
+std::atomic<uint64_t> g_presents{0};
 int g_movies_open = 0; // BinkOpen without its BinkClose yet
 
 // --- milestones ---------------------------------------------------------------
@@ -263,6 +268,33 @@ std::string where(uint32_t a) {
 
 } // namespace
 
+// --- presentation ---------------------------------------------------------------------
+// What the kit's DirectDraw 7 presents through its software renderer (and GDI
+// windows): counted, and with --frames every Nth one written as a PPM - the
+// frames to compare with legion's references.
+extern "C" void host_display_present_window(const uint32_t *argb, int w, int h) {
+    const uint64_t n = ++g_presents;
+    if (g_frames_dir.empty() || !argb || w <= 0 || h <= 0 || n % g_frame_every)
+        return;
+    char path[1024];
+    snprintf(path, sizeof path, "%s/frame-%06llu.ppm", g_frames_dir.c_str(), (unsigned long long)n);
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    std::vector<uint8_t> row(size_t(w) * 3);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const uint32_t p = argb[size_t(y) * size_t(w) + size_t(x)];
+            row[3 * size_t(x)] = uint8_t(p >> 16);
+            row[3 * size_t(x) + 1] = uint8_t(p >> 8);
+            row[3 * size_t(x) + 2] = uint8_t(p);
+        }
+        fwrite(row.data(), 1, row.size(), f);
+    }
+    fclose(f);
+}
+
 // --- input -----------------------------------------------------------------------
 // The keyboard and mouse DirectInput reads (dx/dinput.cpp): nothing is pressed,
 // except Escape while an intro movie plays with --skip-movies (the default),
@@ -324,6 +356,7 @@ void report(FILE *out, bool abnormal) {
     std::lock_guard<std::mutex> hold(g_lock);
     fprintf(out, "\n== Empire Earth boot report%s ==\n", abnormal ? " (abnormal end)" : "");
     fprintf(out, "stop: %s after %.1fs\n", boot_stop_reason(), boot_elapsed());
+    fprintf(out, "frames presented: %llu\n", (unsigned long long)g_presents.load());
     boot_print_exit_code(out);
     for (int m = 0; m < kMilestoneCount; ++m)
         if (g_reached[m] > 0)
@@ -361,16 +394,18 @@ std::string user_dir_default() {
 }
 
 int usage(const char *argv0) {
-    fprintf(stderr,
-            "usage: %s [--game DIR] [--user DIR] [--seconds S] [--trace FILE] [--no-strict]\n"
-            "  --game DIR   the GOG game folder holding Empire Earth.exe (default: the\n"
-            "               developer copy game.toml names)\n"
-            "  --user DIR   the player's data: registry.json and everything the game writes\n"
-            "               (default ~/Library/Application Support/EmpireEarth)\n"
-            "  --seconds S  post WM_CLOSE after S seconds (default 120; 0 = never)\n"
-            "  --trace FILE every import call: thread, DLL!name, stdcall arguments\n"
-            "  --play-movies do not press Escape through the intro movies\n",
-            argv0);
+    fprintf(
+        stderr,
+        "usage: %s [--game DIR] [--user DIR] [--seconds S] [--trace FILE] [--no-strict]\n"
+        "  --game DIR   the GOG game folder holding Empire Earth.exe (default: the\n"
+        "               developer copy game.toml names)\n"
+        "  --user DIR   the player's data: registry.json and everything the game writes\n"
+        "               (default ~/Library/Application Support/EmpireEarth)\n"
+        "  --seconds S  post WM_CLOSE after S seconds (default 120; 0 = never)\n"
+        "  --trace FILE every import call: thread, DLL!name, stdcall arguments\n"
+        "  --play-movies do not press Escape through the intro movies\n"
+        "  --frames DIR write presented frames there as PPM (every --frame-every N, default 60)\n",
+        argv0);
     return 2;
 }
 
@@ -384,7 +419,7 @@ void ee_flush_host_posts() {
 
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
-    std::string game, user = user_dir_default(), trace;
+    std::string game, user = user_dir_default(), trace, frames, frame_every = "60";
     bool strict = true;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--game") && i + 1 < argc)
@@ -399,6 +434,10 @@ int main(int argc, char **argv) {
             strict = false;
         else if (!strcmp(argv[i], "--play-movies"))
             g_skip_movies = false;
+        else if (!strcmp(argv[i], "--frames") && i + 1 < argc)
+            frames = argv[++i];
+        else if (!strcmp(argv[i], "--frame-every") && i + 1 < argc)
+            frame_every = argv[++i];
         else
             return usage(argv[0]);
     }
@@ -412,6 +451,16 @@ int main(int argc, char **argv) {
         setenv("RECOMP_EXE", (game + "/Empire Earth.exe").c_str(), 1);
     if (!getenv("RECOMP_STRICT"))
         setenv("RECOMP_STRICT", strict ? "1" : "0", 1);
+    // No GPU here: the kit's DirectDraw 7 draws with its reference renderer.
+    if (!getenv("RECOMP_D3D7_SOFTWARE"))
+        setenv("RECOMP_D3D7_SOFTWARE", "1", 1);
+    if (!frames.empty()) {
+        os_mkdir(frames.c_str());
+        g_frames_dir = frames;
+        g_frame_every = (uint32_t)strtoul(frame_every.c_str(), nullptr, 10);
+        if (!g_frame_every)
+            g_frame_every = 1;
+    }
     {
         OsStat st;
         if (os_stat(getenv("RECOMP_REGISTRY"), &st) != 0)
@@ -439,9 +488,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "[ee] loading failed: %s\n", loader_error());
         return 2;
     }
-    // After the kit's DirectX shims are registered (boot_load): the null
-    // DirectDraw 7 replaces the kit's DirectDrawCreateEx, which refuses DD7.
-    ee_pending_ddraw_register();
     ee_pending_mss32_over_kit();
     ee_pending_win32_over_kit();
     reach(kLoaded);

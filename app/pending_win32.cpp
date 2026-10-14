@@ -1,8 +1,6 @@
-// pending_win32.cpp - TEMPORARY stand-ins for user32/gdi32/dinput/imm32 and
-// ddraw/d3d gaps that block the headless boot. They belong to other
-// workstreams (docs/phase3.md: P3-B owns ddraw/d3d, P3-C owns
-// user32/gdi32/dinput/imm32); each is listed in docs/reference/boot.md §5 for
-// its owner.
+// pending_win32.cpp - TEMPORARY stand-ins for user32/gdi32/dinput/imm32 gaps
+// that block the headless boot. They belong to P3-C (docs/phase3.md); each is
+// listed in docs/reference/boot.md §5 for its owner.
 //
 // Registered before loader_load runs imports_init, so a shim the kit has
 // always replaces the one here (imports_register: a later non-null

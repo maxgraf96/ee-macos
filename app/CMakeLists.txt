@@ -3,13 +3,12 @@
 #
 #   ee_boot   the whole game: the executable's translation and all eight DLLs'
 #             (recomp_gen + every aux archive), booted from the PE entry point
-#             through the kit's shared boot (host/boot.cpp) with null display,
-#             sound and input until the ddraw/d3d (P3-B) and win32-ui (P3-C)
-#             hosts land. docs/reference/boot.md.
+#             through the kit's shared boot (host/boot.cpp), headless: the
+#             kit's DirectDraw 7 on its software renderer, null sound and
+#             input. docs/reference/boot.md.
 if(APPLE AND POP_HAVE_GEN AND NOT POP_TRANSLATE STREQUAL "STUB" AND TARGET recomp_gen_h_milesmix)
   add_executable(ee_boot ${CMAKE_CURRENT_LIST_DIR}/ee_main.cpp
                  ${CMAKE_CURRENT_LIST_DIR}/pending_win32.cpp
-                 ${CMAKE_CURRENT_LIST_DIR}/pending_ddraw.cpp
                  ${CMAKE_CURRENT_LIST_DIR}/pending_mss32.cpp
                  ${CMAKE_CURRENT_LIST_DIR}/pending_dmusic.cpp
                  ${POP_ROOT}/host/page_overlay.cpp)

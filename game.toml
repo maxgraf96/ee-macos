@@ -137,6 +137,11 @@ mouse_device_right = 0x00f00238
 camera = 0x00f00240
 sprites = []
 
+[runtime]
+# DirectDrawCreateEx serves IID_IDirectDraw7 (kit dx/ddraw7.cpp, P3-B): both
+# display plugins are DirectX 7 (graphics.md).
+ddraw7 = true
+
 [mods]
 builtin = "none"
 
