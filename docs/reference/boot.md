@@ -1,6 +1,6 @@
 # Booting the whole game: `ee_boot`
 
-Status: Phase 3, workstream P3-A (exe-boot), 2026-10-14. The GOG `Empire Earth.exe` and all eight DLLs, translated, boot natively on arm64 macOS **in strict mode, headless, to the main menu's message loop**, render the main menu at 1024×768 through the kit's DirectDraw 7 (P3-B, software renderer) with the kit's user32/gdi32 text in the system's Tahoma (P3-C), and exit cleanly on `WM_CLOSE`. The menu shows the version **`v2.00.2974`**, the data checksum both Windows peers sent (netcode.md §8) [measured]. Sound and input are null; temporary stand-ins remain only for audio (Phase 4) and one user32 behaviour (§5). Kit `ee` d4bac5b + `feat/boot`. Context: [phase3.md](../phase3.md), [build.md](build.md), [legion.md](legion.md).
+Status: Phase 3, workstream P3-A (exe-boot), 2026-10-14. The GOG `Empire Earth.exe` and all eight DLLs, translated, boot natively on arm64 macOS **in strict mode, headless, to the main menu's message loop**, render the main menu at 1024×768 through the kit's DirectDraw 7 (P3-B, software renderer) with the kit's user32/gdi32 text in the system's Tahoma (P3-C), and exit cleanly on `WM_CLOSE`. The menu shows the version **`v2.00.2974`**, the data checksum both Windows peers sent (netcode.md §8) [measured]. Sound and input are null; temporary stand-ins remain only for audio (Phase 4) and one user32 behaviour (§5). Kit `ee` 3c71e54 + `feat/boot`. Context: [phase3.md](../phase3.md), [build.md](build.md), [legion.md](legion.md).
 
 Labels: **[measured]** = output of the commands here (M4 Max, macOS 15.5); **[static]** = read from the binaries or the DB; **[inferred]** = reasoning.
 
@@ -12,10 +12,10 @@ Labels: **[measured]** = output of the commands here (M4 Max, macOS 15.5); **[st
 cd /Users/max/Code/neoee-macos          # this repository, with the kit at an `ee` that has feat/boot
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt   # once
 .venv/bin/python tools/setup.py --install "original/gog/Empire Earth"   # once: link + export the nine modules' listings
-.venv/bin/python tools/run.py            # seed the registry, translate (first time, ~5 min), build, open the app
+.venv/bin/python tools/run.py            # seed the registry, translate (when stale, ~5 min), build, open the app
 ```
 
-`tools/run.py` builds `build/EmpireEarth.app` (the kit's SDL host, `tools/build.py --target app`) and opens it; later runs rebuild only what changed, and `open build/EmpireEarth.app` works too. The registry and everything the game writes live in `~/Library/Application Support/EmpireEarth` (`--user DIR` for another place); `tools/boot/seed_user.py` seeds the registry with legion's options and the CD key from your own GOG install script (it finds the Wineskin build's, or pass `--gog-script`).
+`tools/run.py` builds `build/EmpireEarth.app` (the kit's SDL host, `tools/build.py --target app`) and opens it. It translates again when a module's generated code is missing or older than its `analysis/kit/` inputs or the kit's translator (a checkout that predates the five plugin DLLs needs the `setup.py` step above, then one translation); otherwise it rebuilds only what changed, and `open build/EmpireEarth.app` works too. The registry and everything the game writes live in `~/Library/Application Support/EmpireEarth` (`--user DIR` for another place); `tools/boot/seed_user.py` seeds the registry with legion's options and the CD key from your own GOG install script (it finds the Wineskin build's, or pass `--gog-script`).
 
 In the game: click in the window to capture the mouse (the game draws its own cursor from relative motion); Escape skips the intro movies (~2 minutes otherwise); hold Escape to release the mouse; Command-Q quits through the game's own exit. Display is Metal at the game's 1024×768 menu mode in a 4:3 window. **No audio yet** (Phase 4), and Multiplayer's networking is Phase 5.
 

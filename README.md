@@ -28,9 +28,9 @@ This project ports *Empire Earth* (2001; the GOG *Empire Earth Gold* base game) 
 ```sh
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt   # once
 .venv/bin/python tools/setup.py --install "/path/to/Empire Earth"   # once: link your GOG copy, export the listings
-.venv/bin/python tools/run.py      # seed the registry, translate (first time), build and open build/EmpireEarth.app
+.venv/bin/python tools/run.py      # seed the registry, translate (when stale), build and open build/EmpireEarth.app
 ```
-Boots to the main menu (Metal, mouse and keyboard; no audio yet). Details, the headless boot and what is still a stand-in: [`docs/reference/boot.md`](docs/reference/boot.md).
+`setup.py` exports from the func-db Ghidra projects ([`docs/reference/function-db.md`](docs/reference/function-db.md) §9). Boots to the main menu (Metal, mouse and keyboard; no audio yet). Details, the headless boot and what is still a stand-in: [`docs/reference/boot.md`](docs/reference/boot.md).
 
 ## Build
 Setup, build, tests, the freestanding/`ld64.lld` bundle build and the DLL base map: [`docs/reference/build.md`](docs/reference/build.md).
