@@ -34,7 +34,11 @@ $k = 0
 foreach ($ep in 1, $null, 13) { $k++   # first epoch, the registry default, last epoch (mapping unverified, rmg.md §8.1)
   $cases.Add([pscustomobject]@{ id = 'D{0:d2}' -f $k; script = 'Plains'; size = 2; epoch = $ep; seed = 4001 }) }
 if ($Only) { $cases = @($cases | Where-Object { $Only -contains $_.id }) }
-if ($From) { $i = [array]::FindIndex([object[]]$cases, [Predicate[object]]{ param($c) $c.id -eq $From }); $cases = @($cases)[$i..($cases.Count - 1)] }
+if ($From) {
+  $i = 0; while ($i -lt $cases.Count -and $cases[$i].id -ne $From) { $i++ }
+  if ($i -ge $cases.Count) { throw "no case $From" }
+  $cases = @($cases)[$i..($cases.Count - 1)]
+}
 
 $before = Get-ItemProperty $key | Select-Object 'Map Type', 'Map Size', 'Starting Epoch'
 $beforeFile = Join-Path $Out 'game-options-before.json'
