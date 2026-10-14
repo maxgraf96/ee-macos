@@ -77,7 +77,10 @@ Empire Earth.exe              game logic, UI, AI, (dead) WON lobby client — 4.
 ```
 
 ### 2.3 Code characteristics
-- **Size:** EXE `.text` 4,232 KB (1.52 M instructions, ~15–25k functions); engine 586 KB (~3k functions); Dinkumware 684 KB; plugins ~160 KB.
+- **Size** (function DB, [function-db.md](reference/function-db.md)):
+  - **EXE:** `.text` 4,232 KB, **25,602 functions** (37,459 entries including EH funclets and thunks). **1,879 RTTI classes**; 23,800/23,800 vtable slots resolved.
+  - **Code split by origin:** game 65%, **WON lobby library 24%** (needed for the LAN lobby), Dinkumware 6%, DRM residue 4%, plus libpng / zlib 1.1.3 / libjpeg 6b / a little MFC.
+  - **Other modules:** engine 586 KB (5,218 entries); Dinkumware 684 KB; plugins ~160 KB.
 - **Compiler:** MSVC 6 (Rich header `Utc12` 8168/8799, linker 6.00.8447).
   - EXE base fixed at `0x400000` with no relocations; DLLs relocatable.
   - SafeDisc leftovers (`SIntf32.dll`, `CmdLineExt.dll` strings) to exclude. GOG's `.cms_t`/`.cms_d` sections are DRM residue (including a Petite-packed PE); Phase 1 must confirm they are unreachable.
@@ -106,7 +109,16 @@ Empire Earth.exe              game logic, UI, AI, (dead) WON lobby client — 4.
   - msvcrt `sin/cos/_CI*` are never called, and neither is `_ftol`. Float→int is inline; a rare `0x0e7f` sample (truncate rounding) on the main thread hints at a temporary RC switch, to check in Ghidra.
   - So the transcendental surface for bit-exactness is essentially **the engine's `UM*` wrappers plus `sqrt`**.
 - **No CW changes in-game:** none on any thread across 17k samples per thread; precision is set only at thread start and on plugin reload.
-- **World checksums** (`ESChecksum*`, `NEMWorldDatabaseChecksum*`) are not called in single player. The checksum-stream oracle therefore comes from LAN sessions (`windows/frida/sync_hooks.js`).
+- **Out-of-sync detection** ([netcode.md](reference/netcode.md)):
+  - From tick 40, every multiplayer tick computes an additive 32-bit **world checksum at `EXE+0x145ebf`**. It is not `ESChecksum`, which explains the zero calls seen in single player.
+  - Clients send their value to the host (message `0x32`); the host's own value never goes on the wire.
+  - The host decides: with 2 players both are flagged; with 3+ the majority wins.
+  - Every machine writes an OOS log; the losers are removed.
+  - "Debug OOS Handling" has no runtime effect.
+  - **Oracle:** `windows/frida/netcode_hooks.js` records the per-tick world checksum on each machine.
+- **Two kinds of screen:** menus and the multiplayer lobby run DirectDraw in **normal windowed mode** (`DDSCL_NORMAL`). The multiplayer lobby is a **GDI-drawn UI** from the WON toolkit statically linked into the EXE. Gameplay switches to exclusive fullscreen (`0x513`).
+  - The current Wine build hangs on entering the lobby: the main thread spins in the lobby's message loop and nothing is displayed.
+  - Our user32/gdi32 + DirectDraw HLE must present GDI windows and switch between the two modes cleanly (Phase 3 test case).
 - **Free metadata:** mangled C++ signatures for the whole engine API and the display-plugin interface, plus RTTI in the EXE. No PDBs, though the plugins leak build paths (`C:\SSSI Development\…`).
 - **Netcode tuning in the registry** (`HKCU\Software\SSSI\Empire Earth`): `Min/Max PTs per Second` (physics ticks 15–125/s), `CT Send Interval…`, `Debug OOS Handling`, `Network Adapter` (index), `Rasterizer Name`.
 
@@ -139,7 +151,7 @@ These must also match the Windows friends' installs (§5.6). The Steam build's h
 | gdi32 | 36 | winmm | 16 |
 | mss32 | 34 | binkw32 | 9 |
 | advapi32 | 7 | imm32 | 7 |
-| version / ole32 / ddraw | 3 each | dinput / shell32 / iphlpapi | 1 each |
+| version (DRM-only, so stubbed) / ole32 / ddraw | 3 each | dinput / shell32 / iphlpapi | 1 each |
 
 Plus COM: DirectDraw7 / Direct3D7, DirectInput, DirectMusic. For scale, Wine implements tens of thousands of functions.
 
@@ -155,6 +167,14 @@ Plus COM: DirectDraw7 / Direct3D7, DirectInput, DirectMusic. For scale, Wine imp
   - renderer and window fixes;
   - GOG addresses.
 - **No decompilation or engine reimplementation of EE exists.**
+- **Community RE, harvested and verified** ([community-re.md](research/community-re.md), [`db/community-symbols.json`](../db/community-symbols.json)): 251 claims for the GOG base game, **240 statically verified, 0 mismatched**. Highlights:
+  - **Simulation hot functions:** all 64 of 00xJS's x87 hot functions match byte for byte and map to the `EEPhysicsModel`/`EEPM*` classes.
+  - **Engine maths:** `UMCos`/`UMArcCos` are **table-based** (engine-data tables), so they are trivially exact if we translate them faithfully.
+  - **Determinism checkpoints:** per-object update `0x547b5c` and per-tick world update `0x546d6b`. Combined with the `-loadgame` switch, Mac-vs-Windows runs can start from the same save.
+  - **Struct layouts:** player table `0x918374`; struct maps for `GEModel`, `GETerrainMesh` and others.
+  - **Renderer requirements:** two-page flipping, display modes 640×480/800×600/1024×768, FVF `0x152` with a 2442-vertex ring buffer, an 82-slot rasterizer vtable.
+  - **Watch item:** a thread race in `BuildPointList` (late-game crash) will carry over into a faithful translation.
+  - **New sources:** McGregory99/empire-earth-web reimplements `TCP Protocol.dll` call for call (no licence, so facts only).
 
 ---
 
@@ -271,26 +291,64 @@ Precedents for the later C phase:
   - **Mac↔Windows** needs bit-identical results with real x87. This is achievable because:
     - At **PC=53**, x87 `fadd/fsub/fmul/fdiv/fsqrt` equal IEEE `double`, except where the extended exponent range matters (detect and route to SoftFloat).
     - Loads and stores convert exactly as x87 does (`fstp m32` rounds to float).
-    - Transcendentals (via `msvcrt` and 2× `fsin`/`fcos`) must reproduce msvcrt/x87 results bit-exactly where they feed the simulation, verified on real hardware.
+- **Phase 1 results** ([ADR-002](decisions/002-exact-x87.md), proposed):
+  - **No extended-precision sources in game code:**
+    - no FLD constants, no 80-bit loads or spills, no transcendental instructions (except 2 in a GDI drawing method);
+    - no `fldcw` (the only 8 are in the dead DRM residue);
+    - `FILD m64` is almost all zero-extended u32.
+  - **The engine's trig is tables plus `sqrt`:**
+    - `UMCos` uses a 16,385-float table, `UMArcCos` a 32,760-float table plus a `sqrt`/atan series near 1;
+    - `UMArcTan2` is built on `UMArcCos`;
+    - there is no `UMSin`/`UMSqrt`. The tables are engine data, so they are exact by construction.
+  - **Float→int:**
+    - 1,330 inline `FISTP` sites using round-to-nearest-even;
+    - a truncating helper (567 call sites) built on `FISTP m64`, which never touches the control word.
+  - **Measured:** the kit's double model is **already bit-exact** on game-shaped work: 0 differences on 13,577 PC53 and 7,700 PC24 vectors, and on 22,076 `UM*` vectors vs Unicorn running the real engine. Rosetta's x87 matches our reference model on 184k vectors.
+- **Design (ADR-002):** a hybrid. The double fast path is selected by a per-thread mode word (PC53, round-nearest, no extended value live); a free exponent guard routes rare edge cases to SoftFloat-80; PC24 uses midpoint-safe rounding; CW starts at `0x027f`; `_controlfp` is a cheap HLE; build with `-ffp-contract=off` and a CI check for FMA. **3.5–4.5 weeks.**
+- **Acceptance:** before acceptance, the legion hardware vectors must pass (raw instructions plus the `UM*` functions called inside the real game). An AMD run is a nice-to-have. Intel and AMD transcendentals differ, but none feed EE's simulation.
 - **Oracles:**
-  - **The game's own sync check:** it removes out-of-sync players with a message, and `Debug OOS Handling` exists.
-  - Per-tick `ESChecksum` streams.
-  - LAN games against the unmodified GOG client on `legion`, and against the existing Wine build on this Mac.
+  - **The game's own sync check:** a per-tick world checksum at `EXE+0x145ebf`, sent to the host as message `0x32`; out-of-sync players are removed.
+  - `windows/frida/netcode_hooks.js` for per-machine checksum streams.
+  - LAN games against the unmodified GOG client on `legion`.
   - 00xJS's verified rewrites as a cross-check.
 
 ### 5.3 Graphics
-- **Stage 1:** target **`DX7HRDisplay.dll`** (no hardware T&L; it is the default "Direct3D" rasterizer and what Wine setups use). It needs a smaller D3D7 subset, mostly pre-transformed vertices, so no lighting/transform pipeline:
-  - surfaces, flip, Lock/Blt, color keys;
-  - `GetDC` → GDI text onto surfaces;
-  - render/texture-stage states → ubershader on Metal (via the kit's shader generator).
-  - Render at Retina resolution; scale the 2D UI cleanly.
-- **Open point from the spike:** `DX7HRDisplay` exports `ConvertToD3DMatrix`, so it may submit *untransformed* vertices with D3D7 doing the transform. Phase 1's COM inventory decides whether we need the D3D7 transform stage (software T&L in the shim) or only pre-transformed vertices.
-- **Later:** the T&L plugin, if worthwhile.
+- **Inventory result** ([graphics.md](reference/graphics.md), static): `DX7HRDisplay.dll` sends **only untransformed vertices** and relies on **D3D7 fixed-function transform and lighting**.
+  - **Vertices:** one system-memory vertex buffer, FVF `0x152` (XYZ|NORMAL|DIFFUSE|TEX1), drawn with `DrawPrimitiveVB`/`DrawIndexedPrimitiveVB` only, for 3D and 2D alike.
+  - **State:** `SetTransform` (25 sites), up to 8 point/directional lights, materials, colour-vertex sources, linear vertex fog.
+  - **Texturing:** stage 0 only (SELECTARG1/SELECTARG2/MODULATE).
+- **Shim checklist:**
+  - 50 COM methods (DD7 12, Surface7 12, D3D7 4, Device7 19, VB7 3) + 3 exports;
+  - 32 render states;
+  - 12 TSS types;
+  - 7 surface types (flip/mip chains, Z16/24/32, managed and render-target textures);
+  - 12 pixel formats.
+  
+  Not needed: multitexturing, palettes, clippers, gamma, state blocks.
+- **Design:** extend the kit's D3D2/3 command recorder + Metal renderer (`ddraw.cpp`, `d3d.cpp`, `host/d3d_render.cpp`) with version-7 vtables, FVF `0x152`, vertex T&L with 8 lights and fog in MSL, render-to-texture, 32-bpp and mip chains. Don't use the kit's D3D9 path.
+  - Present only on Flip or a Blt to the primary; drop the kit's Populous-specific frame heuristics.
+  - **Effort:** ~4.5–6 weeks, plus 1–1.5 weeks for GDI ANSI text and DirectInput fixes.
+- **GDI:** used mostly to build glyph atlases once (`TextLock`) and to measure text on a screen DC (the ~92/s calls). Per-frame GDI on the back buffer is possible; `com_census.js` will measure it.
+- **The T&L plugin** (GOG's default) is the same code with 3 overridden methods: about a day extra, so support both.
+- **Rasterizer interface:** `GERasterizer` has 78 slots, `DX7Rasterizer` 82. The EXE reads a 0x340-byte per-screen state record inline about 49 times, so that layout is part of the interface.
+- **DirectInput:** version 0x700, keyboard and mouse only. Two traps: never return exactly 256 keyboard records, and re-acquire only through `WM_ACTIVATE`.
+- Render at Retina resolution; scale the 2D UI cleanly.
 - **Decompilation track:** the display plugin is small (~500 functions) with a fully named interface. Rewrite it natively for true widescreen, UI scaling and better throughput.
 
 ### 5.4 Audio and video
 - **Miles:** the 34 `AIL_*` functions over the kit's mixer (WAV/ADPCM; minimp3 is already vendored if `.asi` MP3 is used).
-- **DirectMusic:** the `IDirectMusic*` calls `SEConductor` makes, backed by **GothicKit/dmusic** (MIT, C11; built for Gothic's `.sgt/.sty/.dls` music; incomplete, so we contribute upstream). Fallback: offline-render the 8 tracks from the user's own files.
+- **DirectMusic** (measured, [audio.md](reference/audio.md)): EE uses 9 DX6/7 interfaces and ~40 methods. **GothicKit/dmusic** (MIT) loads and plays **all 8 tracks** once patched:
+  - a bank-select fix (upstream mis-assigns 89 of 103 instruments);
+  - master groove level and segment repeats. EE's whole intensity mechanism is the groove level 1–4, switching at the next bar.
+  
+  The patch is in `third_party/patches/dmusic-ee-fixes.patch`. We pin a dmusic fork and upstream the fixes.
+  - 4 of 8 tracks need Windows' system General MIDI DLS bank (`gm.dls`), which isn't shipped. Use macOS's own `gs_instruments.dls` at runtime (read from the system, never redistributed), falling back to the kit's soundfont.
+  - **Gaps:** reverb (EE sets one per track), gain staging, and possibly variation choice and synth rate vs Windows.
+  - Rendering runs 550–1300× realtime.
+  - Music uses its own RNG, so it can't affect lockstep.
+- **Miles:** 2D only, 8-bit mono 22 kHz samples, plus 3 MP3s for menu/UI music. 17 small AIL calls are missing in the kit.
+- **Bink:** all three movies are Bink 1 640×480; FFmpeg decodes them cleanly; the kit covers all 9 calls.
+- **Shared stub DirectSound** object for Miles, DirectMusic and Bink.
 - **Bink 1:** FFmpeg dylibs (LGPL-2.1, dynamically linked; the kit already does this). Covers 3 movies: Sierra, SSSI, intro.
 
 ### 5.5 Input and windowing
@@ -298,8 +356,23 @@ Precedents for the later C phase:
 - Mouse capture/confinement, edge scrolling in windowed mode, Cmd-key mappings (00xJS's mappings are a reference), trackpad scrolling.
 
 ### 5.6 LAN multiplayer
-- **Transport:** wsock32/ws2_32 on BSD sockets. Discovery uses UDP broadcast (`SO_BROADCAST`, ports 33334/33335); games use TCP/UDP on 33334–33336.
-- **Network adapters:** `GetAdaptersInfo` HLE returns the Mac's real interfaces, VPN tunnels included (`utun*` for Tailscale/ZeroTier/Hamachi), with readable names. The in-game *Network Adapter Options* then selects the VPN.
+- **Two layers** (static analysis, emulation and a Wine trace; [netcode.md](reference/netcode.md)):
+  - **Lobby** (game list, chat, Host Game): the EXE's statically linked WON `LanLogic`, over **wsock32**. Ports come from GOG's `WONLobby.cfg`:
+    - **UDP 8585**: LAN broadcast;
+    - **UDP 33336**: lobby. Entering Multiplayer binds `0.0.0.0:33336` with broadcast on [measured under Wine].
+    
+    The lobby's wire format is still to be decoded from a real capture.
+  - **Game:** at the lobby→game hand-off the client connects straight to the host's IP via `TCP Protocol.dll`. This is the same path as *Join By IP Address*.
+    - **UDP 33334** carries all game traffic: one engine message per datagram, RC4-obfuscated with a key table the DLL derives at startup.
+    - **TCP 33335** carries file transfer (maps/scenarios).
+  - The plugin's own `"EEService"` broadcast on 33334 is reachable only from legacy UI actions, so it is not in the normal flow.
+- **Winsock HLE checklist** is netcode.md §7:
+  - Both wsock32 (lobby) and ws2_32 (game) must really work.
+  - `WSAEventSelect` must re-signal while data is still queued.
+  - Calls on an invalid socket must fail cleanly; the dead Sierra DNS lookup must fail instantly.
+  - **macOS sends the limited broadcast out of only one interface**, so we fan broadcasts out per interface (Wi-Fi *and* ZeroTier) for both 8585 and 33334.
+- **Data checksum on join:** the connect request carries a byte-sum of `Low-Level Engine.dll`, `sxlrt233.dll`, `TCP Protocol.dll` and the `Data\Db`, `Unit AI Scripts` and `Models` files. Keep those files byte-identical in the game folder even though they're translated.
+- **Network adapters:** the *Network Adapter Options* setting only changes the displayed IP; sockets bind to any address. `GetAdaptersInfo` should still report real interfaces with readable names.
 - **Virtual LANs:**
   - **Hamachi / ZeroTier** forward broadcasts, so games appear automatically.
   - **Tailscale** does not forward broadcasts, so use the game's built-in **Join By IP Address**.
@@ -309,7 +382,7 @@ Precedents for the later C phase:
   - Retail 2.00 + CD key: to check, and that's where your key could matter.
   - **CD key:** GOG's installer writes `HKLM\SOFTWARE\WOW6432Node\Sierra\CDKeys\EmpireEarth` (REG_BINARY) from its install script. Our importer reads the value from the player's own GOG files into the registry emulation, and never ships it. Since the group already plays GOG↔GOG over ZeroTier, a shared GOG key evidently doesn't block LAN games.
 - **Display plugin is per-client:** GOG's installer defaults to `Direct3D Hardware TnL`, 16-bit, 1024×768, so Windows friends likely run the T&L plugin. Rendering runs on its own thread and shouldn't affect sync; verify in a LAN test.
-- **Firewall:** Windows' "Allow" prompt creates **Private-only** rules, and a ZeroTier network usually starts as **Public**. Friends' ZeroTier networks must be set to Private, or need a Public rule scoped to the ZeroTier subnet. Our friend-facing guide will say this; [reference/legion.md](reference/legion.md) §7 has commands.
+- **Firewall:** Windows' "Allow" prompt creates **Private-only** rules, and a ZeroTier network usually starts as **Public**. Friends' ZeroTier networks must be set to Private, or need a Public rule scoped to the ZeroTier subnet. Every peer needs **inbound UDP 8585, UDP 33336, UDP 33334 and TCP 33335**. Our friend-facing guide will say this; [reference/legion.md](reference/legion.md) §7 has commands.
 - **Firewall:** the app requests incoming connections (macOS firewall prompt). Document the VPN setup for friends.
 
 ### 5.8 Bundled first-run compiler (D10)
@@ -344,8 +417,8 @@ Precedents for the later C phase:
    - Scripted AI-only skirmishes with fixed seeds, campaign missions, save/load. The Mac must reproduce the checksum streams.
    - Byte-compared saves.
    - Perceptual screenshot diffs.
-5. **LAN:**
-   - Mac↔Mac (two builds on two Macs, or two instances).
+5. **LAN** (oracle: per-tick world checksum via `windows/frida/netcode_hooks.js` and `tools/lan/eelan.py` decoding of captures):
+   - Mac↔Mac (two builds on two Macs). Two instances on **one** machine can't share UDP 33334, so use Join by IP with separate network namespaces, or two machines.
    - Mac↔`legion` (GOG on Windows).
    - Mac↔the existing Wine build (a second "Windows" client on the same Mac).
    - Soak tests: 8 AIs at max speed, with the game's OOS removal as the oracle.
@@ -369,14 +442,28 @@ Rough focused-engineering weeks for one developer with AI agents; Phases 0–1 r
 - **Spike:** recomp-kit on `Default.dll` + engine + Dinkumware → ADR-001 (adopt/fork vs own).
 - `NeoEE_Setup.exe` is no longer needed. Delete it, or move it to `original/` (git-ignored).
 
-### Phase 1: Reverse-engineering foundation (≈2–4 wk)
-- Ghidra (headless + REA): apply the 4.4k engine symbols, the plugin interface and RTTI classes; tag library code (Dinkumware, WON SDK, CRT, SafeDisc/GOG leftovers).
-- **Function DB:** bounds, names, indirect-target status, x87 use, thread (sim/render), library flag. Target ≥ 99.5% of `.text` bytes.
-- **Usage inventories:** COM vtable slots actually called (DirectDraw7/D3D7 from `DX7HRDisplay`, DirectInput, DirectMusic); TCP plugin protocol.
-- Mine 00xJS / Reborn-DLL / EELibrary / Cheat Engine tables for known GOG addresses and structures.
+### Phase 1: Reverse-engineering foundation: static work **done 2026-10-14**; legion confirmation runs pending
+| Output | Result |
+|---|---|
+| Function DB ([function-db.md](reference/function-db.md), `db/functions/`, `tools/ghidra/`) | ≥ 99.9% of `.text` in every module, all vtable slots resolved, library/DRM tags, DRM unreachable, reproducible; the kit translates with it cleanly |
+| Graphics/input inventory ([graphics.md](reference/graphics.md)) | D3D7 shim checklist (50 methods, T&L + 8 lights + fog), rasterizer interface, DirectInput traps |
+| Sync maths ([ADR-002](decisions/002-exact-x87.md), `tests/x87/`) | no extended precision in game code; hybrid x87 design; Mac-side vectors pass |
+| Netcode ([netcode.md](reference/netcode.md), `tools/lan/`) | lobby vs game layers, ports, RC4 framing, message catalogue, OOS checksum, Winsock checklist, capture decoder |
+| Audio ([audio.md](reference/audio.md), `tools/audio/`, dmusic patch) | all 8 tracks play via patched dmusic; Miles/Bink scoped |
+| Community RE ([community-re.md](research/community-re.md), `db/community-symbols.json`) | 240 verified symbols, struct maps, determinism checkpoints |
+
+**Pending runs on `legion`** (scripts ready):
+- `code_census.js`: executed code vs DB, expecting 0 blocks outside it;
+- `com_census.js`: D3D7/DInput calls in-game;
+- `x87_runner.py` + `ummath_vectors.js`: hardware vectors that gate ADR-002;
+- `music_hooks.js` + loopback recording;
+- `netcode_hooks.js` + `pktmon`: LAN session with a second Windows client.
+
+Thread roles come from these censuses, not the static DB.
 
 ### Phase 2: Translation core → **M1: native random-map generator** (≈7–12 wk, per ADR-001 gaps 1–7)
-- **Gate:** an exact-x87 design note before closing gaps 4–6. It must be backed by a differential suite: Unicorn for PC/RC arithmetic, and `legion` hardware for transcendentals and msvcrt maths. If the fork's x87 layer can't meet §5.2 within ~6 weeks, replace that layer only.
+- **Gate:** the exact-x87 design note now exists as [ADR-002](decisions/002-exact-x87.md) (proposed). It is accepted once the legion hardware vectors pass. If the fork's x87 layer can't meet §5.2 within ~6 weeks, replace that layer only.
+- **Gap 2 (EXE hygiene)** is reduced to ~2–3 days of kit changes: make the DB authoritative in `game_config.py`, take code ranges from the DB, disable the data-pointer scan, feed `data_in_code` into the jump-table ranges, exclude DRM (function-db.md §7.4).
 - Close the fork's gaps:
   - multi-module loader (relocations, cross-module imports, DllMain order);
   - EXE translation hygiene, driven by the Phase 1 function DB;
@@ -448,9 +535,9 @@ neoee-macos/
 |---|---|---|
 | R1 | Translator bugs (flags, x87, EH) | One semantics source; Unicorn + real-x86 fuzzing; lockstep validation; interpreter cross-check |
 | R2 | Mac↔Windows desync | Exact x87 at measured PC/RC; msvcrt transcendentals bit-exact; checksum streams; OOS oracle; LAN soak. Mac↔Mac is unaffected. |
-| R3 | Missed functions / indirect targets | Trap + report → function DB; interpreter fallback; aggressive data scan (EXE has no relocs) |
+| R3 | Missed functions / indirect targets | **Mitigated in Phase 1:** the function DB classifies ≥ 99.9% of `.text` in every module and resolves every vtable slot. With the DB the kit translates the EXE with 0 gaps, 0 unmodelled instructions and no data-pointer scan. Trap + report stays as the safety net. |
 | R4 | D3D7 fidelity on Metal | Scope to `DX7HRDisplay` usage; screenshot diffs vs Windows; 00xJS's D7VK fixes as hints |
-| R5 | DirectMusic fidelity | Upstream dmusic fixes; offline-render fallback |
+| R5 | DirectMusic fidelity: bank bug (patched), missing system GM bank, no reverb, variation differences | Pinned dmusic fork + upstream fixes; macOS `gs_instruments.dls`; add reverb; compare against Windows loopback recordings; offline-render fallback |
 | R6 | Windows friends on another build (Steam/retail) | Hash check in Phase 5; document "use GOG" |
 | R7 | Tailscale has no broadcast | Built-in Join by IP; optional known-peers unicast; recommend ZeroTier/Hamachi for auto-discovery |
 | R8 | Friends need a compiler at first run | Xcode CLT (free) or bundled LLVM (Phase 6 decision) |

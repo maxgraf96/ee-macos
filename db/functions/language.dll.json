@@ -1,0 +1,11 @@
+{
+ "schema": "neoee-funcdb/1",
+ "module": {"name":"Language.dll","sha256":"2539f8b76ee3a6c6b6e03e5ce76d43e891c8b41533d058e249feea5ca8ca3456","image_base":"0x10000000","size_of_image":"0x31000","entry_rva":null,"size_of_headers":"0x1000","sections":[{"name":".rdata","rva":"0x1000","vsize":"0x1c","raw_size":"0x1000","flags":"0x40000040","code":false},{"name":".rsrc","rva":"0x2000","vsize":"0x2dd90","raw_size":"0x2e000","flags":"0x40000040","code":false},{"name":".reloc","rva":"0x30000","vsize":"0xc","raw_size":"0x1000","flags":"0x42000040","code":false}]},
+ "generator": {"tool":"tools/ghidra/build_db.py","ghidra":"12.1.4","analysis":"Ghidra auto-analysis at the preferred base + evidence seeding"},
+ "stats": {"functions":0,"kinds":{},"tags":{},"coverage":{},"classes":0,"vtables":0,"vtable_slots":0,"x87_functions":{},"eh":{"cxx_frames":0,"seh3_frames":0,"other_frames":0,"funcinfo":0,"throw_sites":0},"indirect_targets":0,"seeded":0,"switch_tables":{"total":0,"ghidra":0,"funcdb_only":[]},"vtable_slot_coverage":{"vtables":0,"slots":0,"distinct_targets":0,"targets_function_start":0,"slots_function_start":0,"targets_found_by_ghidra_alone":0,"targets_added_by_seeding":0,"targets_not_function_start":[]},"community":{"function_entries":0,"matched_function_starts":0,"not_a_function_start":[]}},
+ "imports": [],
+ "exports": [],
+ "classes": [],
+ "data_in_code": [],
+ "functions": []
+}

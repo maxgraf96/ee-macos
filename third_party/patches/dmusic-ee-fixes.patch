@@ -1,0 +1,80 @@
+diff --git a/include/dmusic.h b/include/dmusic.h
+index 7165d1e..03a7788 100644
+--- a/include/dmusic.h
++++ b/include/dmusic.h
+@@ -620,4 +620,9 @@ DMAPI DmResult DmPerformance_renderPcm(DmPerformance* slf, void* buf, size_t num
+ /// \param vol The new volume to set (between 0 and 1).
+ DMAPI void DmPerformance_setVolume(DmPerformance* slf, float vol);
+ 
++/// EE port (local patch): master groove level offset, like DirectMusic's GUID_PerfMasterGrooveLevel.
++DMAPI void DmPerformance_setMasterGroove(DmPerformance* slf, int8_t level);
++/// EE port (local patch): like IDirectMusicSegment::SetRepeats.
++DMAPI void DmSegment_setRepeats(DmSegment* slf, uint32_t repeats);
++
+ /// \}
+diff --git a/src/Performance.c b/src/Performance.c
+index 36a059b..5a1d5f8 100644
+--- a/src/Performance.c
++++ b/src/Performance.c
+@@ -673,7 +673,8 @@ static void DmPerformance_handleCommandMessage(DmPerformance* slf, DmMessage_Com
+ 		Dm_report(DmLogLevel_WARN, "DmPerformance: Command message with command %d not implemented", msg->command);
+ 	}
+ 
+-	DmPattern* pttn = DmStyle_getRandomPattern(slf->style, slf->groove, msg->command);
++	int32_t effective_groove = clamp_s32((int32_t) slf->groove + slf->master_groove, 1, 100);
++	DmPattern* pttn = DmStyle_getRandomPattern(slf->style, (uint32_t) effective_groove, msg->command);
+ 	if (pttn == NULL) {
+ 		Dm_report(DmLogLevel_INFO, "DmPerformance: No suitable pattern found. Silence ensues ...", msg->command);
+ 		return;
+@@ -1003,3 +1004,21 @@ void DmPerformance_setVolume(DmPerformance* slf, float vol) {
+ 
+ 	DmSynth_setVolume(&slf->synth, vol);
+ }
++
++void DmPerformance_setMasterGroove(DmPerformance* slf, int8_t level) {
++	if (slf == NULL) {
++		return;
++	}
++	if (mtx_lock(&slf->lock) != thrd_success) {
++		return;
++	}
++	slf->master_groove = level;
++	(void) mtx_unlock(&slf->lock);
++}
++
++void DmSegment_setRepeats(DmSegment* slf, uint32_t repeats) {
++	if (slf == NULL) {
++		return;
++	}
++	slf->repeats = repeats;
++}
+diff --git a/src/Synth.c b/src/Synth.c
+index 0e1026b..0a3d0a6 100644
+--- a/src/Synth.c
++++ b/src/Synth.c
+@@ -172,8 +172,11 @@ static DmResult DmSynth_assignInstrumentChannels(DmSynth* slf, DmBand* band) {
+ 			continue;
+ 		}
+ 
+-		uint32_t bank = (ins->patch & 0xFF00U) >> 8;
+-		uint32_t patch = ins->patch & 0xFFU;
++		// EE port fix: DMUS patch = drum<<31 | MSB<<16 | LSB<<8 | program; the hydra stores
++		// DLS ulBank (MSB<<8 | LSB), and drum kits in bank 128 (see Tsf.c).
++		uint32_t bank = (ins->patch & 0x80000000U) ? 128U
++		                                           : ((((ins->patch >> 16) & 0x7FU) << 8) | ((ins->patch >> 8) & 0x7FU));
++		uint32_t patch = ins->patch & 0x7FU;
+ 
+ 		tsf_set_volume(fnt->syn, slf->volume);
+ 		tsf_channel_set_bank_preset(fnt->syn, (int) ins->channel, (int) bank, (int) patch);
+diff --git a/src/_Internal.h b/src/_Internal.h
+index 902a55f..177bfe6 100644
+--- a/src/_Internal.h
++++ b/src/_Internal.h
+@@ -554,6 +554,7 @@ struct DmPerformance {
+ 	uint32_t time;
+ 	uint8_t groove;
+ 	uint8_t groove_range;
++	int8_t master_groove; // EE port: GUID_PerfMasterGrooveLevel, added to every groove level
+ 	double tempo;
+ 	DmMessage_Chord chord;
+ 	DmTimeSignature time_signature;

@@ -21,6 +21,7 @@ are tracked here; `deploy.sh` copies them from the git-ignored `original/gog/`.
 | `frida/iat_census.js` | in game | API census: IAT stubs on every external import, counts per function × thread × CW |
 | `frida/sync_hooks.js` | in game | `ESChecksum*`/`ESVerify` call counts per thread × CW, `GetTotalChecksum` stream (0 calls in single player) |
 | `frida/summarize.py` | Mac or legion | capture directory → Markdown tables |
+| `vm/` | Mac → legion | EE-VM: unattended Windows 11 VM in VMware, the second peer for LAN captures (`vm/README.md`) |
 
 ## Typical session (from the Mac)
 
