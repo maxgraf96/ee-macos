@@ -13,12 +13,18 @@ Outputs in --out: <script>.json (snapshot), events.jsonl (send() messages), meta
 A script may also write files under --out: send({"type": "file", "path": "rel/path", "json": obj})
 writes JSON, send({"type": "file", "path": "rel/path"}, bytes) writes raw bytes (rmg_capture.js).
 Existing blobs/ files of the same size are kept (content-addressed, written once).
+
+Every blocking Frida call (load, snapshot, stop, unload, detach) runs under a watchdog. A call
+that hangs (Stalker teardown can) is logged in meta.json "timeouts" and skipped, the capture
+still finishes, and the process exits hard at the end. Frida's own D-Bus calls (load, unload,
+detach) time out after ~25 s regardless, so scripts must not do heavy work while loading.
 """
 import argparse
 import hashlib
 import json
 import os
 import sys
+import threading
 import time
 
 import frida
@@ -36,6 +42,27 @@ def sha256(path):
         return h.hexdigest()
     except OSError:
         return None
+
+
+def bounded(what, f, timeout, timeouts):
+    """Run a blocking Frida call in a daemon thread; give up after `timeout` seconds."""
+    box = {}
+
+    def work():
+        try:
+            box["value"] = f()
+        except Exception as e:  # noqa: BLE001
+            box["error"] = e
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        print(f"{what}: no answer after {timeout:g}s, going on", flush=True)
+        timeouts.append(what)
+        raise TimeoutError(what)
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
 
 
 def parse_params(items):
@@ -86,6 +113,9 @@ def main():
     ap.add_argument("--every", type=float, default=0,
                     help="also write snapshots every N seconds, so a game exit keeps the last one")
     ap.add_argument("--stop-file", help="stop early (and snapshot) once this file exists")
+    ap.add_argument("--load-timeout", type=float, default=120, help="seconds per script load")
+    ap.add_argument("--rpc-timeout", type=float, default=120, help="seconds per snapshot()/stop() call")
+    ap.add_argument("--teardown-timeout", type=float, default=30, help="seconds per unload/detach")
     args = ap.parse_args()
     if args.log:
         sys.stdout = sys.stderr = open(args.log, "w", encoding="utf-8", buffering=1)
@@ -126,26 +156,32 @@ def main():
     session = device.attach(pid)
     detached = []
     session.on("detached", lambda reason, crash: detached.append(reason))
+    timeouts = []
     scripts = {}
     for name in args.scripts.split(","):
         src = open(os.path.join(HERE, name + ".js"), encoding="utf-8").read()
         prelude = "globalThis.PARAMS = %s;\n" % json.dumps(params)
         s = session.create_script(prelude + src, name=name)
         s.on("message", on_message(name))
-        s.load()
+        try:
+            bounded(f"load {name}", s.load, args.load_timeout, timeouts)
+        except Exception as e:  # noqa: BLE001
+            print(f"{name}: load failed: {e}", flush=True)
+            os._exit(2)
         scripts[name] = s
     if args.spawn:
         device.resume(pid)
     print(f"pid {pid}: loaded {', '.join(scripts)}; waiting {args.seconds}s", flush=True)
 
     meta = {"pid": pid, "spawned": args.spawn, "frida": frida.__version__, "scripts": list(scripts),
-            "params": params, "start": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": args.seconds}
+            "params": params, "start": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": args.seconds,
+            "timeouts": timeouts}
     def save_snapshots():
         for name, s in scripts.items():
             path = os.path.join(args.out, name + ".json")
             try:
-                snap = s.exports_sync.snapshot()
-            except Exception as e:  # script without snapshot() or the game died
+                snap = bounded(f"snapshot {name}", s.exports_sync.snapshot, args.rpc_timeout, timeouts)
+            except Exception as e:  # script without snapshot(), the game died, or no answer
                 if os.path.exists(path):
                     continue  # keep the last periodic snapshot
                 snap = {"error": str(e)}
@@ -174,27 +210,41 @@ def main():
         meta["detached"] = str(detached[0])
 
     save_snapshots()
+    teardown = meta["teardown"] = {}
+
+    def step(what, f, timeout):  # seconds taken, or the error, go to meta.json
+        t = time.time()
+        try:
+            r = bounded(what, f, timeout, timeouts)
+            teardown[what] = round(time.time() - t, 2)
+            return r
+        except Exception as e:  # noqa: BLE001  (also: already gone with the game)
+            teardown[what] = "%s after %.1fs" % (type(e).__name__, time.time() - t)
+            return None
+
+    # A script whose stop() returns {"eternalize": true} stays in the game instead of being
+    # unloaded: unloading Stalker waits until every followed thread has left it, and a thread
+    # blocked in a long wait never does.
+    keep = set()
     for name, s in scripts.items():
-        try:
-            s.exports_sync.stop()
-        except Exception:
-            pass
+        r = step(f"stop {name}", s.exports_sync.stop, args.rpc_timeout)
+        if isinstance(r, dict) and r.get("eternalize"):
+            keep.add(name)
     time.sleep(1.0)  # let threads leave any IAT stub before the scripts unload
-    for s in scripts.values():
-        try:
-            s.unload()
-        except Exception:
-            pass
-    try:
-        session.detach()
-    except Exception:  # already gone with the game
-        pass
+    for name, s in scripts.items():
+        if name in keep:
+            step(f"eternalize {name}", s.eternalize, args.teardown_timeout)
+        else:
+            step(f"unload {name}", s.unload, args.teardown_timeout)
+    step("detach", session.detach, args.teardown_timeout)
     meta["end"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     meta["files_written"] = file_counts
     with open(os.path.join(args.out, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=1)
     events.close()
-    print(f"wrote {args.out}", flush=True)
+    print(f"wrote {args.out}" + (f" (timeouts: {', '.join(timeouts)})" if timeouts else ""), flush=True)
+    if timeouts:
+        os._exit(0)  # a hung Frida call would otherwise keep the interpreter from exiting
 
 
 if __name__ == "__main__":
