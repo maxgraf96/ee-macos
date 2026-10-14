@@ -25,3 +25,11 @@ Every merge goes through the main session, as in Phase 2. P3-A rebases often, be
 - **Strict-mode boot log:** zero unknown calls or traps to the main menu. Every implemented API is unit-tested in the kit (game-neutral).
 - **Screenshots:** perceptual comparison with the legion references at the same resolution and settings, with a documented threshold. Text metrics are checked against the Windows GDI vectors.
 - **Cross-check:** the boot API sequence compared with the Windows trace. Order differences are fine; missing functionality isn't.
+
+## Status
+| ID | State | Result |
+|---|---|---|
+| P3-A exe-boot | running | |
+| P3-B d3d7-metal | **merged** (`ee` 3534522) | DD7/D3D7 shim behind a C seam (`dx/d3d7_host.h`). Metal renderer plus a software reference renderer (test oracle; headless via `RECOMP_D3D7_SOFTWARE=1`). All 50 COM methods and 3 exports; fixed-function T&L with 8 lights; fog; stage-0 combiner; render-to-texture; mips; Flip preserves the back buffer; GPU-side Blts. 3,694 headless checks; 21/22 GPU scenes within one level per channel, the 22nd off by one pixel; ~1.1 ms CPU per measured in-game frame. Opt-in: `[runtime] ddraw7 = true`. |
+| P3-C win32-ui | running | |
+| P3-D references | legion 0010 queued | text metrics, boot trace, menu screenshots |
