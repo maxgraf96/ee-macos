@@ -47,8 +47,9 @@ No game bytes, generated C, captures or Ghidra databases in either repo. The kit
 | B runtime-core | **merged** (`ee` 35624d7) | Multi-module loader (relocation, binding, Windows DllMain order, LoadLibrary refcounts, TLS), strict mode, 4 GB guarded arena, argc for 518/519 imports, CW `0x027f`. |
 | C x87 | **merged** (`ee` 0f7a705) | ADR-002 implemented: 0 differences on 1.15 M non-transcendental hardware vectors (both corpora); transcendentals within 1 ulp; criterion 2 at 45,380 `UM*` calls, 0 differences, through the translated engine; `_controlfp` family; FMA check; SoftFloat-80 vendored freestanding. Extra hardware vectors and a 131k `UM*` set are pending (legion 0009). |
 | D crt | **merged** (`ee` 381fa1a) | msvcrt 160/167, msvcp60 17/17; 42k unit checks. The Windows reference run is pending (legion 0008). |
-| E eh | running (started after A) | MSVC SEH + C++ EH |
+| E eh | **merged** (`ee` 690fec0) | MSVC SEH (`_except_handler3`) + C++ EH (`__CxxFrameHandler`, `_CxxThrowException`, `_setjmp3`/`longjmp`), resuming at continuations via frame checkpoints; all 47 EXE catch blocks and continuations are translated entries; 817 `eh_tests` checks; WON `ReadBufferException` caught on real EXE code; arena faults delivered as guest access violations. |
 | F m1-oracle | legion 0006 + 0007 queued | replay driver build; capture environment with DLLs rebased to the `game.toml` map; S00 smoke |
+| H m1-replay | running | Mac replay backend, round-trip self-test, matrix tooling |
 | G m1-re | **merged** (ee-macos 1401ee9) | [rmg.md](reference/rmg.md): pipeline, context, capture/replay spec, 60-case matrix |
 
-Next: merge E, run the legion S00 capture → Windows replay → Mac replay, then the 60-case matrix (M1).
+Next: H (Mac replay), then run the legion S00 capture → Windows replay → Mac replay, then the 60-case matrix (M1).
