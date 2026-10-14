@@ -47,6 +47,9 @@ const GAME = ['empire earth.exe', 'low-level engine.dll', 'sxlrt233.dll', 'langu
 const P = Object.assign({
   threads: 'game', modules: GAME, sweep_ms: 1000, ring_blocks: 131072,
   entry_hooks: [['low-level engine.dll', '?WIN32ThreadMain@TSThread@@CGKPAX@Z']],
+  // TSThread routines not to follow. The input thread (ISMouse, re-created at game start)
+  // crashed Stalker inside frida-agent.dll+0x66d51 about 20 s into a match (2026-10-14).
+  skip_routines: ['Empire Earth.exe+0x1110fe'],
   catchers: [['kernel32.dll', 'Sleep'], ['kernel32.dll', 'SleepEx'], ['kernel32.dll', 'WaitForSingleObject'],
              ['kernel32.dll', 'WaitForSingleObjectEx'], ['kernel32.dll', 'WaitForMultipleObjects'],
              ['user32.dll', 'PeekMessageA'], ['user32.dll', 'GetMessageA'],
@@ -92,7 +95,8 @@ const rings = new Map();    // key -> { buf, read, lost }; kept for the script's
 const active = new Set();   // tids currently followed
 const skipped = new Map();  // tid -> start, threads not to follow (pruned when they exit)
 const pending = new Set();  // live game threads not followed yet
-const history = [];         // every thread ever followed: { tid, start, via, t_ms }
+const history = [];         // every thread ever followed: { tid, start, via, routine, t_ms }
+const skippedRoutines = []; // threads not followed because of P.skip_routines
 const hooked = new Map();   // 'module!export' -> listener (entry hooks and catchers)
 const excluded = new Set();
 const t0 = Date.now();
@@ -157,27 +161,41 @@ function drain() {
 
 // Runs on the thread itself, inside an Interceptor callback: Stalker follows the current thread
 // once the callback returns, without suspending anything.
-function followSelf(tid, via) {
+function followSelf(tid, via, routine) {
   if (stopping || active.has(tid) || skipped.has(tid)) return;
   const s = startOf(tid);
   if (!isGame(s)) { skipped.set(tid, s ? s.text : '?'); return; }
+  if (routine && P.skip_routines.indexOf(routine) >= 0) {
+    skipped.set(tid, 'routine ' + routine);
+    pending.delete(tid);
+    skippedRoutines.push({ tid, routine, t_ms: Date.now() - t0 });
+    return;
+  }
   const buf = Memory.alloc(8 + 8 * RING);
   buf.writeU32(0);
   buf.add(4).writeU32(RING);
   rings.set(tid + ':' + history.length, { buf, read: 0, lost: 0 });
   active.add(tid);
   pending.delete(tid);
-  history.push({ tid, start: s ? s.text : '?', via, t_ms: Date.now() - t0 });
+  history.push({ tid, start: s ? s.text : '?', via, routine, t_ms: Date.now() - t0 });
   Stalker.follow(tid, { transform: cm.transform, data: buf });
 }
 
-function hook(mod, name) {
+function where(a) {
+  const m = Process.findModuleByAddress(a);
+  return m ? m.name + '+0x' + a.sub(m.base).toString(16) : a.toString();
+}
+
+// entry: the hook is a thread entry taking a TSThread* (routine at +0x28, its argument at +0x2c).
+function hook(mod, name, entry) {
   const key = mod + '!' + name;
   if (hooked.has(key)) return;
   const m = Process.findModuleByName(mod);
   const a = m && m.findExportByName(name);
   if (!a) return;
-  hooked.set(key, Interceptor.attach(a, { onEnter() { followSelf(this.threadId, key); } }));
+  hooked.set(key, Interceptor.attach(a, {
+    onEnter(args) { followSelf(this.threadId, key, entry ? where(args[0].add(0x28).readPointer()) : undefined); },
+  }));
 }
 
 function unhook(key) {
@@ -189,7 +207,7 @@ function sweep() {
   drain();
   if (stopping) return;
   refreshModules();
-  P.entry_hooks.forEach(([m, n]) => hook(m, n));   // the engine may load after us (spawn)
+  P.entry_hooks.forEach(([m, n]) => hook(m, n, true));   // the engine may load after us (spawn)
   const live = new Set();
   Process.enumerateThreads().forEach(t => {
     live.add(t.id);
@@ -219,7 +237,8 @@ function snapshot() {
   let lost = 0;
   rings.forEach(r => { lost += r.lost; });
   const out = { modules: {}, threads_followed: history.length, threads_active: active.size,
-                threads_pending: [...pending], threads: history, skipped_by_start_module: starts,
+                threads_pending: [...pending], threads: history, skipped_routines: skippedRoutines,
+                skipped_by_start_module: starts,
                 hooks: [...hooked.keys()], mode: P.threads, blocks_lost: lost, elapsed_ms: Date.now() - t0 };
   for (const m of mods) out.modules[m.name] = { base: m.base.toString() };
   for (const name in blocks) {

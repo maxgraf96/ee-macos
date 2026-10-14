@@ -521,14 +521,23 @@ function ctxSummary(ctx) {
 // ---------------------------------------------------------------------------------------------
 // Export hooks (per Default.dll load).
 let defaultMod = null, defaultHooks = [];
+const unhooked = {};   // export -> { rva, bytes }: too short for an inline hook, so its calls are not captured
 function hookDefault(m) {
   for (const name of Object.keys(EXPORTS)) {
     const a = m.findExportByName(name);
     if (!a) { warn('Default.dll lacks ' + name); continue; }
-    defaultHooks.push(Interceptor.attach(a, {
-      onEnter() { enterCall(name, this); },
-      onLeave(ret) { leaveCall(name, ret); },
-    }));
+    try {
+      defaultHooks.push(Interceptor.attach(a, {
+        onEnter() { enterCall(name, this); },
+        onLeave(ret) { leaveCall(name, ret); },
+      }));
+    } catch (e) {
+      // EERMPIMCreateNeutralLandWaterMap is "xor eax,eax; ret" (3 bytes, the next export follows):
+      // no room for a hook. Keep hooking the other exports.
+      const bytes = hexBytes(a.readByteArray(8));
+      unhooked[name] = { rva: hex(u32(a.sub(m.base))), bytes };
+      warn('cannot hook ' + name + ' (' + bytes + '): ' + e.message);
+    }
   }
 }
 function enterCall(name, ictx) {
@@ -649,7 +658,7 @@ Interceptor.attach(exe.base.add(EXE_RVA.playable), {
 
 function snapshot() {
   return { schema: SCHEMA, case: P.case, params: P, elapsedMs: Date.now() - t0, tracking, trackingSince,
-           liveBlocks: live.size, stats, generations, calls, loads, warnings };
+           liveBlocks: live.size, stats, generations, calls, loads, unhooked, warnings };
 }
 send({ type: 'ready', exe: hex(u32(exe.base)), defaultLoaded: !!defaultMod, seed: P.seed });
 rpc.exports = { snapshot, stop() { } };

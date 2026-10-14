@@ -9,7 +9,7 @@
   Tasks live under Task Scheduler folder \EEPort\ and are removed by "cleanup".
 
   launch.ps1 status                          interactive session + game process info
-  launch.ps1 start                           start the game (working dir = game folder)
+  launch.ps1 start [-GameDir <dir>]          start the game (working dir = game folder)
   launch.ps1 stop [-Force]                   WM_CLOSE via session helper; -Force kills after timeout
   launch.ps1 session '<session.ps1 args>'    run session.ps1 in the user's session, print output
   launch.ps1 frida   '<run.py args>'         run frida/run.py in the user's session (hidden)
@@ -23,10 +23,11 @@ param(
   [string]$Root = 'C:\EEPort',
   [int]$TimeoutSec = 60,
   [switch]$Force,
-  [Parameter(Position = 1)][string]$ArgLine = ''
+  [Parameter(Position = 1)][string]$ArgLine = '',
+  [string]$GameDir = ''   # default <Root>\game\Empire Earth; M1 captures use <Root>\game-m1\Empire Earth
 )
 $ErrorActionPreference = 'Stop'
-$GameDir = Join-Path $Root 'game\Empire Earth'
+if (-not $GameDir) { $GameDir = Join-Path $Root 'game\Empire Earth' }
 $GameExe = Join-Path $GameDir 'Empire Earth.exe'
 $Jobs = Join-Path $Root 'captures\jobs'
 New-Item -ItemType Directory -Force -Path $Jobs | Out-Null

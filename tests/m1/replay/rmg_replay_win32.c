@@ -224,9 +224,9 @@ static int map_module(mod_t *m, const rr_module_rec *rec)
         memset(img + sec[i].VirtualAddress, 0, vs > raw ? vs : raw);
         if (raw) memcpy(img + sec[i].VirtualAddress, file + sec[i].PointerToRawData, vs && raw > vs ? vs : raw);
     }
-    free(file);
     m->img = img;
-    m->nt = (IMAGE_NT_HEADERS32 *)(img + dos->e_lfanew);
+    m->nt = (IMAGE_NT_HEADERS32 *)(img + dos->e_lfanew);   /* dos points into file: read it before free */
+    free(file);
     delta = rec->base - m->nt->OptionalHeader.ImageBase;
     if (delta) {
         IMAGE_DATA_DIRECTORY dd = m->nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
