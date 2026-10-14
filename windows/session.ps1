@@ -122,7 +122,12 @@ function Get-GameWindows {
     }
   }
 }
-function Main-Window { Get-GameWindows | Where-Object { $_.visible } | Sort-Object { - ($_.client[2] * $_.client[3]) } | Select-Object -First 1 }
+# -Shown skips minimized / zero-size windows (screenshots). Input actions keep the iconic window
+# so that Ensure-Foreground can restore it.
+function Main-Window([switch]$Shown) {
+  Get-GameWindows | Where-Object { $_.visible -and -not ($Shown -and ($_.iconic -or $_.client[2] -le 0 -or $_.client[3] -le 0)) } |
+    Sort-Object { - ($_.client[2] * $_.client[3]) } | Select-Object -First 1
+}
 
 # Input actions only ever go to the game: bring it to the front (ALT tap lifts the foreground
 # lock) and refuse to send anything if another window (e.g. a VM console) keeps the focus.
@@ -151,7 +156,7 @@ switch ($Action) {
   }
   'screenshot' {
     Add-Type -AssemblyName System.Drawing
-    $mw = Main-Window
+    $mw = Main-Window -Shown          # minimized game: fall back to the virtual screen
     if ($mw) { $x = $mw.client[0]; $y = $mw.client[1]; $wd = $mw.client[2]; $ht = $mw.client[3] }
     else {
       Add-Type -AssemblyName System.Windows.Forms
