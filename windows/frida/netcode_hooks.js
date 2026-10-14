@@ -12,15 +12,15 @@
 //   wire:     plaintext of the first max_wire datagrams through TCP Protocol.dll NPIMSend /
 //             NPIMSendTo (before RC4) and NPIMReceive / NPIMReceiveFrom (after RC4), as an
 //             oracle for tools/lan/eelan.py's decryption.
-// PARAMS: max_world (default 200000), max_wire (default 3000), wire_bytes (default 64).
+// PARAMS: max_world (default 200000), max_wire (default 3000), wire_bytes (default 64),
+//         wire (default true; false = no TCP Protocol.dll hooks, see below).
 'use strict';
 
 const P = Object.assign({ max_world: 200000, max_wire: 3000, wire_bytes: 64 }, globalThis.PARAMS || {});
 const exe = Process.getModuleByName('empire earth.exe');
 const engine = Process.getModuleByName('low-level engine.dll');
-const tcp = Process.getModuleByName('tcp protocol.dll');
 const t0 = Date.now();
-const world = [], logged = [], removed = [], wire = [];
+const world = [], logged = [], removed = [], wire = [], modules = [];
 
 function exportLike(mod, prefix) {
   for (const e of mod.enumerateExports()) if (e.name.startsWith(prefix)) return e.address;
@@ -67,7 +67,7 @@ function hex(p, n) {
   const b = new Uint8Array(p.readByteArray(n));
   return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
 }
-function hookSend(name, bufArg, lenArg) {
+function hookSend(tcp, name, bufArg, lenArg) {
   const a = tcp.getExportByName(name);
   Interceptor.attach(a, {
     onEnter(args) {
@@ -78,7 +78,7 @@ function hookSend(name, bufArg, lenArg) {
     },
   });
 }
-function hookRecv(name, bufArg, lenPtrArg) {
+function hookRecv(tcp, name, bufArg, lenPtrArg) {
   const a = tcp.getExportByName(name);
   Interceptor.attach(a, {
     onEnter(args) { this.buf = args[bufArg]; this.lenp = args[lenPtrArg]; },
@@ -90,12 +90,29 @@ function hookRecv(name, bufArg, lenPtrArg) {
     },
   });
 }
-hookSend('NPIMSend', 1, 2);            // (NEConnection*, buf, len)
-hookSend('NPIMSendTo', 2, 3);          // (NEServer*, slot, buf, len)
-hookRecv('NPIMReceive', 2, 3);         // (NEConnection*, maxlen, buf, &len)
-hookRecv('NPIMReceiveFrom', 2, 3);     // (NEServer*, maxlen, buf, &len, &slot)
+function hookTcp(tcp) {
+  hookSend(tcp, 'NPIMSend', 1, 2);        // (NEConnection*, buf, len)
+  hookSend(tcp, 'NPIMSendTo', 2, 3);      // (NEServer*, slot, buf, len)
+  hookRecv(tcp, 'NPIMReceive', 2, 3);     // (NEConnection*, maxlen, buf, &len)
+  hookRecv(tcp, 'NPIMReceiveFrom', 2, 3); // (NEServer*, maxlen, buf, &len, &slot)
+}
+// The engine loads every plugin DLL at startup to probe it and unloads it again, so TCP
+// Protocol.dll is usually absent at the main menu. Hook it whenever it (re)appears.
+// PARAM wire=false skips this: with these hooks in place the LAN *host* (legion) crashed in
+// ntdll (access violation) the moment the match started (2026-10-14 17:23); the joiner survived.
+const isTcp = m => m.name.toLowerCase() === 'tcp protocol.dll';
+const tcpNow = P.wire === false ? null : Process.findModuleByName('tcp protocol.dll');
+if (tcpNow) hookTcp(tcpNow);
+if (P.wire !== false) Process.attachModuleObserver({
+  onAdded(m) {
+    if (!isTcp(m) || (tcpNow && m.base.equals(tcpNow.base))) return;
+    modules.push([Date.now() - t0, 'added', m.name, m.base.toString()]);
+    hookTcp(m);
+  },
+  onRemoved(m) { if (isTcp(m)) modules.push([Date.now() - t0, 'removed', m.name, m.base.toString()]); },
+});
 
-send({ type: 'hooked', logResp: !!logResp, rmCtor: !!rmCtor });
+send({ type: 'hooked', logResp: !!logResp, rmCtor: !!rmCtor, tcpLoaded: !!tcpNow });
 
 rpc.exports = {
   snapshot() {
@@ -103,6 +120,6 @@ rpc.exports = {
              world: world.map(([ms, tid, tick, dump, flags, v]) =>
                [ms, tid, tick, dump, flags, '0x' + v.toString(16).padStart(8, '0')]),
              logged: logged.map(([ms, tick, v, slot]) => [ms, tick, '0x' + v.toString(16).padStart(8, '0'), slot]),
-             removed, wire };
+             removed, wire, modules };
   },
 };

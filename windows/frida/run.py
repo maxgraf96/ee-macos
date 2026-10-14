@@ -57,6 +57,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--param", action="append", default=[])
     ap.add_argument("--log", help="write stdout/stderr here (used by launch.ps1 frida)")
+    ap.add_argument("--every", type=float, default=0,
+                    help="also write snapshots every N seconds, so a game exit keeps the last one")
+    ap.add_argument("--stop-file", help="stop early (and snapshot) once this file exists")
     args = ap.parse_args()
     if args.log:
         sys.stdout = sys.stderr = open(args.log, "w", encoding="utf-8", buffering=1)
@@ -86,6 +89,8 @@ def main():
     else:
         pid = args.pid or device.get_process(args.name).pid
     session = device.attach(pid)
+    detached = []
+    session.on("detached", lambda reason, crash: detached.append(reason))
     scripts = {}
     for name in args.scripts.split(","):
         src = open(os.path.join(HERE, name + ".js"), encoding="utf-8").read()
@@ -100,21 +105,40 @@ def main():
 
     meta = {"pid": pid, "spawned": args.spawn, "frida": frida.__version__, "scripts": list(scripts),
             "params": params, "start": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": args.seconds}
+    def save_snapshots():
+        for name, s in scripts.items():
+            path = os.path.join(args.out, name + ".json")
+            try:
+                snap = s.exports_sync.snapshot()
+            except Exception as e:  # script without snapshot() or the game died
+                if os.path.exists(path):
+                    continue  # keep the last periodic snapshot
+                snap = {"error": str(e)}
+            if name == "modules" and isinstance(snap, list):
+                for m in snap:
+                    m["sha256"] = sha256(m["path"])
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(snap, f, indent=1)
+            os.replace(path + ".tmp", path)
+
+    deadline = time.time() + args.seconds
+    next_save = time.time() + args.every if args.every > 0 else None
     try:
-        time.sleep(args.seconds)
+        while time.time() < deadline and not detached:
+            if args.stop_file and os.path.exists(args.stop_file):
+                print("stop file seen", flush=True)
+                break
+            if next_save and time.time() >= next_save:
+                save_snapshots()
+                next_save += args.every
+            time.sleep(max(0.0, min(1.0, deadline - time.time())))
     except KeyboardInterrupt:
         pass
+    if detached:
+        print(f"detached: {detached[0]}", flush=True)
+        meta["detached"] = str(detached[0])
 
-    for name, s in scripts.items():
-        try:
-            snap = s.exports_sync.snapshot()
-        except Exception as e:  # script without snapshot() or the game died
-            snap = {"error": str(e)}
-        if name == "modules" and isinstance(snap, list):
-            for m in snap:
-                m["sha256"] = sha256(m["path"])
-        with open(os.path.join(args.out, name + ".json"), "w", encoding="utf-8") as f:
-            json.dump(snap, f, indent=1)
+    save_snapshots()
     for name, s in scripts.items():
         try:
             s.exports_sync.stop()
@@ -126,7 +150,10 @@ def main():
             s.unload()
         except Exception:
             pass
-    session.detach()
+    try:
+        session.detach()
+    except Exception:  # already gone with the game
+        pass
     meta["end"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     with open(os.path.join(args.out, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=1)

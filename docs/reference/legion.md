@@ -334,9 +334,41 @@ The port list comes from PLAN.md §5.6 and is not yet verified on the wire. The 
 3. **During the session**, run `iat_census` + `threads` on legion for the netcode thread picture: `TCP Protocol.dll` imports, `NESynchronousClient`.
 4. **Check before the test.** Both sides need the same `Network Adapter` index semantics, and `Debug OOS Handling = 1` is already set on legion (from Wine).
 
+### Session 1: legion ↔ EE-VM (2026-10-14, 17:10–17:40)
+The plan above changed in two ways. The Mac's Wine build can't be a peer, and the second peer became a VM on legion.
+- **The Wine build can't show the lobby.**
+  - Clicking Multiplayer leaves the main-menu frame frozen. The lobby is running: button-click sounds still play, and `winedbg info wnd` shows its visible child window `WndClass0` under `SSSI Empire Earth`.
+  - The GOG `ddraw.dll` wrapper's D3D9 surface stays on top of the GDI child. This happens on Wine 10.0 (Wineskin) and on Wine 11.0 (Homebrew) alike.
+  - With Wine's builtin ddraw, the game exits with code 3 at startup.
+- **The second peer is EE-VM** (`windows/vm/`): Windows 11 build 26300 in VMware Workstation 25H2 on legion, bridged to the Wi-Fi, at `192.168.1.192`.
+  - Both peers run on the same Core Ultra CPU.
+  - For VMware, legion needed *Windows Hypervisor Platform* (memory integrity keeps Hyper-V running) and a restart.
+  - In-game mouse: VMware *Preferences → Input → Optimize mouse for games: Always*. Without it, the DirectInput cursor sticks to the screen edges.
+- **What was recorded.** Captures are in `analysis/lan-captures/session2/{legion,eevm}/`.
+  - The usable match had the VM hosting, with legion joining from the LAN list.
+  - `pktmon` ran on both machines, filtered to the peer IP, both broadcast addresses and 8585/33334–33336, with `--pkt-size 0`. legion's file also holds all of the VM's internet traffic, because bridged frames cross legion's stack: 147k frames against the VM's 12.7k.
+  - `netcode_hooks` (`wire=false`) and `sync_hooks` ran on the host. `run.py --every 15 --stop-file …` kept the snapshots safe through game exits.
+- **Results.**
+  - `tools/lan/eelan.py` decodes both captures identically: 897 `NEMCommunicationsTick`, 817 `NEMWorldDatabaseChecksumResponse`, the chat, build and gather orders, and a pause.
+  - **Sync oracle.** The host's own world checksum (Frida, EXE `0x545ebf`) equals the client's wire response on **817/817 ticks** (CT 40–857). There are about 2.85 checksums/s, all from one host thread, with `flags=1`. The host tally (`LogChecksumResponse`) has 2 slots (0 and 254), equal on every tick.
+  - The `ESChecksum*` exports had **0 calls in multiplayer too**. The world checksum is the EXE's own function only.
+- **Gotchas found.**
+  - **Installing VMware moved the game's Default adapter.** It became `VMnet8` (192.168.157.1), so legion's lobby broadcasts went to the VMware host-only network and the VM never saw legion's games.
+    - After disabling VMnet1/VMnet8 (`Disable-NetAdapter`; the bridged VM doesn't use them), Default was fine.
+    - Windows players with VPN or virtualisation adapters will hit the same problem. The adapter choice made in Options didn't persist across the crashes below.
+  - **legion crashed 3/3 as LAN host at match start.** The setup was: VMnet adapters enabled, Wi-Fi picked explicitly in *Choose Network Adapter*.
+    - Two of the three runs had Frida attached; the crash is the game's own.
+    - Each was an access violation in SysWOW64 `ntdll` heap code, with the exception address near the `RtlEnterCriticalSection` export.
+    - The main thread's stack ran through `TCP Protocol.dll` +0x1cd8 / +0x484c / +0x7370 into msvcrt. +0x1cd8 lies just before `NPIMEnumerateNetworkAdapters` (+0x1ce0), at the end of the adapter-selection routine (netcode.md §3.4).
+    - A full dump is at `C:\EEPort\captures\dumps\`. WER LocalDumps is now on for `Empire Earth.exe`. The triage script is at `analysis/lan-captures/session2/dumpscan.py`.
+    - The VM, with one adapter and Default selected, never crashed as joiner or as host. The trigger, adapter count or explicit choice, is not isolated yet.
+  - With the TCP Protocol.dll wire hooks in place, those hooks were the first suspect for the crash; they turned out not to be the cause. `netcode_hooks.js` now attaches them only when the DLL is loaded (module observer). `wire=false` skips them.
+
 ## 8. Open items
 - Ghidra: how the EXE converts float to int (no `_ftol` calls in-game; the transient CW 0x0E7F on the main thread).
-- Run `sync_hooks` + `threads` during the LAN session (§7). That is where `ESChecksum` and `NEMWorldDatabaseChecksumResponse` should be active, and it gives the checksum stream and its thread.
 - Add a COM vtable census for DirectDraw7/D3D7, DirectInput and DirectMusic. This was planned for Phase 1.
 - Per-tick hook on the sim thread (`GetCurrentCommunicationsTick`, ~41/s) to timestamp world ticks, for PLAN §6.4.
-- Capture the LAN session (§7).
+- LAN (§7 session 1):
+  - a legion-hosted match, with legion's own Frida world stream, now that VMnet1/8 are off;
+  - isolate the host crash (adapter count vs explicit *Choose Network Adapter*) and decompile `TCP Protocol.dll` +0x1bee–0x1cd8 / +0x484c from the dump;
+  - a longer match for the oracle.
