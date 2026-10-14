@@ -10,6 +10,9 @@ The game keeps running.
   run.py ... --param interval_ms=20 --param internal=true
 
 Outputs in --out: <script>.json (snapshot), events.jsonl (send() messages), meta.json.
+A script may also write files under --out: send({"type": "file", "path": "rel/path", "json": obj})
+writes JSON, send({"type": "file", "path": "rel/path"}, bytes) writes raw bytes (rmg_capture.js).
+Existing blobs/ files of the same size are kept (content-addressed, written once).
 """
 import argparse
 import hashlib
@@ -46,6 +49,29 @@ def parse_params(items):
     return params
 
 
+def write_file(out_dir, payload, data, counts):
+    """{"type": "file"} message from a script: write payload["json"] or the binary data under out_dir."""
+    rel = str(payload.get("path", ""))
+    parts = rel.replace("\\", "/").split("/")
+    if not rel or os.path.isabs(rel) or ".." in parts or ":" in rel:
+        raise ValueError("bad file path from script: %r" % rel)
+    dest = os.path.join(out_dir, *parts)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if "json" in payload:
+        body = json.dumps(payload["json"], indent=1).encode("utf-8")
+    elif data is not None:
+        body = data
+    else:
+        raise ValueError("file message without json or data: %r" % rel)
+    if rel.startswith("blobs/") and os.path.exists(dest) and os.path.getsize(dest) == len(body):
+        return
+    with open(dest + ".tmp", "wb") as f:
+        f.write(body)
+    os.replace(dest + ".tmp", dest)
+    counts["files"] += 1
+    counts["bytes"] += len(body)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--spawn", action="store_true")
@@ -68,9 +94,18 @@ def main():
     params = parse_params(args.param)
     events = open(os.path.join(args.out, "events.jsonl"), "w", encoding="utf-8")
     t0 = time.time()
+    file_counts = {"files": 0, "bytes": 0, "errors": 0}
 
     def on_message(name):
         def handler(msg, data):
+            payload = msg.get("payload") if msg["type"] == "send" else None
+            if isinstance(payload, dict) and payload.get("type") == "file":
+                try:
+                    write_file(args.out, payload, data, file_counts)
+                except Exception as e:  # keep capturing; record the failure
+                    file_counts["errors"] += 1
+                    print(f"[{name}] file write failed: {e}", file=sys.stderr)
+                return
             rec = {"t": round(time.time() - t0, 3), "script": name}
             if msg["type"] == "send":
                 rec["payload"] = msg["payload"]
@@ -155,6 +190,7 @@ def main():
     except Exception:  # already gone with the game
         pass
     meta["end"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    meta["files_written"] = file_counts
     with open(os.path.join(args.out, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=1)
     events.close()
