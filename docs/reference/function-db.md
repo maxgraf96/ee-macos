@@ -95,7 +95,7 @@ References *from* the DRM sections never count as evidence for game code. Withou
 - relocation-table pointer data inside not-yet-decoded `MOV [abs], imm32` instructions (DX7 plugins, Default.dll, the mixer);
 - targets of DRM references and of numeric constants (EXE).
 
-Each Error bookmark `conflicting data/instruction at B` is cleared when B has only data references, then re-disassembled and the function body re-derived. One jump table (EXE+0x3c985f [0x7c985f], `CMP EDI,3; JA; JMP [EDI*4+0x7c9b1c]`) was only half resolved by Ghidra. Its two missing cases are added as computed-jump flows.
+Each Error bookmark `conflicting data/instruction at B` is cleared when B has only data references, then re-disassembled and the function body re-derived. Every other plain data unit that the instruction at the flow target overlaps is cleared too, and the straight-line flow is followed past further such units. One `MOV [abs], imm32` holds two relocated dwords, and clearing only B left Default.dll+0x6c9a's initializer tail (+0x6caa, 20 bytes) as data, with no new bookmark; the DB was regenerated for Default.dll (Phase 2 workstream A). One jump table (EXE+0x3c985f [0x7c985f], `CMP EDI,3; JA; JMP [EDI*4+0x7c9b1c]`) was only half resolved by Ghidra. Its two missing cases are added as computed-jump flows.
 
 ### 2.4 Code vs data in the EXE
 
@@ -168,6 +168,7 @@ Fields are omitted when empty, false or zero, which keeps the EXE at 9.2 MB.
 | `noreturn`, `ret_pop` | Ghidra no-return flag; bytes popped by `RET n` (a list if several values) |
 | `ecx_in`, `edx_in` | ECX/EDX read before written in the entry block (`__thiscall`/`__fastcall` evidence) [inferred] |
 | `alt_entries` | `{evidence: count}` for interior addresses that data or EH tables name (alternate entries) |
+| `alt_vas` | the same interior addresses: `{va: [evidence]}`. The kit seeds each as an alternate entry |
 | `switch` | `[[table_rva, entries, resolved_by], …]` |
 | `community` | `[{name, status, source}]` from `db/community-symbols.json`, with provenance |
 | `seeded` | created by our seeding, not by Ghidra's own analysis |
@@ -328,11 +329,12 @@ Code is classified by **section flags** (`Image.__init__ :874`, `is_exec :919`).
 
 `ghidra_run.py kit <slug> db/functions/<module>.json <outdir>` writes, from the saved Ghidra project, exactly the DB's non-DRM entries:
 - `functions.tsv` and `functions/<addr>.asm` in the kit's format. Optional `--decompile` adds `.c` pseudocode.
-- `funcdb.json`, a sidecar that carries what the kit needs from the DB beyond the listings:
+- Function names: the DB's best name (`name`), else `fn_<va>`. They name the translated functions in the kit's `symbols.json` and profiler.
+- `funcdb.json` (schema `recomp-funcdb/1`, the kit's `[translate] function_db` input), a sidecar that carries what the kit needs from the DB beyond the listings:
   - `code_ranges`;
   - `excluded_ranges` (DRM sections, headers);
   - `entry_points` with kinds and evidence;
-  - `alternate_entries`;
+  - `alternate_entries` (the `alt_vas` addresses with their evidence);
   - `data_in_code`;
   - `jump_tables`;
   - `excluded_functions`.
@@ -361,6 +363,8 @@ Command: `translate.py --game analysis/func-db/kit-test/exe --out gen --report r
 | time | 71.5 s | 37.5 s |
 
 ### 7.4 Kit changes needed so that the DB is authoritative
+
+**Status: implemented** on the kit branch `feat/game-repo` (Phase 2 workstream A): `translate.py` `FunctionDB`, `[translate] function_db`, `[modules.aux.<key>] function_db`. Items 1–6 below are done as described; item 7 waits for gap 5. Measured results and the base map: [build.md](build.md).
 
 These are small and local to `translate.py`/`game_config.py`, and the order matters:
 1. **`[translate] function_db = "db/functions/<module>.json"`** (or the `funcdb.json` sidecar) in `game_config.load` (`game_config.py:143`).

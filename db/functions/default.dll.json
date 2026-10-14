@@ -2,7 +2,7 @@
  "schema": "neoee-funcdb/1",
  "module": {"name":"Default.dll","sha256":"ab0e791039e558ac93f250594003995a4037883864cbdbbb6ded6f8faa4f9d3e","image_base":"0x10000000","size_of_image":"0x1d000","entry_rva":"0x16063","size_of_headers":"0x1000","sections":[{"name":".text","rva":"0x1000","vsize":"0x15118","raw_size":"0x16000","flags":"0x60000020","code":true},{"name":".rdata","rva":"0x17000","vsize":"0x1342","raw_size":"0x2000","flags":"0x40000040","code":false},{"name":".data","rva":"0x19000","vsize":"0x1a08","raw_size":"0x2000","flags":"0xc0000040","code":false},{"name":".reloc","rva":"0x1b000","vsize":"0x1448","raw_size":"0x2000","flags":"0x42000040","code":false}]},
  "generator": {"tool":"tools/ghidra/build_db.py","ghidra":"12.1.4","analysis":"Ghidra auto-analysis at the preferred base + evidence seeding"},
- "stats": {"functions":834,"kinds":{"function":824,"thunk":2,"import_thunk":8},"tags":{"game":808,"lib:dinkumware":15,"lib:crt-static":3,"lib:import":8},"coverage":{".text":{"bytes":86296,"function":86164,"orphan_code":0,"data":112,"padding":20,"unknown":0,"pct":{"function":99.847,"orphan_code":0.0,"data":0.13,"padding":0.023,"unknown":0.0,"classified":100.0},"unknown_runs":0,"largest_unknown":[]}},"classes":14,"vtables":13,"vtable_slots":68,"x87_functions":{"any":76,"const":44,"arith":40,"ldst":75,"int_load":40,"int_store":26,"compare":44,"status_word":44,"sign":8},"eh":{"cxx_frames":0,"seh3_frames":0,"other_frames":0,"funcinfo":0,"throw_sites":0},"indirect_targets":251,"seeded":208,"switch_tables":{"total":2,"ghidra":2,"funcdb_only":[]},"vtable_slot_coverage":{"vtables":13,"slots":68,"distinct_targets":37,"targets_function_start":37,"slots_function_start":68,"targets_found_by_ghidra_alone":27,"targets_added_by_seeding":10,"targets_not_function_start":[]},"community":{"function_entries":0,"matched_function_starts":0,"not_a_function_start":[]}},
+ "stats": {"functions":834,"kinds":{"function":824,"thunk":2,"import_thunk":8},"tags":{"game":808,"lib:dinkumware":15,"lib:crt-static":3,"lib:import":8},"coverage":{".text":{"bytes":86296,"function":86184,"orphan_code":0,"data":92,"padding":20,"unknown":0,"pct":{"function":99.87,"orphan_code":0.0,"data":0.107,"padding":0.023,"unknown":0.0,"classified":100.0},"unknown_runs":0,"largest_unknown":[]}},"classes":14,"vtables":13,"vtable_slots":68,"x87_functions":{"any":76,"const":44,"arith":40,"ldst":75,"int_load":40,"int_store":26,"compare":44,"status_word":44,"sign":8},"eh":{"cxx_frames":0,"seh3_frames":0,"other_frames":0,"funcinfo":0,"throw_sites":0},"indirect_targets":251,"seeded":208,"switch_tables":{"total":2,"ghidra":2,"funcdb_only":[]},"vtable_slot_coverage":{"vtables":13,"slots":68,"distinct_targets":37,"targets_function_start":37,"slots_function_start":68,"targets_found_by_ghidra_alone":27,"targets_added_by_seeding":10,"targets_not_function_start":[]},"community":{"function_entries":0,"matched_function_starts":0,"not_a_function_start":[]}},
  "imports": [
   {"slot_rva":"0x17000","dll":"low-level engine.dll","name":"?Apply@GETransformation@@QBEXABVGEVector@@AAV2@@Z","demangled":"GETransformation::Apply"},
   {"slot_rva":"0x17004","dll":"low-level engine.dll","name":"?SetOrientationYPR@GETransformation@@QAEXMMM@Z","demangled":"GETransformation::SetOrientationYPR"},
@@ -102,7 +102,6 @@
   {"name":"type_info","mangled":".?AVtype_info@@","td_rva":"0x1a350","tag":"lib:crt-static","vtables":[{"rva":"0x17330","offset":0,"slots":["0x15f96"]}]}
  ],
  "data_in_code": [
-  ["0x6cb0",4,"undefined *"],
   ["0xfb3f",4,"pointer"],
   ["0xfb43",4,"pointer"],
   ["0xfb47",4,"pointer"],
@@ -126,8 +125,6 @@
   ["0xfec2",4,"pointer"],
   ["0xfec6",4,"pointer"],
   ["0xfeca",4,"pointer"],
-  ["0x6caa",6,"table"],
-  ["0x6cb4",10,"table"],
   ["0xfb3f",40,"table"],
   ["0xfe9a",52,"table"]
  ],
@@ -307,9 +304,9 @@
   {"rva":"0x6c69","va":"0x10006c69","size":10,"sec":".text","kind":"function","tag":"game","insns":2,"callers":0,"callees":2,"xref":{"reloc":1},"indirect":true,"seeded":true},
   {"rva":"0x6c73","va":"0x10006c73","size":27,"sec":".text","kind":"function","tag":"game","insns":6,"callers":12,"call_sites":12,"callees":1,"indirect":false,"ret_pop":0},
   {"rva":"0x6c8e","va":"0x10006c8e","size":12,"sec":".text","kind":"function","tag":"game","insns":4,"callers":1,"callees":1,"indirect":false,"ret_pop":0},
-  {"rva":"0x6c9a","va":"0x10006c9a","size":17,"chunks":[["0x6c9a","0x6caa"],["0x6cbe","0x6cbf"]],"sec":".text","kind":"function","tag":"game","insns":4,"callers":0,"callees":0,"xref":{"imm":12},"indirect":true,"ret_pop":0,"seeded":true},
+  {"rva":"0x6c9a","va":"0x10006c9a","size":37,"sec":".text","kind":"function","tag":"game","insns":7,"callers":0,"callees":1,"xref":{"imm":12},"indirect":true,"ret_pop":0,"seeded":true},
   {"rva":"0x6cbf","va":"0x10006cbf","size":34,"sec":".text","kind":"function","tag":"game","insns":12,"callers":0,"callees":2,"imports":[55],"xref":{"vt":1},"indirect":true,"vt_slots":[[0,0]],"class":0,"vt_writes":[0],"ret_pop":4,"ecx_in":true},
-  {"rva":"0x6ce1","va":"0x10006ce1","size":100,"sec":".text","kind":"function","tag":"game","insns":44,"callers":1,"call_sites":1,"callees":4,"imports":[55],"indirect":false,"ret_pop":0,"ecx_in":true},
+  {"rva":"0x6ce1","va":"0x10006ce1","size":100,"sec":".text","kind":"function","tag":"game","insns":44,"callers":2,"call_sites":1,"callees":4,"imports":[55],"indirect":false,"ret_pop":0,"ecx_in":true},
   {"rva":"0x6d45","va":"0x10006d45","size":27,"sec":".text","kind":"function","tag":"game","insns":12,"callers":1,"call_sites":1,"callees":2,"indirect":false,"ret_pop":0,"ecx_in":true},
   {"rva":"0x6d60","va":"0x10006d60","size":50,"sec":".text","kind":"function","tag":"game","insns":21,"callers":1,"call_sites":1,"callees":2,"imports":[55],"indirect":false,"ret_pop":4,"ecx_in":true},
   {"rva":"0x6d92","va":"0x10006d92","size":53,"sec":".text","kind":"function","tag":"game","insns":25,"callers":1,"call_sites":1,"callees":0,"indirect":false,"ret_pop":0,"ecx_in":true},

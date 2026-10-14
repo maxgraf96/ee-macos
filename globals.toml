@@ -1,0 +1,56 @@
+# Curated symbols for Empire Earth's M1 modules, at their run-time addresses
+# (game.toml base map: engine 0x10000000, sxlrt233 0x10200000, Default.dll
+# 0x10300000). Every function the function DB names (exports, FID matches,
+# community symbols) already carries that name in its listing; what is curated
+# here is the M1 surface by a stable identifier: the random-map plugin API, the
+# DllMains and the engine entry points the M1 harness drives. Sources:
+# db/functions/*.json (exports) and db/community-symbols.json.
+# tests/test_game_config.py checks every address against the DB.
+
+# The kit's own code reads these three (Populous-shaped: turn counter, command
+# frame, entity table). EE has no equivalent yet; sentinels in the unmapped
+# arena between the executable and the heap.
+[globals.simulation_turn]
+addr = 0x00f00000
+size = 4
+
+[globals.command_frame]
+addr = 0x00f00010
+size = 4
+
+[globals.entity_base]
+addr = 0x00f01000
+size = 4
+stride = 4
+count = 1
+
+[entries]
+# Default.dll (random-map PIM, base 0x10300000): its exports.
+Default_DllMain = 0x10316063
+PIMGetName = 0x10306f97
+PIMGetType = 0x10306f9d
+PIMIsValid = 0x10306fa3
+EERMPIMCreateFlatMap = 0x10306fa6
+EERMPIMCreateHeightMap = 0x10306fb1
+EERMPIMCreateNeutralLandWaterMap = 0x10306fbc
+EERMPIMCreatePlayerLandWaterMap = 0x10306fbf
+EERMPIMCreateTrees = 0x10307091
+EERMPIMFilterHeightMap = 0x1030709c
+EERMPIMGenerateNeutralPositions = 0x103070a7
+EERMPIMGeneratePlayerPositions = 0x103070cd
+EERMPIMGenerateResources = 0x103070d8
+EERMPIMGenerateShallows = 0x103070e3
+EERMPIMSetRandomMapValues = 0x103070ee
+# Not exported: the .rmv reader EERMPIMSetRandomMapValues calls (cdecl ctx,
+# const UString &script), driven by the M1 harness [static, spike].
+EERM_ReadScript = 0x1030de77
+# Low-Level Engine.dll (base 0x10000000).
+Engine_DllMain = 0x100818dd
+UString_ctor_cstr = 0x1007fcd5                # ??0UString@@QAE@PBD@Z
+FSFileSpec_ctor_UString = 0x10021f0c          # ??0FSFileSpec@@QAE@ABVUString@@@Z
+UMSetFloatingPointPrecision = 0x1007e067      # ?UMSetFloatingPointPrecision@@YAXK@Z
+UMSetFloatingPointRoundingMode = 0x1007e079   # ?UMSetFloatingPointRoundingMode@@YAXK@Z
+GEInitialize = 0x1004a2cc                     # ?GEInitialize@@YAJAAVFSFileSpec@@QAUHINSTANCE__@@@Z
+PIMModule_GetModule = 0x100575d2              # ?GetModule@PIMModule@@CAJ_NAAPAV1@@Z
+# sxlrt233.dll (Dinkumware C++ library 2.33, base 0x10200000).
+Sxlrt233_DllMain = 0x102a7057

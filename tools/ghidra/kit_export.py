@@ -57,7 +57,9 @@ def export(program, slug, db_path, out, decompile=False):
                     stats["missing"].append(r["va"])
                     continue
                 stats["created_here"] += 1
-            name = "fn_%08x" % va
+            # the DB's best name (export, import thunk, FID, community) names the
+            # translated function in the kit's symbols.json and profiler
+            name = " ".join((r.get("name") or "").split()) or "fn_%08x" % va
             lines = []
             it = listing.getInstructions(f.getBody(), True)
             while it.hasNext():
@@ -79,7 +81,10 @@ def export(program, slug, db_path, out, decompile=False):
 
     code = [s for s in db["module"]["sections"] if s["code"]]
     sidecar = {
-        "schema": "neoee-funcdb-kit/1",
+        # the function-DB input recomp-kit's translator reads ([translate] function_db;
+        # kit/tools/recomp/translate.py FunctionDB). Addresses are at image_base, the
+        # module's preferred base; the translator moves them to the base it translates for.
+        "schema": "recomp-funcdb/1",
         "module": db["module"]["name"], "sha256": db["module"]["sha256"], "image_base": hex(base),
         # replaces section-flag code classification (EXE sections are all 0xc0000040)
         "code_ranges": [[hex(base + int(s["rva"], 16)), hex(base + int(s["rva"], 16) + int(s["vsize"], 16)),
@@ -91,9 +96,11 @@ def export(program, slug, db_path, out, decompile=False):
         # every function start the DB knows, with the evidence that makes it reachable
         "entry_points": [[r["va"], r["kind"], sorted((r.get("xref") or {}).keys())]
                          for r in db["functions"] if r["tag"] != "drm"],
-        # interior addresses that data or EH tables name (alternate entries)
-        "alternate_entries": [[r["va"], r["alt_entries"]] for r in db["functions"]
-                              if r.get("alt_entries") and r["tag"] != "drm"],
+        # interior addresses that data or EH tables name (alternate entries): each is an
+        # instruction boundary inside a DB function, with the evidence that names it
+        "alternate_entries": [[va, kinds] for r in db["functions"] if r["tag"] != "drm"
+                              for va, kinds in sorted((r.get("alt_vas") or {}).items(),
+                                                      key=lambda kv: int(kv[0], 16))],
         # bytes inside code sections that are data (jump/index tables, constants)
         "data_in_code": [[hex(base + int(d[0], 16)), d[1], d[2]] for d in db["data_in_code"]],
         "jump_tables": [[r["va"], hex(base + int(t[0], 16)), t[1], t[2]]

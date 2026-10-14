@@ -10,9 +10,15 @@ analysis/
 *.gpr
 *.rep/
 
-# Build outputs, including generated C translated from game code
+# Build outputs, including generated C translated from game code: the kit
+# writes the translation, objects, bundles, apps and logs under build/
+# (tools/build.py)
 build/
 gen/
+*.bundle
+*.o
+*.d
+CMakeUserPresets.json
 
 # Throwaway experiments (conclusions go to docs/decisions/)
 spikes/
@@ -22,4 +28,5 @@ spikes/
 venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 .DS_Store

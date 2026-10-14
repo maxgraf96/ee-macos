@@ -549,6 +549,7 @@ class Builder:
         out = []
         conflicts = Counter()
         alt = defaultdict(Counter)       # owner entry -> Counter(kind) for interior entries
+        alt_at = defaultdict(dict)       # owner entry -> {interior address: [kinds]}
         # a relocation proves a pointer, not code (the engine keeps data tables in .text),
         # so "reloc" and "dp" seeds must be Ghidra-decoded or pass validate_code
         strong = {"vt", "export", "entry", "unwind", "catch", "catch_cont", "seh_filter",
@@ -562,6 +563,7 @@ class Builder:
                 if st:
                     for k in kinds:
                         alt[own.entry][k] += kinds[k]
+                    alt_at[own.entry][t] = sorted(kinds)
                 else:
                     for k in kinds:
                         conflicts["interior_not_insn:" + k] += 1
@@ -581,6 +583,7 @@ class Builder:
             out.append({"va": hx(t), "kinds": dict(kinds), "why": reason,
                         "section": pm.section_of(t)})
         self.alt = alt
+        self.alt_at = alt_at
         self.conflicts = conflicts
         return out
 

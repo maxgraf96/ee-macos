@@ -15,11 +15,17 @@ This project ports *Empire Earth* (2001; the GOG *Empire Earth Gold* base game) 
 ## Layout
 | Path | Contents |
 |---|---|
+| `kit/` | [recomp-kit](https://codeberg.org/maxgraf/recomp-kit) fork (submodule, branch `ee`): translator, runtime, hosts |
+| `game.toml`, `globals.toml` | the kit's game configuration: module hashes, the base map, translation inputs, curated symbols |
 | `docs/` | plan, ADRs, research, reference notes |
-| `tools/` | analysis scripts (`peinfo.py`, `inventory.py`; deps in `tools/requirements.txt`) |
+| `tools/` | `build.py`/`setup.py`/`test.py` (thin wrappers around the kit's) and analysis scripts (`peinfo.py`, `inventory.py`, `ghidra/`; deps in `tools/requirements.txt`) |
+| `mods/`, `tests/` | EE targets in the kit's build (the M1 harness, `tests/m1/`) and this repository's tests |
 | `db/` | function/API databases derived from analysis (names and addresses only) |
 | `windows/` | scripts for the Windows reference machine |
 | `original/` | (ignored) the player's game files |
+
+## Build
+Setup, build, tests, the freestanding/`ld64.lld` bundle build and the DLL base map: [`docs/reference/build.md`](docs/reference/build.md).
 
 ## Tools quickstart
 ```sh
