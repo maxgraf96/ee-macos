@@ -339,7 +339,7 @@ Everything the context can reach is allocated in that window [static]:
 **At entry** to each export:
 - **Scanned roots:** `[ctx, ctx+0x3d0)`, Default `.data`, and for `SetRandomMapValues` the 16-byte `UString` argument (on the EXE stack).
 - **Closure.** Every aligned dword of a root or of a captured block that points into a live block pulls in **the whole block**, recursively.
-- **Foreign pointers.** Values that point into other private RW memory (non-module) are counted and sampled as `foreign`. There should be none. If there are, the capture is incomplete for that call, and the `heapwalk=true` parameter adds the hit blocks one level deep from a `HeapWalk` of msvcrt's heap.
+- **Foreign values.** Values that point into other private RW memory (non-module) are counted and sampled as `foreign`. Most are expected to be stale addresses in uninitialised memory: vector capacity tails and recycled blocks. They are information, not errors. If one is really dereferenced, the Windows replay shows it: an access violation at module+RVA, or a mismatch. `heapwalk=true` then adds the busy msvcrt heap blocks they hit, one level deep, from a `HeapWalk`.
 - **Captured but not scanned:**
   - the stack window `[ESP−stack_below, ESP+stack_above)` (0x8000/0x200), so that reads of uninitialised stack replay identically;
   - for diagnosis, the engine's `.data`, which is not restored.
@@ -401,7 +401,7 @@ msvcrt-internal allocations (stream buffers and the like) are excluded by the ca
 ### 6.5 Limits
 - **Address-exact by design.** A capture replays only at its own addresses (§7). That is the point: no pointer fixing, and stack garbage, padding and freed-memory reuse all reproduce.
 - **Memory touched without a pointer path from the roots is invisible.** Examples would be engine globals mutated by a previous call, or EXE objects reached through a global. §5.4 says the plugin has none; the Windows replay proves it per call.
-- **`Default.dll` loaded before attach** (e.g. attaching during a game) loses the DllMain-time blocks: a warning, and foreign pointers. Attach at the menu.
+- **`Default.dll` loaded before attach** (e.g. attaching during a game) loses the DllMain-time blocks: a warning, then replay failures. Attach at the menu.
 
 ## 7. Replay driver
 
@@ -430,7 +430,7 @@ Code and build: [`tests/m1/replay/`](../../tests/m1/replay/README.md).
 - a 128-byte header: seq, gen, attempt, tid, ESP, CW in/out, SW/TW in, EAX, args, flags, export name;
 - sections `MODS` (name, base, `SizeOfImage`, `TimeDateStamp`, `.data`), `INRG` (restorable regions with bytes), `ALOG`, `FLOG`, `OUTR` (expected regions with bytes) and `DBGS`.
 
-Struct definitions are in `rmg_replay.h`. `rmg_pack.py` refuses calls with warnings or foreign pointers unless `--force`, and `--verify` re-hashes every blob. `rmg_pack.py list` prints a call table. The pack builder knows no game layout, only the region labels.
+Struct definitions are in `rmg_replay.h`. `rmg_pack.py` refuses calls with capture warnings or unreadable regions unless `--force`, and `--verify` re-hashes every blob. `rmg_pack.py list` prints a call table. The pack builder knows no game layout, only the region labels.
 
 ### 7.3 Windows (`rmg_replay.exe`, 32-bit, LAA)
 - **One child process per pack.** The parent creates the child suspended. It checks with `VirtualQueryEx` that every needed range (64 KB-aligned) is free:
@@ -511,7 +511,7 @@ scp -r tests/m1/replay/* legion:C:/EEPort/m1/replay/
   scp rmg_replay.exe legion:C:/EEPort/tools/
   ```
 
-**Smoke case S00** (defaults: Continental Small, 2 players). Run this first and check `rmg_capture.json`: `warnings` empty, every call `foreign` 0/0, capture time per call in seconds.
+**Smoke case S00** (defaults: Continental Small, 2 players). Run this first and check `rmg_capture.json`: `warnings` empty, the `foreign` counts per call (expected small; note them), capture time per call (`capture_ms` in the manifests). The decisive check is that every pack replays.
 ```sh
 L stop
 L start                     # then ESC until the main menu (~30 s)
@@ -538,7 +538,7 @@ Then pack and replay as for S00.
 For the editor cases (E), use `--param generations=1` without `seed`, and type the seed in the dialog.
 
 ## 10. Open questions
-1. **Is `Default.dll` mapped before its DllMain runs at the Frida module observer?** Tracking starts at `FUN_0066d402` entry anyway, before the plugin load, so DllMain allocations are covered either way. If the texture worker keeps the DLL loaded across a generation, the tracking order changes; watch `loads.json` and `foreign`.
+1. **Is `Default.dll` mapped before its DllMain runs at the Frida module observer?** Tracking starts at `FUN_0066d402` entry anyway, before the plugin load, so DllMain allocations are covered either way. If the texture worker keeps the DLL loaded across a generation, the tracking order changes; watch `loads.json` and the replay results.
 2. **Capture cost on Huge/Gigantic** (full closure scan at entry and exit, about 2–4 MB per call): seconds per call are expected. If too slow, scan rows with a typed fast path (§4.3).
 3. **Starting Epoch registry values** → `$StartEpoch` mapping, and whether the setup screen re-reads `Map Type`/`Map Size` from the registry on each visit or only at startup.
 4. **Thread.** Which thread runs world creation (main or a loader thread); the capture records `tid`. The CW is expected to be `0x027f` (set after every plugin load).

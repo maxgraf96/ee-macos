@@ -162,11 +162,11 @@ def parse_seq(spec):
 
 
 def problems(c):
+    """Reasons not to pack a call. Foreign values are not among them: they are mostly stale
+    addresses in uninitialised memory, and the Windows replay shows whether any is really used."""
     p = list(c.get("warnings", []))
     for phase in ("entry", "exit"):
-        f = c[phase].get("foreign", {})
-        if f.get("count"):
-            p.append("%s: %d foreign pointers, e.g. %s" % (phase, f["count"], f.get("sample", [])[:3]))
+        p += ["%s region %s %s: %s" % (phase, r["kind"], r["addr"], r["error"]) for r in c[phase]["regions"] if "error" in r]
     return p
 
 
@@ -222,7 +222,7 @@ def main():
     p.add_argument("capture")
     p.add_argument("-o", "--out", required=True)
     p.add_argument("--seq", help="e.g. 0-10,14")
-    p.add_argument("--force", action="store_true", help="pack calls with warnings or foreign pointers")
+    p.add_argument("--force", action="store_true", help="pack calls with capture warnings")
     p.add_argument("--verify", action="store_true", help="re-hash every blob while packing")
     p.set_defaults(fn=cmd_pack)
     a = ap.parse_args()

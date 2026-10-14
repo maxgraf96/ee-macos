@@ -24,7 +24,8 @@
 //   * At entry: roots = context [ctx, ctx+0x3d0), Default.dll .data, the UString argument of
 //     SetRandomMapValues. Every aligned dword of a root or captured block that points into a
 //     tracked live block pulls in that whole block (conservative closure). Values that point into
-//     other private RW memory are reported as "foreign" (they should not occur; check them).
+//     other private RW memory are counted as "foreign": mostly stale addresses in uninitialised
+//     memory; the replay shows whether any of them is really used.
 //     Also captured, not scanned: the stack window [ESP-stack_below, ESP+stack_above) and,
 //     for diagnosis only, Low-Level Engine.dll .data.
 //   * During the call, on the calling thread, allocator/free calls whose caller is a game module
@@ -152,13 +153,25 @@ function hexBytes(ab) { return Array.from(new Uint8Array(ab), x => x.toString(16
 
 // ---------------------------------------------------------------------------------------------
 // Native helpers. TinyCC on this Frida: no writable globals, no stdcall externs (see threads.js).
-const cm = new CModule(`
-typedef unsigned int u32;
+// x87 environment of the calling thread: CW, SW, TW (FNSTENV masks exceptions, so FLDENV it back).
+let cmFpu;
+try {
+  cmFpu = new CModule(`
 void fpu_env(unsigned short *out) {
   unsigned char env[28];
-  __asm__ __volatile__("fnstenv %0\\n\\tfldenv %0" : "=m"(env) : : "memory");
+  __asm__ __volatile__("fnstenv %0\\n\\tfldenv %0" : "+m"(env) : : "memory");
   out[0] = *(unsigned short *)(env + 0); out[1] = *(unsigned short *)(env + 4); out[2] = *(unsigned short *)(env + 8);
+}`);
+} catch (e) {
+  cmFpu = new CModule(`
+void fpu_env(unsigned short *out) {
+  unsigned short cw, sw;
+  __asm__ __volatile__("fnstcw %0" : "=m"(cw)); __asm__ __volatile__("fnstsw %0" : "=m"(sw));
+  out[0] = cw; out[1] = sw; out[2] = 0xdead;   /* tag word unavailable */
+}`);
 }
+const cm = new CModule(`
+typedef unsigned int u32;
 /* Scan nwords dwords at mem from word 'start'. Hits are (word index, block index | 0xffffffff, value):
    a block hit when bs[i] <= v < be[i] (sorted, disjoint), a foreign hit when v lies in one of the
    sorted ranges [rs, re). Stops when out is full; *next = first word not scanned. Returns #u32 written. */
@@ -184,7 +197,7 @@ u32 scan(const u32 *mem, u32 nwords, u32 start, const u32 *bs, const u32 *be, u3
   return k;
 }
 `);
-const fpuEnvNative = new NativeFunction(cm.fpu_env, 'void', ['pointer']);
+const fpuEnvNative = new NativeFunction(cmFpu.fpu_env, 'void', ['pointer']);
 const scanNative = new NativeFunction(cm.scan, 'uint32', ['pointer', 'uint32', 'uint32', 'pointer', 'pointer', 'uint32',
   'uint32', 'uint32', 'pointer', 'pointer', 'uint32', 'pointer', 'uint32', 'pointer']);
 const fpuBuf = Memory.alloc(8);
@@ -314,9 +327,10 @@ Interceptor.attach(crt.getExportByName('fopen'), {
   onEnter(args) { this.c = inCall(this); if (this.c) { this.path = args[0]; this.mode = args[1]; } },
   onLeave(ret) {
     if (!this.c) return;
-    const raw = new Uint8Array(this.path.readByteArray(1024)), r = u32(ret);
-    const plen = raw.indexOf(0) < 0 ? 1024 : raw.indexOf(0), path = this.path.readCString();
-    const ev = { op: 'fopen', path, path_hex: hexBytes(raw.buffer.slice(0, plen)), mode: this.mode.readCString(),
+    const r = u32(ret), raw = [];
+    for (let i = 0; i < 1024; i++) { const b = this.path.add(i).readU8(); if (!b) break; raw.push(b); }
+    const path = String.fromCharCode.apply(null, raw);
+    const ev = { op: 'fopen', path, path_hex: hexBytes(new Uint8Array(raw).buffer), mode: this.mode.readCString(),
                  ret: hex(r), caller: this.c };
     if (r) { try { const ab = File.readAllBytes(path); ev.size = ab.byteLength; ev.content = storeArrayBuffer(ab); } catch (e) { ev.error = e.message; } }
     cur.files.push(ev);
@@ -559,7 +573,10 @@ function leaveCall1(name, ret) {
                in: [rec.entry.regions.length, rec.entry.bytes], out: [rec.exit.regions.length, rec.exit.bytes],
                allocs: rec.allocs.length, files: rec.files.length,
                foreign: [rec.entry.foreign.count, rec.exit.foreign.count], warnings: rec.warnings.length });
-  if (rec.entry.foreign.count || rec.exit.foreign.count) warn('call ' + rec.seq + ' ' + rec.export + ': foreign pointers ' + rec.entry.foreign.count + '/' + rec.exit.foreign.count);
+  // Foreign values are information, not errors: uninitialised capacity tails and recycled blocks
+  // hold stale heap addresses. A value the code really dereferences shows up in the replay.
+  if (rec.entry.foreign.count || rec.exit.foreign.count)
+    send({ type: 'info', msg: 'call ' + rec.seq + ' ' + rec.export + ': foreign values ' + rec.entry.foreign.count + '/' + rec.exit.foreign.count });
   for (const w of rec.warnings) warn('call ' + rec.seq + ': ' + w);
 }
 

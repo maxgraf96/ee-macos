@@ -548,6 +548,7 @@ int main(int argc, char **argv)
         else { printf("usage: %s [--game DIR] [--diff-dir DIR] [-v] PACK.rrp...\n", argv[0]); return 2; }
     }
     if (i >= argc) { printf("usage: %s [--game DIR] [--diff-dir DIR] [-v] PACK.rrp...\n", argv[0]); return 2; }
+    if (diff_dir) CreateDirectoryA(diff_dir, NULL);   /* may already exist */
     if (child) return run_child(argv[i], diff_dir);
     GetModuleFileNameA(NULL, self, sizeof self);
     snprintf(child_args, sizeof child_args, "--game \"%s\"%s%s%s%s%s", g_game_dir, diff_dir ? " --diff-dir \"" : "",
