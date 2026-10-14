@@ -511,6 +511,7 @@ Thread roles come from these censuses, not the static DB.
 ### Phase 6: Shareable app → **M5: 1.0 for friends** (≈2–4 wk)
 - App bundle + first-run importer: GOG offline installer (Inno) or game folder → hash check → translate + compile (one-time, cached).
 - **Bundled LLVM toolchain** (D10, §5.8): freestanding build, lld link, ad-hoc signing, cached output.
+- **No Ghidra on players' Macs:** first-run translation inputs come from the repo's function DB plus the player's own binaries, decoded by our own tools. Ghidra listings are derived from game code and can't ship. Workstream P6-A, started 2026-10-15.
 - Settings UI; logs and crash reports; a friend-facing README (VPN how-to).
 - **Signing:**
   - Ad-hoc signed by default; friends use *Open Anyway* in Privacy & Security once.
