@@ -28,12 +28,8 @@
 //     menu in seconds.
 //   - TEMPORARY stand-ins for gaps other workstreams own, each registered so
 //     the kit's own shim wins as soon as it exists (docs/reference/boot.md §5):
-//     user32/gdi32 (pending_win32.cpp: thread messages and per-thread
-//     PeekMessage, LoadStringA/LoadBitmapA from any module, ANSI text, hooks),
 //     the Miles calls the sound plugin makes (pending_mss32.cpp), an inert
 //     DirectMusic (pending_dmusic.cpp).
-//   - The game's window, not the splash screen's, gets the activation a window
-//     manager sends, and the deadline's WM_CLOSE.
 //   - A boot report: the milestones reached, the threads the game started and
 //     the x87 control word each ran at, and every import that was called with
 //     no implementation behind it. --trace writes every import call.
@@ -62,8 +58,6 @@
 #include <string>
 #include <vector>
 
-void ee_pending_win32_register(); // pending_win32.cpp
-void ee_pending_win32_over_kit();
 void ee_pending_mss32_register(); // pending_mss32.cpp
 void ee_pending_mss32_over_kit();
 void ee_pending_dmusic_register(); // pending_dmusic.cpp
@@ -311,43 +305,30 @@ extern "C" void host_input_state(HostInputState *out) {
 namespace {
 
 // --- the host ----------------------------------------------------------------
-// The game's own window: the visible top-level window the main thread made.
-// The splash screen (EXE 0x5344fb) is shown first, from its own thread, and is
-// what the kit's boot would activate and close; the game's window is the one
-// a window manager activates once it appears, and the one a close goes to.
-uint32_t g_game_window = 0;
-// Posts made from tick() wait for the next PeekMessageA (ee_flush_host_posts,
-// called by pending_win32.cpp before it looks at the queue): tick() runs inside
-// whatever import read the clock - often the kit's own PeekMessageA on some
-// worker, which would then take a message posted under its feet.
-struct HostPost {
-    uint32_t hwnd, msg, wparam, lparam;
-};
-std::vector<HostPost> g_host_posts;
-void post_later(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lparam) {
-    g_host_posts.push_back({hwnd, msg, wparam, lparam});
+// TEMPORARY (P3-C, docs/reference/boot.md §5): when a thread ends, Windows
+// destroys the windows it created, sending them WM_DESTROY on that thread. The
+// splash thread (EXE 0x5344fb) relies on it: it leaves its loop on WM_QUIT and
+// returns without DestroyWindow. Without this the splash stays the window
+// host_main_window() names, the one the boot activates and closes.
+void destroy_thread_windows() {
+    const uint32_t tid = guest_current_thread_id();
+    std::vector<uint32_t> mine;
+    for (const auto &kv : user32::windows())
+        if (kv.second.thread == tid && !kv.second.parent)
+            mine.push_back(kv.first);
+    const uint32_t destroy = mine.empty() ? 0 : imports_resolve("USER32.dll", "DestroyWindow");
+    for (uint32_t hwnd : mine)
+        if (destroy && user32::find_window(hwnd)) {
+            printf("[ee] thread %u ended: destroying its window %08x\n", tid, hwnd);
+            guest_call(guest_current_context(), destroy, hwnd);
+        }
 }
-uint32_t game_window() {
-    for (const auto &kv : user32::windows()) {
-        const user32::Window &w = kv.second;
-        if (!w.parent && w.visible && w.thread == g_main_tid)
-            return kv.first;
-    }
-    return 0;
-}
+
+// The deadline: WM_CLOSE to the main window, as closing it does; the game
+// then shuts down through its own exit path.
 void tick() {
-    uint32_t hwnd = game_window();
-    if (hwnd && hwnd != g_game_window) {
-        g_game_window = hwnd;
-        post_later(hwnd, 0x001c /* WM_ACTIVATEAPP */, 1, 0);
-        post_later(hwnd, 0x0006 /* WM_ACTIVATE */, 1 /* WA_ACTIVE */, 0);
-        post_later(hwnd, 0x0007 /* WM_SETFOCUS */, 0, 0);
-        printf("[ee] game window %08x shown: activated and focused\n", hwnd);
-    }
     if (g_seconds > 0 && boot_elapsed() > g_seconds && !boot_close_requested()) {
-        printf("[ee] %.0fs deadline: posting WM_CLOSE to %08x\n", g_seconds, g_game_window);
-        if (g_game_window)
-            post_later(g_game_window, 0x0010 /* WM_CLOSE */, 0, 0);
+        printf("[ee] %.0fs deadline: posting WM_CLOSE to %08x\n", g_seconds, host_main_window());
         boot_request_close("deadline");
     }
 }
@@ -356,7 +337,8 @@ void report(FILE *out, bool abnormal) {
     std::lock_guard<std::mutex> hold(g_lock);
     fprintf(out, "\n== Empire Earth boot report%s ==\n", abnormal ? " (abnormal end)" : "");
     fprintf(out, "stop: %s after %.1fs\n", boot_stop_reason(), boot_elapsed());
-    fprintf(out, "frames presented: %llu\n", (unsigned long long)g_presents.load());
+    fprintf(out, "frames presented: %llu; application active: %s\n",
+            (unsigned long long)g_presents.load(), win32_app_active() ? "yes" : "no");
     boot_print_exit_code(out);
     for (int m = 0; m < kMilestoneCount; ++m)
         if (g_reached[m] > 0)
@@ -410,12 +392,6 @@ int usage(const char *argv0) {
 }
 
 } // namespace
-
-void ee_flush_host_posts() {
-    for (const HostPost &p : g_host_posts)
-        host_post_message(p.hwnd, p.msg, p.wparam, p.lparam);
-    g_host_posts.clear();
-}
 
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -472,13 +448,15 @@ int main(int argc, char **argv) {
     if (!trace.empty() && !(g_trace = fopen(trace.c_str(), "w")))
         fprintf(stderr, "[ee] cannot write %s\n", trace.c_str());
 
-    ee_pending_win32_register();
     ee_pending_mss32_register();
     ee_pending_dmusic_register();
 
     BootOptions opts;
     opts.name = "EmpireEarth";
-    opts.activate = false; // the game's window, not the splash: tick() does it
+    // The application has the foreground for the whole run, as a player's
+    // focused window does: the kit's user32 then activates each window the
+    // game shows from inside ShowWindow, as Windows does (host_app_state).
+    opts.activate = false;
     opts.tick = tick;
     opts.report = report;
     opts.deadline_seconds = g_seconds;
@@ -489,16 +467,17 @@ int main(int argc, char **argv) {
         return 2;
     }
     ee_pending_mss32_over_kit();
-    ee_pending_win32_over_kit();
     reach(kLoaded);
     printf("[ee] %s; user data %s; strict %s\n", loader_exe_path().c_str(), user.c_str(),
            getenv("RECOMP_STRICT"));
     for (uint32_t i = 0; const LoaderModule *m = loader_module(i); ++i)
         printf("[ee]   %-30s %08x..%08x (prefers %08x, %u relocations)\n", m->name.c_str(), m->base,
                m->base + m->size, m->preferred_base, m->relocations);
+    sched_set_thread_exit_observer(destroy_thread_windows);
     imports_set_call_observer(observe_call);
     imports_set_return_observer(observe_return);
 
+    host_app_state(true, false);
     boot_run();
 
     imports_set_call_observer(nullptr);

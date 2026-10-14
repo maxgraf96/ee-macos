@@ -8,7 +8,6 @@
 #             input. docs/reference/boot.md.
 if(APPLE AND POP_HAVE_GEN AND NOT POP_TRANSLATE STREQUAL "STUB" AND TARGET recomp_gen_h_milesmix)
   add_executable(ee_boot ${CMAKE_CURRENT_LIST_DIR}/ee_main.cpp
-                 ${CMAKE_CURRENT_LIST_DIR}/pending_win32.cpp
                  ${CMAKE_CURRENT_LIST_DIR}/pending_mss32.cpp
                  ${CMAKE_CURRENT_LIST_DIR}/pending_dmusic.cpp
                  ${POP_ROOT}/host/page_overlay.cpp)

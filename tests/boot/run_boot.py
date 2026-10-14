@@ -105,7 +105,9 @@ def main():
         starts = [first for _, _, first, _ in threads if first != "027f"]
         if others or starts:
             problems.append("threads not at CW 027f: %s" % others)
-        presented = re.search(r"^frames presented: (\d+)", out, re.M)
+        presented = re.search(r"^frames presented: (\d+); application active: (\w+)", out, re.M)
+        if presented and presented.group(2) != "yes":
+            problems.append("the application was not active at the end")
         if not presented or int(presented.group(1)) == 0:
             problems.append("no frame was presented")
         dumped = sorted(frames.glob("frame-*.ppm")) if frames.is_dir() else []
