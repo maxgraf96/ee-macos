@@ -11,8 +11,8 @@
 //     and its registry.json, seeded by tools/boot/seed_user.py. A developer
 //     build would otherwise keep both under build/recomp/.
 //   - TEMPORARY, Phase 4 (audio): the Miles calls the sound plugin makes that
-//     the kit lacks (pending_mss32.cpp) and an inert DirectMusic
-//     (pending_dmusic.cpp). The engine aborts on either missing.
+//     the kit lacks (pending_mss32.cpp); the engine aborts without them.
+//     DirectMusic is the kit's (game.toml [runtime] dmusic).
 //   - TEMPORARY, P3-C (user32): a thread's windows are destroyed when it ends,
 //     as on Windows. The splash thread (EXE 0x5344fb) returns without
 //     DestroyWindow; left alive, its window is the one host_main_window()
@@ -30,8 +30,7 @@
 #include <string>
 #include <vector>
 
-void ee_pending_mss32_register();  // pending_mss32.cpp
-void ee_pending_dmusic_register(); // pending_dmusic.cpp
+void ee_pending_mss32_register(); // pending_mss32.cpp
 
 namespace {
 
@@ -61,7 +60,6 @@ __attribute__((constructor)) void ee_standins_init() {
         setenv("RECOMP_REGISTRY",
                (std::string(getenv("RECOMP_PROFILE_DIR")) + "/registry.json").c_str(), 1);
     ee_pending_mss32_register();
-    ee_pending_dmusic_register();
     sched_set_thread_exit_observer(destroy_thread_windows);
 }
 
