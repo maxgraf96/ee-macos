@@ -46,6 +46,8 @@
 #endif
 
 void crt_pending_register(); // crt_pending.cpp: what the kit's msvcrt lacks yet
+// um_vectors.cpp: ADR-002 criterion 2, the engine's maths against the recording
+int um_run(X86 *c, const LoaderModule &engine, const char *in, const char *out);
 
 namespace {
 
@@ -182,6 +184,7 @@ void run_rmv(X86 *c, LoaderModule &engine, LoaderModule &def, const char *script
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0); // a guest fault ends the process: keep what was said
     const char *bundles = getenv("EE_M1_BUNDLES"), *rmv = nullptr, *imports_file = nullptr;
+    const char *um_in = nullptr, *um_out = nullptr;
     bool check = false;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--bundles") && i + 1 < argc)
@@ -190,10 +193,16 @@ int main(int argc, char **argv) {
             rmv = argv[++i];
         else if (!strcmp(argv[i], "--imports") && i + 1 < argc)
             imports_file = argv[++i];
+        else if (!strcmp(argv[i], "--um") && i + 1 < argc)
+            um_in = argv[++i];
+        else if (!strcmp(argv[i], "--um-out") && i + 1 < argc)
+            um_out = argv[++i];
         else if (!strcmp(argv[i], "--check"))
             check = true;
         else {
-            fprintf(stderr, "usage: %s [--bundles DIR] [--check] [--rmv NAME] [--imports FILE]\n",
+            fprintf(stderr,
+                    "usage: %s [--bundles DIR] [--check] [--rmv NAME] [--imports FILE] "
+                    "[--um VECTORS --um-out RESULTS]\n",
                     argv[0]);
             return 2;
         }
@@ -274,6 +283,11 @@ int main(int argc, char **argv) {
         expect(valid == 1, "PIMIsValid is 1");
         if (rmv)
             run_rmv(c, *mods[1], def, rmv);
+        if (um_in) {
+            int n = um_run(c, *mods[1], um_in, um_out ? um_out : "um-port.jsonl");
+            printf("  um: %d call vectors -> %s\n", n, um_out ? um_out : "um-port.jsonl");
+            expect(n > 0, "the call vectors ran");
+        }
     } else {
         printf("guest process exited with code %u\n", process_exit_code());
         ++g_failures;
