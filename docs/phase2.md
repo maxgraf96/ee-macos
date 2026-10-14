@@ -53,3 +53,13 @@ No game bytes, generated C, captures or Ghidra databases in either repo. The kit
 | G m1-re | **merged** (ee-macos 1401ee9) | [rmg.md](reference/rmg.md): pipeline, context, capture/replay spec, 60-case matrix |
 
 **Mac side complete.** M1 now waits only on legion: 0007 (rebased capture copy) → 0006 (S00 capture + Windows replay) → the 60-case matrix → `tools/m1/run_matrix.py` on the Mac.
+
+## First M1 results (2026-10-15, ~00:40)
+- **Windows** (legion, rebased capture copy + `base_guard.js`): 7/9 calls of each case replay byte-identically against the real DLLs (S00b, A01).
+- **Mac** (translated DLLs, bundles and linked): **14/18 packs pass** for S00b and A01, the same 7 calls per case byte-identical: positions, flat, **height map**, shallows, **resources**, **trees**.
+- **The 2 failing calls per case are capture-tooling issues, not translation errors:**
+  - `SetRandomMapValues` copies uninitialised stack bytes into heap structs: 75 B differ on Windows, 121 B on the Mac. Fix: capture and restore the stack window below ESP.
+  - `CreatePlayerLandWaterMap`'s entry capture misses part of the ctx heap block (76 B). Fix: capture whole blocks at entry.
+
+  Both are in progress (`phase2/m1-fix`).
+- The legion operator is running the 49-case matrix unattended. Groups B and E need setup-screen input and come after.
