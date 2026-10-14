@@ -6,7 +6,22 @@ Labels: **[measured]** = output of the commands here (M4 Max, macOS 15.5); **[st
 
 ---
 
-## 1. How to run
+## 0. Try it: the windowed game
+
+```sh
+cd /Users/max/Code/neoee-macos          # this repository, with the kit at an `ee` that has feat/boot
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt   # once
+.venv/bin/python tools/setup.py --install "original/gog/Empire Earth"   # once: link + export the nine modules' listings
+.venv/bin/python tools/run.py            # seed the registry, translate (first time, ~5 min), build, open the app
+```
+
+`tools/run.py` builds `build/EmpireEarth.app` (the kit's SDL host, `tools/build.py --target app`) and opens it; later runs rebuild only what changed, and `open build/EmpireEarth.app` works too. The registry and everything the game writes live in `~/Library/Application Support/EmpireEarth` (`--user DIR` for another place); `tools/boot/seed_user.py` seeds the registry with legion's options and the CD key from your own GOG install script (it finds the Wineskin build's, or pass `--gog-script`).
+
+In the game: click in the window to capture the mouse (the game draws its own cursor from relative motion); Escape skips the intro movies (~2 minutes otherwise); hold Escape to release the mouse; Command-Q quits through the game's own exit. Display is Metal at the game's 1024×768 menu mode in a 4:3 window. **No audio yet** (Phase 4), and Multiplayer's networking is Phase 5.
+
+Smoke test [measured, 2026-10-15]: the window opens with focus, the three intro movies play on Metal at 640×480, the main menu renders at 1024×768 (frame dumped with `RECOMP_D3D7_DUMP_DIR`), and SIGTERM / Command-Q ends in `ExitProcess(0)`. DirectInput creates the keyboard and mouse and acquires both on activation (headless trace: 6 `Acquire` → DI_OK, 1 → S_FALSE). Clicking through the menus is the player's to try: input could not be driven from here.
+
+## 1. How to run headless
 
 ```sh
 # once: link the installation and export the translation inputs for all nine modules
@@ -32,7 +47,7 @@ build/recomp/ee_boot [--seconds 120] [--trace FILE] [--frames DIR [--frame-every
 - **Focus.** The host reports the application focused for the whole run (`host_app_state(true, false)`), so the kit's user32 activates each window the game shows from inside `ShowWindow`, as Windows does for the foreground application; the report says whether the application is active at the end.
 - Every kit environment variable applies (`RECOMP_LOG=2` traces every import from inside the kit).
 
-The host is `app/ee_main.cpp` over the kit's shared boot (`host/boot.cpp`): mem_init, the loader, the shims, the heartbeat, the watchdog and the fault handler are the kit's. It links the executable's translation and the eight DLLs' (`pop_link_gen`, all `[modules.aux.*]`), `recomp_dx` with no GPU or audio host (presentation reaches `ee_main.cpp`'s `host_display_present_window`), the mod foundation (for the overlay) and `app/pending_*.cpp`.
+The headless host is `app/ee_main.cpp` over the kit's shared boot (`host/boot.cpp`): mem_init, the loader, the shims, the heartbeat, the watchdog and the fault handler are the kit's. It links the executable's translation and the eight DLLs' (`pop_link_gen`, all `[modules.aux.*]`), `recomp_dx` with no GPU or audio host (presentation reaches `ee_main.cpp`'s `host_display_present_window`), the mod foundation (for the overlay) and `app/ee_standins.cpp` with `app/pending_*.cpp`. The windowed app is the kit's `recomp_app` with the same `ee_standins.cpp` linked in (`app/CMakeLists.txt`); its constructor sets the user directory and installs the stand-ins of §5 before the kit registers its own shims.
 
 ---
 
@@ -102,6 +117,7 @@ Still logging-only in those DLLs, by choice: `GetThreadContext` (the executable'
 | `MapViewOfFile` maps the file's pages (`os_vm_map_file`, `os_vm_reset`, `os_vm_page_size`); misaligned offsets are `ERROR_MAPPED_ALIGNMENT` | two 156 MB views of `data.ssa` were copied into the heap and the second did not fit | `loader_tests` |
 | Winsock: WS2_32 shares WSOCK32's `WSAStartup`/`WSACleanup` (versions, counting), `WSAGetLastError`/`WSASetLastError`, byte order, `inet_addr`, a `gethostbyname` without DNS | `TCP Protocol.dll` checks `wVersion == 2.0` and aborts otherwise; the dead Sierra lookup must fail at once (netcode.md §7) | `loader_tests` |
 | `com_register_guest_class`: `CoCreateInstance` serves classes a host builds | an inert DirectMusic without touching the kit's COM model | `dx_tests` |
+| mss32: Miles 6's starting preferences (`DIG_DS_FRAGMENT_SIZE` 8, `_CNT` 96, `DIG_DS_MIX_FRAGMENT_CNT` 8) | the sound plugin divides by the first before it sets any | `dx_tests` |
 | `GetFileTime`, `CompareFileTime`, `GetFileAttributesExA`, `GlobalSize`, `GetWindowsDirectoryA`, `GetTempPathA`/`GetTempFileNameA` (Temp under the guest root), `GetShortPathNameA`, `WaitForSingleObjectEx`, `lstrcpynA`, `RegDeleteKeyA`/`RegDeleteValueA`, no WINMM aux devices | the rest of what the executable and the engine import from kernel32/advapi32/winmm [static, `db/win32-imports.json`]; not reached by the boot, reached by the menus and the game | `loader_tests` |
 
 ---
@@ -119,9 +135,11 @@ Called at boot with nothing behind them: only `WS2_32!socket` and `WS2_32!closes
 - **Merged and in use** (`ee` d4bac5b, `[runtime] relative_mouse` and `system_fonts`): per-thread message queues and `PostThreadMessageA`, module-aware `LoadStringA`/`LoadBitmapA` (over `resource_find_in`, §4), ANSI GDI text with the installed Tahoma, Arial, Times New Roman and Courier New, the refused `WH_CALLWNDPROC` hook, and activation from `host_app_state`. `pending_win32.cpp`, which stood in for all of these, is gone; what it showed the game needs is in the triage log (§6, steps 3–4, 11–13).
 - **Still a stand-in (`ee_main.cpp`, `destroy_thread_windows`): a thread's windows are destroyed when it ends.** The splash thread (EXE 0x5344fb) leaves its loop on `WM_QUIT` and returns without `DestroyWindow`; Windows destroys the window at thread exit. Without that, the splash stays the window `host_main_window()` names: the boot activates it and the deadline's `WM_CLOSE` goes to it, and the game never exits [measured]. The stand-in runs on the kit's thread-exit observer (`sched_set_thread_exit_observer`) and calls `DestroyWindow` for the thread's top-level windows on that thread.
 - `GetProcAddress(user32, "GetMonitorInfoA")` → 0 (DX7HRDisplay's multi-monitor path; it copes). With the null DirectDraw (before P3-B merged) the splash screen's `BitBlt` was refused; not seen since.
+- DirectInput at boot [measured]: one `SetCooperativeLevel` answers `DIERR_ACQUIRED` (legion's capture has every one succeed) and one `GetObjectInfo` fails with 0x80070002.
+- The windowed host logs `guest pointer unavailable: reason=vtable-mismatch … object=0x00f00234`: game.toml's `[hooks]` mouse sentinels (Populous-shaped, kept outside every module) name no object, and the host falls back to window position differences, as it says.
 
 ### Phase 4 (audio)
-- **`pending_mss32.cpp`**: the Miles calls the sound plugin makes that the kit lacks — `AIL_open_digital_driver` (over the kit's `AIL_waveOutOpen`), `close_digital_driver`, `set_redist_directory`, `last_error`, `get_DirectSound_info` (a kit `IDirectSound`; the mixer asks its caps for the voice count), `mem_alloc_lock`, `file_size`, the sample position and rate calls, and **`AIL_get_preference` with Miles 6 defaults** (`DIG_DS_FRAGMENT_SIZE` 8 ms, `_CNT` 96, `DIG_DS_MIX_FRAGMENT_CNT` 8): the kit's table starts at 0 and the mixer divides by it (Miles Sound System Mixer.dll+0x194f, a strict-mode divide error).
+- **`pending_mss32.cpp`**: the Miles calls the sound plugin makes that the kit lacks — `AIL_open_digital_driver` (over the kit's `AIL_waveOutOpen`), `close_digital_driver`, `set_redist_directory`, `last_error`, `get_DirectSound_info` (a kit `IDirectSound`; the mixer asks its caps for the voice count), `mem_alloc_lock`, `file_size`, and the sample position and rate calls. The preferences the mixer reads back (`DIG_DS_FRAGMENT_SIZE` 8 ms, `_CNT` 96, `DIG_DS_MIX_FRAGMENT_CNT` 8, Miles 6's defaults) are now the kit's (`feat/boot`); with 0 the mixer divided by zero (Miles Sound System Mixer.dll+0x194f, a strict-mode divide error).
 - **`pending_dmusic.cpp`: an inert DirectMusic.** "Unavailable" is not a path the game has: `SEConductor::InitializeConductor` (engine+0x582e6) checks every HRESULT with a release-build VERIFY that prints `%s (%d) : Verification failure (%s)` and calls `abort()` (engine+0x1c43e) [measured]. The stand-in serves the loader, composer and performance through `com_register_guest_class`, with one default port (output class, DLS) and `IKsControl` on it; every call succeeds and nothing plays. audio.md §2 is the contract Phase 4 implements.
 
 ### Phase 5 (network)
@@ -148,6 +166,7 @@ Each step is one blocker, in the order the boot met them [measured].
 13. ANSI GDI text and hooks: stand-ins. Boot clean but for the Phase 5 sockets.
 14. P3-B's DirectDraw 7 merged: `[runtime] ddraw7 = true`, the null stand-in removed, the software renderer headless. Same milestones; the main menu renders.
 15. P3-C's user32/gdi32/dinput/imm32 merged: `pending_win32.cpp` removed. The splash window then outlived its thread and took the activation and the deadline's `WM_CLOSE` (a forced unwind, then a fault in the simulation thread during teardown); a thread's windows are destroyed at its end (stand-in), the host reports focus, and the boot is clean again with the UI in Tahoma.
+16. The windowed app: the kit's `recomp_app` with `ee_standins.cpp` (constructor-installed), Metal Direct3D 7, SDL input; Miles' preference defaults moved into the kit. Movies and the main menu render; quitting exits cleanly.
 
 ---
 

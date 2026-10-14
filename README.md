@@ -24,6 +24,14 @@ This project ports *Empire Earth* (2001; the GOG *Empire Earth Gold* base game) 
 | `windows/` | scripts for the Windows reference machine |
 | `original/` | (ignored) the player's game files |
 
+## Try it
+```sh
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt   # once
+.venv/bin/python tools/setup.py --install "/path/to/Empire Earth"   # once: link your GOG copy, export the listings
+.venv/bin/python tools/run.py      # seed the registry, translate (first time), build and open build/EmpireEarth.app
+```
+Boots to the main menu (Metal, mouse and keyboard; no audio yet). Details, the headless boot and what is still a stand-in: [`docs/reference/boot.md`](docs/reference/boot.md).
+
 ## Build
 Setup, build, tests, the freestanding/`ld64.lld` bundle build and the DLL base map: [`docs/reference/build.md`](docs/reference/build.md).
 
