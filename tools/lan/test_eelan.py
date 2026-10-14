@@ -114,8 +114,22 @@ def build():
     frames.append((t + 3, ether(ipv4_tcp(host, cli, 33335, 50100, 1000, 0x02, b"")), None))
     frames.append((t + 3.1, ether(ipv4_tcp(host, cli, 33335, 50100, 1001, 0x18, xfer[:600])), None))
     frames.append((t + 3.2, ether(ipv4_tcp(host, cli, 33335, 50100, 1601, 0x18, xfer[600:])), None))
-    lobby = b"\x01\x02WONLanGame Max game\x00\x00"
-    frames.append((t + 4, ether(ipv4_udp(cli, "255.255.255.255", 33336, 8585, lobby, 50)), None))
+    def u16s(txt):
+        return struct.pack("<H", len(txt)) + txt.encode("utf-16-le")
+    advert = b"\x01" + struct.pack("<HH", 33336, 0x8B49) + b"\x00" + u16s("Max game") \
+        + struct.pack("<HHHH", 0, 2, 8, 14) + b"\x00"
+    frames.append((t + 4, ether(ipv4_udp(host, "255.255.255.255", 8585, 8585, advert, 50)), None))
+    frames.append((t + 4, ether(ipv4_udp(cli, "255.255.255.255", 8585, 8585, b"\x04", 52)), None))
+
+    def rec(body):
+        return struct.pack("<H", len(body) + 2) + body
+    room = rec(b"\x02" + struct.pack("<HHHH", 0, 1, 2, 2) + struct.pack("<H", 1) + u16s("Host")
+               + struct.pack("<H", 2) + u16s("Max"))
+    room += rec(b"\x08\x05" + struct.pack("<HB", 2, 1))
+    room += rec(b"\x06" + struct.pack("<HH", 0, 1) + u16s("hi") + b"\0\0")
+    start = rec(b"\x08\x07")
+    frames.append((t + 4.2, ether(ipv4_tcp(host, cli, 33336, 50200, 5000, 0x18, room[:7])), None))
+    frames.append((t + 4.3, ether(ipv4_tcp(host, cli, 33336, 50200, 5007, 0x18, room[7:] + start)), None))
     clear = bytes([0, 0x3A, 0xFF, 0xFE])  # key index 0 = clear text (NEMServerIsAlive)
     frames.append((t + 4.1, ether(ipv4_udp(host, cli, 33334, 50010, clear, 51)), None))
     nul = [(t, ipv4_udp(cli, host, 50010, 33334, enc(req, 77), 40))]
@@ -137,8 +151,16 @@ def main():
         assert xf and xf[0]["msg"]["file_name"] == "scenario.scn", xf
         ct41 = [e for e in evs if e["msg"].get("ct") == 41 and e["msg"]["type"] == 0x26][0]
         assert ct41["msg"]["inputs"][0]["name"] == "EEMSelectUnit", ct41
-        lob = [e for e in evs if e["msg"]["name"] == "LobbyDatagram"]
-        assert lob and "WONLanGame Max game" in lob[0]["msg"]["strings"], lob
+        adv = [e["msg"] for e in evs if e["msg"]["name"] == "LanGameAdvert"]
+        assert adv and adv[0]["game"] == "Max game" and adv[0]["players"] == 2, adv
+        assert "LanQuery" in names, names
+        roster = [e["msg"] for e in evs if e["msg"]["name"] == "LobbyRoster"]
+        assert [m_["name"] for m_ in roster[0]["members"]] == ["Host", "Max"], roster
+        rdy = [e["msg"] for e in evs if e["msg"]["name"] == "LobbyGameData.ReadyState"]
+        assert rdy and rdy[0]["client_id"] == 2 and rdy[0]["ready"] == 1, rdy
+        chat = [e["msg"] for e in evs if e["msg"]["name"] == "LobbyChatRelay"]
+        assert chat and chat[0]["text"] == "hi" and chat[0]["sender_id"] == 1, chat
+        assert "LobbyGameData.StartGame" in names, names
         assert "NEMServerIsAlive" in names, names
         evs2 = [e for e in eelan.iter_events([p2]) if e["proto"] != "stats"]
         assert evs2[0]["msg"]["player_name"] == "Max", evs2

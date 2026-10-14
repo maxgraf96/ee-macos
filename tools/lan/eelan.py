@@ -13,8 +13,9 @@ per-packet comments and duplicate sightings, which are de-duplicated), macOS tcp
 en*/feth*/utun*/lo0 (Ethernet, NULL/LOOP and raw-IP link types), or Wireshark.
 
 What is decoded (see docs/reference/netcode.md for the protocol description):
-  * UDP 8585 / 33336: the EXE's WON LAN lobby (WONLobby.cfg LanBroadcastPort / LobbyPort);
-    reported raw (hex + printable strings) because its format is not decoded yet.
+  * UDP 8585: the EXE's WON LAN lobby game list (LanQuery / LanGameAdvert / KeepAlive /
+    Closed), and TCP 33336: the lobby room on the host (join, roster, chat, version check,
+    slot/ready state, StartGame). Record framing is decoded; some payloads stay hex.
   * UDP 33334: all game traffic, plus the plugin's legacy discovery (search 0x15 /
     advertisement 0x16), which the normal lobby flow does not use. Every
     datagram is one NE message. Byte 0 is a per-packet key index k; bytes 1.. are RC4
@@ -418,9 +419,102 @@ def _printable_runs(b, minlen=4):
 
 
 def decode_lobby(payload):
-    """EXE WONAPI LAN lobby traffic (8585/33336): format not decoded yet; keep it raw."""
+    """Unknown EXE WONAPI lobby traffic: keep it raw."""
     return {"name": "LobbyDatagram", "len": len(payload), "hex": bytes(payload[:256]).hex(),
             "strings": _printable_runs(payload)[:16]}
+
+
+def _u16s(b, o):
+    """u16 character count n, then n UTF-16LE characters. Returns (str, new offset)."""
+    n = _u16(b, o)
+    if o + 2 + 2 * n > len(b):
+        raise DecodeError("short UTF-16 string at %d" % o)
+    return bytes(b[o + 2:o + 2 + 2 * n]).decode("utf-16-le", errors="replace"), o + 2 + 2 * n
+
+
+# WON LAN lobby, UDP 8585 (LanBroadcastPort): field names are from the session-2 captures.
+LAN_UDP = {1: "LanGameAdvert", 2: "LanGameKeepAlive", 3: "LanGameClosed", 4: "LanQuery"}
+
+
+def decode_lan_udp(b):
+    b = bytes(b)
+    if not b:
+        return decode_lobby(b)
+    t = b[0]
+    m = {"name": LAN_UDP.get(t, "LanUdp_0x%02x" % t), "lan_type": t, "len": len(b)}
+    try:
+        if t in (1, 2, 3):
+            m["lobby_port"] = _u16(b, 1)
+        if t == 1:
+            m["magic"] = "%04x" % _u16(b, 3)
+            m["in_progress"] = _u8(b, 5)
+            m["game"], o = _u16s(b, 6)
+            o += 2  # NUL
+            m["players"] = _u16(b, o)
+            m["max_players"] = _u16(b, o + 2)
+            m["unknown_u16"] = _u16(b, o + 4)
+            m["tail_hex"] = b[o + 6:].hex()
+        elif t not in (2, 3, 4):
+            m["hex"] = b.hex()
+    except DecodeError as e:
+        m["error"] = str(e)
+        m["hex"] = b.hex()
+    return m
+
+
+# WON LAN lobby room, TCP 33336 (LobbyPort): records [u16 len incl. itself][u8 type][body].
+LAN_TCP = {1: "LobbyJoin", 2: "LobbyRoster", 5: "LobbyChat", 6: "LobbyChatRelay",
+           7: "LobbyLeave", 8: "LobbyGameData"}
+LAN_GAME = {0x01: "VersionCheck", 0x02: "GameSetup", 0x03: "SlotAssign", 0x04: "SetReady",
+            0x05: "ReadyState", 0x07: "StartGame", 0x65: "SlotAttr", 0x66: "SetSlotAttr",
+            0x68: "LaunchAck", 0x69: "LaunchAckReply"}
+
+
+def decode_lan_tcp_record(r):
+    r = bytes(r)
+    t = r[2]
+    m = {"name": LAN_TCP.get(t, "LobbyRec_0x%02x" % t), "lan_type": t, "len": len(r)}
+    try:
+        if t == 1:
+            m["player_name"], _ = _u16s(r, 3)
+        elif t == 2:
+            m["status"], m["host_id"], m["your_id"] = _u16(r, 3), _u16(r, 5), _u16(r, 7)
+            n, o, members = _u16(r, 9), 11, []
+            for _ in range(n):
+                cid = _u16(r, o)
+                name, o = _u16s(r, o + 2)
+                members.append({"id": cid, "name": name})
+            m["members"] = members
+        elif t == 5:
+            m["flags"] = _u16(r, 3)
+            m["text"], _ = _u16s(r, 5)
+        elif t == 6:
+            m["flags"], m["sender_id"] = _u16(r, 3), _u16(r, 5)
+            m["text"], _ = _u16s(r, 7)
+        elif t == 8:
+            sub = _u8(r, 3)
+            m["sub"] = sub
+            m["name"] = "LobbyGameData." + LAN_GAME.get(sub, "0x%02x" % sub)
+            if sub == 0x01:
+                m["target"] = "%04x" % _u16(r, 4)
+                m["version"], o = _u16s(r, 6)
+                m["data_checksum"] = _u32(r, o)
+            elif sub == 0x04:
+                m["ready"] = _u8(r, 4)
+            elif sub == 0x05:
+                m["client_id"], m["ready"] = _u16(r, 4), _u8(r, 6)
+            elif sub == 0x65:
+                m["slot"], m["attr"], m["value"] = _u8(r, 4), _u8(r, 5), _u8(r, 6)
+            elif sub == 0x66:
+                m["attr"], m["value"] = _u8(r, 4), _u8(r, 5)
+            else:
+                m["body_hex"] = r[4:].hex()
+        elif t != 7:
+            m["body_hex"] = r[3:].hex()
+    except DecodeError as e:
+        m["error"] = str(e)
+        m["body_hex"] = r[3:].hex()
+    return m
 
 
 def decode_datagram(payload):
@@ -718,6 +812,8 @@ def iter_events(paths, dedup_window=0.050):
                            src="%s:%d" % (src, sp), dst="%s:%d" % (dst, dp), size=len(payload))
                 if UDP_GAME_PORT in (sp, dp):
                     ev["msg"] = decode_datagram(payload)
+                elif LAN_BCAST_PORT in (sp, dp):
+                    ev["msg"] = decode_lan_udp(payload)
                 elif sp in LOBBY_PORTS or dp in LOBBY_PORTS:
                     ev["msg"] = decode_lobby(payload)
                 else:
@@ -745,9 +841,18 @@ def iter_events(paths, dedup_window=0.050):
                 if flags & 0x04:
                     yield Event(base, msg={"name": "tcp_rst", "len": 0})
                 if len(st.buf) > before and (sp in LOBBY_PORTS or dp in LOBBY_PORTS):
-                    yield Event(base, size=len(st.buf) - before,
-                                msg=dict(decode_lobby(bytes(st.buf[before:])), name="LobbyTCP"))
-                    st.buf.clear()
+                    while len(st.buf) >= 2:
+                        n = st.buf[0] | st.buf[1] << 8
+                        if n < 3 or n > 0x4000:
+                            yield Event(base, size=len(st.buf), msg=dict(
+                                decode_lobby(bytes(st.buf)), name="LobbyTCP"))
+                            st.buf.clear()
+                            break
+                        if len(st.buf) < n:
+                            break
+                        rec = bytes(st.buf[:n])
+                        del st.buf[:n]
+                        yield Event(base, size=n, msg=decode_lan_tcp_record(rec))
                 elif len(st.buf) > before:
                     # TCP game messages are not encrypted; xfer records are fixed size
                     while len(st.buf) >= 4:
@@ -817,6 +922,7 @@ def cmd_summary(args):
     adverts = {}
     versions = set()
     lobby = collections.Counter()
+    lan_games = {}
     for ev in iter_events(args.captures):
         if ev["proto"] == "stats":
             print("%s: %s" % (ev["file"], json.dumps(ev["msg"])))
@@ -838,8 +944,10 @@ def cmd_summary(args):
             searches.append((ev["ts"], ev["src"]))
         if m.get("name") == "DiscoveryAdvert":
             adverts[(ev["src"].split(":")[0], m.get("game"))] = m.get("service")
-        if m.get("name") in ("LobbyDatagram", "LobbyTCP"):
+        if "lan_type" in m or m.get("name") in ("LobbyDatagram", "LobbyTCP"):
             lobby[(ev["proto"], ev["src"], ev["dst"])] += 1
+        if m.get("name") == "LanGameAdvert":
+            lan_games[(ev["src"].split(":")[0], m.get("game"))] = m
         if m.get("type") == 0x22:
             versions.add((m.get("version"), m.get("data_checksum"), m.get("player_name")))
     if first is None:
@@ -867,7 +975,11 @@ def cmd_summary(args):
             print("\nsearch from %s: %d packets, median interval %.3f s" % (
                 s, len(tl), sorted(gaps)[len(gaps) // 2] if gaps else 0))
     if lobby:
-        print("\nWON LAN lobby traffic (8585/33336, not decoded):")
+        for (ip, game), adv in lan_games.items():
+            print("LAN lobby game: %s %r port=%s players=%s/%s in_progress=%s" % (
+                ip, game, adv.get("lobby_port"), adv.get("players"), adv.get("max_players"),
+                adv.get("in_progress")))
+        print("\nWON LAN lobby flows (UDP 8585 adverts, TCP 33336 rooms):")
         for (proto, s_, d_), v in lobby.most_common(20):
             print("  %6d  %s %s -> %s" % (v, proto, s_, d_))
     for (ip, game), svc in adverts.items():
@@ -943,7 +1055,8 @@ def cmd_export(args):
             elif m.get("name") in ("DiscoverySearch", "DiscoveryAdvert"):
                 dc.writerow([ev["file"], "%.6f" % ev["ts"], ev["src"], ev["dst"], m["name"],
                              m.get("key"), m.get("service"), m.get("game", "")])
-            if t in session_types or (t == 0x26 and m.get("dump_the_world")):
+            if t in session_types or (t == 0x26 and m.get("dump_the_world")) or \
+                    ("lan_type" in m and m.get("name") not in ("LanGameKeepAlive",)):
                 se.writerow([ev["file"], "%.6f" % ev["ts"], ev["src"], ev["dst"], carrier or "",
                              m.get("name"), _brief(m)])
     out = []

@@ -1,438 +1,452 @@
 # Empire Earth LAN netcode (GOG 2.00 base game)
 
-Status: Phase 1 reference, 2026-10-14. Owner: netcode agent. Tooling: [`tools/lan/`](../../tools/lan/README.md).
+Status: Phase 1 reference, 2026-10-14. Revised against real LAN captures (session 2). Owner: netcode agent. Tooling: [`tools/lan/`](../../tools/lan/README.md).
 
 ## Sources and labels
 
-- **Sources.** Static analysis of the canonical GOG modules (PLAN §2.4):
-  - `TCP Protocol.dll`: a Ghidra 12.1.4 project under `analysis/netcode/`, plus all 148 functions read.
-  - `Low-Level Engine.dll` and `Empire Earth.exe`: the Phase 0 spike exports.
-- **Labels.**
-  - **[static]** is read from code.
-  - **[emulated]** means the original x86 routine was executed under Unicorn and compared with our reimplementation.
-  - **[measured]** is from `legion` ([legion.md](legion.md)).
-  - **[inferred]** is a reasoned guess that needs a capture.
+- **Sources:**
+  - Static analysis of the canonical GOG modules (PLAN §2.4):
+    - `TCP Protocol.dll`: a Ghidra 12.1.4 project under `analysis/netcode/`, with all 148 functions read.
+    - `Low-Level Engine.dll` and `Empire Earth.exe`: the Phase 0 spike exports.
+  - A Wine `+winsock` trace of the Multiplayer screen.
+  - **Session-2 LAN captures** (`analysis/lan-captures/session2/`):
+    - `legion` (Windows 11, 192.168.1.132) and `EE-VM` (a bridged VM on legion, 192.168.1.192): pktmon pcapng on both.
+    - Frida `netcode_hooks` on the VM host.
+    - One complete 2-player random-map game (VM hosts, legion joins; 896 CTs, ~5 min of play), plus three games hosted by legion that crashed at start (§3.4).
+- **Labels:**
+  - **[static]** = read from code.
+  - **[emulated]** = original x86 run under Unicorn and compared with our reimplementation.
+  - **[captured]** = seen in the session-2 captures.
+  - **[measured]** = legion or Wine runtime trace.
+  - **[inferred]** = a reasoned guess.
 - **Addresses** are `module+RVA`. The EXE is fixed at `0x400000`, so EXE VA = RVA + `0x400000`. The DLLs prefer `0x10000000`.
-- **Captures.** No LAN captures had reached `analysis/lan-captures/` when this was written. §10 says how to run the decoder on them, and lists what they must confirm.
 
 ## 1. Summary
 
-- **Two network layers, four ports** (corrected 2026-10-14 after a Wine `+winsock` trace and community-re input):
-  - **LAN lobby: the EXE's WON `LanLogic`, over `wsock32`.** It handles the lobby, the LAN game list, chat and "Host Game".
-    - Ports come from `WONLobby.cfg`, which GOG ships: **LanBroadcastPort 8585** (UDP), **LobbyPort 33336** (UDP) and **EEFileTransferPort 33335**. The EXE defaults are 8585, 8888 and 8889 (EXE+`0x343350`, `+0x27b77b`) [static].
-    - Opening *Multiplayer* binds a broadcast-enabled, non-blocking **UDP socket on 0.0.0.0:33336**, which lobby threads poll every ~20 ms [measured, Wine].
-    - Its wire format is not decoded yet (§3.0).
-  - **Game session: `TCP Protocol.dll` over `ws2_32`.** It is entered at the lobby→game hand-off.
-    - **UDP 33334** carries all game traffic.
-    - **TCP 33335** carries in-game file transfer. The lobby uses the same port number for its own file transfer.
-    - There is no transport-level framing, sequencing or ack: **one datagram = one engine message**.
-- **Obfuscation.** Every UDP datagram is **RC4-obfuscated**.
-  - Byte 0 is a random key index `k` (1..254). `k = 0` means clear text: receivers skip decryption, but senders never pick 0.
-  - Bytes 1..n−1 are RC4-encrypted with the 7-byte key `T[k−1 .. k+5]`.
-  - `T` is a fixed 261-byte table that `TCP Protocol.dll` generates at start-up from an LCG.
-  - [static + emulated: our table and RC4 match the DLL's own code bit for bit]
-- **Discovery.**
-  - **Normal flow.** LAN games are found by the **WON lobby (8585/33336)**. At the hand-off the client connects **directly** to the host IP the lobby supplied, on UDP 33334. This is the same code path as Join By IP (EXE+`0x27e310`), with no plugin search [static].
-  - **The plugin also has its own `"EEService"` discovery:** a broadcast to 255.255.255.255:33334 every ≈1.05 s, answered by unicast to `searcher-IP:33334`.
-    - Only the legacy UI actions reach it: `EEUIEMSOpenMultiplayerScreen`, `EEUIEMSJoinGame`, `EEAFindGames` and `EEAJoinOrHostAGame`.
-    - The Multiplayer button did **not** start it in the Wine trace [measured].
-    - It is probably reachable only through those paths and perhaps `-hostgame` / `-joinbyip` [inferred]. §3.1–3.2 describe it.
-- **Lockstep.** The host sends a **communications tick (CT)** on a timer.
-  - Each CT carries the inputs of all players and the number of **physics ticks (PTs)** to run.
-  - Clients answer every CT with a CT response that carries their own inputs.
-- **OOS check.** From CT 40 on, every multiplayer CT asks for a world checksum.
-  - Every machine computes an additive 32-bit **world checksum** (EXE+`0x145ebf`; this is *not* `ESChecksum`).
-  - Clients send it to the host (`NEMWorldDatabaseChecksumResponse`, type `0x32`).
-  - The host tallies the values and decides by majority. On a mismatch, all machines dump an OOS log on the next CT, and the losers are removed with `NEMRemovePlayer(isOOS=1)`.
-- **Version gate.** The connection request carries a **32-bit byte-sum** of:
-  - `Low-Level Engine.dll`, `sxlrt233.dll` and `TCP Protocol.dll`;
-  - `Data\Db\*.dat`, `Data\Unit AI Scripts\*.tai` and `Data\Models\*.cem`;
-  - the archives' `Timestamp` tags.
+- **Two layers, four ports** [captured]:
 
-  **The Mac port must therefore keep those original files byte-identical in the game folder**, even though it never executes the DLLs (§8).
-- **"Network Adapter" is cosmetic.** All sockets bind `INADDR_ANY`. The adapter index only picks which local IP is *displayed* (§3.4).
-- **"Debug OOS Handling" has no reader** outside option load/save/copy and an options checkbox [static] (§6.4).
+| Port | Proto | Owner | Use |
+|---|---|---|---|
+| **8585** | UDP broadcast | EXE WONAPI `LanLogic` (wsock32) | LAN game list: query / advert / keep-alive / closed. Every lobby binds 8585 and sends from it |
+| **33336** | **TCP** | EXE `LanLogic` | Lobby room on the host: join, roster, chat, version check, slots / ready, **StartGame** |
+| **33334** | UDP | `TCP Protocol.dll` (ws2_32) | Every in-game message (NE / EEM), RC4-obfuscated. The host also sends one `EEService` search here before publishing |
+| **33335** | TCP | `TCP Protocol.dll` (and the lobby's `EEFileTransferPort`) | In-game file transfer. The client connects at game start; no data was sent in a random-map game |
+
+  - Ports come from GOG's `WONLobby.cfg`: `LanBroadcastPort 8585`, `LobbyPort 33336`, `EEFileTransferPort 33335`. The EXE defaults are 8585, 8888 and 8889 (EXE+`0x343350`, `+0x27b77b`).
+  - The Wine trace also showed a UDP socket bound to 33336. No UDP 33336 packet appeared in the captures.
+- **Obfuscation** [static + emulated + captured]:
+  - Every 33334 datagram is `[k][RC4(T[k−1..k+5]) of the rest]`. `T` is a fixed 261-byte table derived from an LCG; `k` is 1..254, and `k = 0` would mean clear text.
+  - All 2,687 game datagrams in both captures, and every nested message, decode with no size mismatch.
+- **Normal flow** [captured]:
+  1. The 8585 game list leads to a TCP 33336 lobby room.
+  2. The host sends `StartGame` over 33336.
+  3. The client sends `0x22` to `host:33334`, 8 ms later, and opens TCP 33335.
+  4. CTs follow on UDP 33334.
+  - The plugin's own discovery appears only as the host's single 1-s duplicate-name search; nobody answers it.
+- **Lockstep** [captured]:
+  - One CT every **350 ms**, constant for the whole game: median 350.0 ms, p5–p95 349–351 ms.
+  - The CT carries **15 PTs** at a PT/s field of **44**.
+  - CTs 0–11 are lobby/load ticks (PTs `0xff`, PT/s 120).
+- **OOS check** [captured + Frida]:
+  - From **CT 40**, every CT with PTs > 0 asks for a world checksum (CT 40–857, except one forced CT).
+  - The client's `0x32` response carries **tick = CT** and arrives 0–42 ms later.
+  - The host's own world checksum (EXE+`0x145ebf`, Frida) equals the client's wire value for **817/817 ticks**.
+- **Version gate** [captured]:
+  - Both peers sent data checksum `0x0e998b9e` and version string `v2.00.2974`; 2974 = checksum & 0x1fff.
+  - The lobby checks the same pair *before* start (TCP 33336 `VersionCheck`), and the 33334 connection request repeats it.
+- **Network Adapter** (corrected):
+  - It is **not** cosmetic. The lobby's adapter choice sets which interface the 8585 broadcasts leave from.
+  - It also becomes the plugin's adapter index, and **any index ≥ 2 crashes `TCP Protocol.dll`**: it frees an interior heap pointer (§3.4).
+- **"Debug OOS Handling"** has no reader outside option load/save/copy and an options checkbox [static] (§6.4).
 
 ## 2. Architecture
 
 ```
-EXE (game: lobby UI, EEM* game messages, sim)            EXE+0xb18a8 registers EEM types 0x41..0xfd
-  │  NESynchronousServer / NESynchronousClient (subclassed in the EXE)
+EXE WONAPI WONLobby (LanLogic, EELobby*; sockets EXE 0x6aa000-0x6b2000; wsock32, WSAStartup 1.1)
+     UDP 8585 game list, TCP 33336 lobby room
+     hand-off: host EXE+0x27d797 -> EEServer("TestGame", adapterIdx, private=0, advertise=0)
+               client EXE+0x27e310 -> EEClient, Connect(hostIP, "EEService", game)
+EXE game (EEM* messages, sim)                          EXE+0xb18a8 registers EEM types 0x41..0xfd
+  |  EEServer / EEClient = NESynchronousServer / Client subclasses (EXE+0xc2536 / +0xafdbb)
 Low-Level Engine.dll  "Network Engine"
-  │  NEMessage (+29 NEM* engine messages, types 0x20..0x3c), NEMPlayerInput (input lists)
-  │  NESynchronousServer: threads Main / Send / Xfer      NESynchronousClient: Main / Receive
-  │  NEProtocol: GetProcAddress of 30 NPIM* entry points (engine+0x509af)
-TCP Protocol.dll  ("TCP/IP Protocol", "WinSock 2.0"; plugin type NPIM)
+  |  NEMessage (+29 NEM* types 0x20..0x3c), NEMPlayerInput (input lists)
+  |  NESynchronousServer: threads Main / Send / Xfer     NESynchronousClient: Main / Receive
+  |  NEProtocol: GetProcAddress of 30 NPIM* entry points (engine+0x509af)
+TCP Protocol.dll  ("TCP/IP Protocol", "WinSock 2.0"; plugin type 'ntwk')
      ws2_32 (24 imports), iphlpapi!GetAdaptersInfo, kernel32 WaitForSingleObject/Sleep
-
-EXE WONAPI (WONLobby: LanLogic, EELobby*, routing/lobby UI; EXE 0x6aa000-0x6b2000 sockets)
-     wsock32 (28 imports, WSAStartup 1.1), UDP 33336 (+ 8585, 33335) for the LAN lobby;
-     hands off to EEServer/EEClient (EXE+0xc2536 / +0xafdbb) -> the NE layer above
 ```
 
 - **Threads** [static; legion measured three network threads, single player included]:
   - **Server:**
-    - `NESynchronousServer::Main` (engine+`0x5581d`) waits on 11 events: socket FD_READ, xfer FD_ACCEPT, start/stop/pause/unpause and others. It runs the SendToAllAndWait retries.
-    - `::Send` (engine+`0x55d2e`) emits CTs on a timer.
-    - `::Xfer` (engine+`0x55f09`) handles file transfer.
+    - `Main` (engine+`0x5581d`): waits on 11 events, receives, runs SendToAllAndWait retries.
+    - `Send` (`+0x55d2e`): CTs on a timer.
+    - `Xfer` (`+0x55f09`).
   - **Client:**
-    - `NESynchronousClient::Main` (engine+`0x526f0`) does connect retries and the message hand-off.
-    - `::Receive` (engine+`0x52d3f`) drains the socket and runs the 75 s server-silence timeout.
-  - **Searcher thread:** `TCP Protocol.dll+0x32c4` runs only on the legacy plugin-discovery path (§3.0).
-  - Every thread starts by calling `UMSetFloatingPointPrecision(0x10000)` (PC=53) and resets RC to nearest each loop.
-- **Single player** also creates a local `NESynchronousServer`:
-  - It is named `"EEName"`, so it is not advertised.
-  - It opens UDP 33334 and TCP 33335, which is why Windows raises the firewall prompt on the first random map [measured, legion §5.6].
-- **Message object.**
-  - Fields: `+8` type, `+9` for-slot, `+0xa` originating slot, `+0xb` byte 0.
-  - `ExportHeader` writes `[byte0][type][forSlot][origSlot]`. Byte 0 is 0 and is **overwritten with the RC4 key index** by the protocol (engine+`0x4d025`).
-  - The receiver dispatches on byte 1 through `NEMessage::sConstructors[256]` (engine+`0x4cfee`).
-- **Engine message factory:** engine+`0x4d0cf`. **EXE factory:** EXE+`0xb1b31`.
-- **Strings on the wire:**
-  - `UWideString` is MBCS, not UTF-16. Format: `u32 n = strlen+2`, then the bytes, then two NULs (engine+`0x80eff`).
-  - Discovery fields are fixed-size C strings. Bytes after the NUL are uninitialised stack and should be ignored.
+    - `Main` (`+0x526f0`): connect retries, message hand-off.
+    - `Receive` (`+0x52d3f`): drains the socket; 75 s server-silence timeout.
+  - **Plugin searcher thread** `TCP Protocol.dll+0x32c4`: legacy path only (§3.5).
+  - All threads set PC=53 (`UMSetFloatingPointPrecision(0x10000)`) and RC = nearest.
+- **Single player** creates a private local server named `"EEName"`, which opens UDP 33334 and TCP 33335. That is why the firewall prompts on the first random map [measured].
+- **Message header:** `[byte0][type][forSlot][origSlot]`.
+  - Byte 0 is overwritten with the RC4 key index (engine+`0x4d025`).
+  - Receivers dispatch on byte 1 through `NEMessage::sConstructors[256]`.
+- **Factories:** engine+`0x4d0cf` (NE) and EXE+`0xb1b31` (EEM).
+- **Strings:**
+  - NE/EEM `UWideString` = `u32 n (=strlen+2)` + MBCS bytes + 2 NULs.
+  - The lobby (8585/33336) uses UTF-16LE with a u16 character count.
 
 ## 3. Discovery and session setup
 
-### 3.0 Who does what (reconciled)
+### 3.1 LAN game list: UDP 8585 [captured; field names inferred from captures]
+Every lobby binds UDP 8585 and broadcasts from it to `255.255.255.255:8585`. One reply was unicast to `requester:8585`. Byte 0 is the type:
 
-| Phase | Code | Ports | Evidence |
+| Type | Name | Body | When |
 |---|---|---|---|
-| Plugin activation at engine start | `NPIMActivate`: `WSAStartup(2.0)`, then a probe TCP socket that is closed again | — | [measured, Wine: one `WSAStartup 0x2` and `socket(2,1,0)`/`closesocket` at start-up] |
-| Multiplayer screen / LAN lobby, game list, chat, host | EXE WONAPI `LanLogic` over **wsock32** | UDP **33336** bound (`SO_BROADCAST`, `FIONBIO`) and polled every ~20 ms; **8585** = `LanBroadcastPort` | [measured: bind 0.0.0.0:33336 by the EXE after `WSAStartup 0x101`; no 8585 socket and no `sendto` were seen in ~100 s at that screen]. 8585's exact role (broadcast destination vs listen port) is [inferred] from the config name, the "LAN Broadcast" port dialog (`LanPortDialog`, `ChangeLANBroadcast`) and community-re |
-| Dead online lobby | WONAPI resolves `empireearth.m1.sierra.com` (`DirServer` in `WONLobby.cfg`) | — | [measured: `gethostbyname` failed at once in Wine]. The HLE must fail fast and never block on DNS |
-| Lobby→game hand-off, client | EXE+`0x27e310` creates `EEClient`, then `Connect(hostIP from lobby, "EEService", game)` **without** `SearchForGame` | UDP 33334 direct | [static] |
-| Lobby→game hand-off, host | `EEServer` (EXE+`0xc2536`) → `NESynchronousServer` → `NPIMPublish` | UDP 33334 game socket, TCP 33335 xfer listener | [static; community-re `+snoop` A/B]. If the lobby path uses a *private* server (the `"EEName"` sites), the host neither runs the 1-s duplicate-name search nor answers `0x15` [inferred] |
-| Legacy plugin discovery | `EEUIEMSOpenMultiplayerScreen` (EXE+`0x10c0f`) / `EEUIEMSJoinGame` (+`0x1021a`) → `SearchForGame(true)`; `EEAFindGames` (+`0x2091`) reads the list; `EEAJoinOrHostAGame` (+`0x2bb8`) hosts or joins | UDP 33334 broadcast | [static]; not triggered by the Multiplayer button [measured] |
+| `0x04` | LanQuery | — | Entering or refreshing the game list. Clicking refresh sends several within 1 s |
+| `0x01` | LanGameAdvert | u16 lobby TCP port (33336), u16 `0x8b49` (constant on both machines), u8 in-progress, u16 n + UTF-16 game name + u16 0, u16 players, u16 max players (8), u16 `14` (unknown), u8 0 | On game creation, on every roster change, on start (in-progress = 1), and as a unicast reply to a query |
+| `0x02` | LanGameKeepAlive | u16 lobby port | Every **15.0 s** while hosting |
+| `0x03` | LanGameClosed | u16 lobby port | When the host leaves or dissolves the game |
 
-Consequences:
-- **Firewall and VPN:** allow inbound UDP 8585, UDP 33336, UDP 33334 and TCP 33335. The lobby's broadcasts (8585/33336) need the same per-interface fan-out as §7 describes for 33334.
-- **Decoding:** `tools/lan/eelan.py` captures 8585/33336 traffic and shows it raw (hex plus printable strings) until the lobby protocol is decoded.
+**Interface choice** [captured]:
+- While legion's lobby used its default adapter, its broadcasts left only from **192.168.153.1**, the VMware host-only adapter, so the VM never saw legion's games.
+- After the user picked Wi-Fi in *Network Adapter Options*, they left from 192.168.1.132.
+- So the lobby sends on one interface: the selected adapter's, or the route-preferred one when none is selected [inferred: the socket is bound to the chosen local IP].
+- On Windows this is the classic "games not visible over VPN / with VMware adapters" trap.
 
-### 3.1 Plugin search, legacy path (client side, `TCP Protocol.dll+0x2ec6`, driven by thread `+0x32c4`) [static]
-1. Wait on the exit event for 50 ms (`WaitForSingleObject(…, 50)`). On timeout, run one search cycle.
-2. **Socket A:** UDP, `SO_BROADCAST=1`, not bound. It sends one 67-byte datagram to **255.255.255.255:33334**.
-   - Plaintext: `[k][0x15][char service[65]]`, with service `"EEService"`.
-   - The address is the limited broadcast whenever the argument is 0, which is the case for every caller.
-3. **Socket B:** UDP, bound to **INADDR_ANY:33334**, `FIONBIO` non-blocking.
-   - It polls `recvfrom` (512-byte buffer) with `Sleep(1)` for **1000 ms**.
-   - Replies of exactly 136 bytes with byte 1 = `0x16` are kept, de-duplicated by source IP.
-4. The detected-game list is replaced at the end of each cycle. The UI reads it with `NPIMGetDetectedGame` / `NPIMGetDetectedGameCount`.
-   - Entry layout (84 bytes): `{sockaddr tcp (unused, zero), sockaddr udp (reply source), UString ip, UString service, UWideString game}`.
-5. Cycle period ≈ 1.05 s plus processing.
-6. **Consequence:** a client and a host on the **same machine** cannot both own UDP 33334. No `SO_REUSEADDR` is set, so the second bind fails and discovery does not work on one host. Use Join By IP for Mac↔Wine tests on one Mac (PLAN §6.5).
+### 3.2 Lobby room: TCP 33336 on the host [captured]
+**Framing:** records `[u16 total length, LE, includes itself][u8 type][body]`. Joiner → host:
 
-### 3.2 Plugin advertise, legacy path (host side, in `NPIMReceiveFrom`, `TCP Protocol.dll+0x264c`) [static]
-The host's game socket (UDP *:33334) receives the 67-byte search. It answers only when all of these hold:
-- the service string equals its own (`strcmp`);
-- `AllowNewConnections` is true;
-- the game is not *private*;
-- the game is *advertised*.
-
-The answer:
-- is sent from a fresh unbound UDP socket;
-- is a **136-byte** datagram to **search-source-IP:33334** (port 33334, *not* the source port);
-- plaintext `[k][0x16][char service[65]][char game_name[69]]`.
-
-Host modes (EXE+`0x2bb8`): mode 0 = normal advertised LAN host; mode 4 = published but **not advertised** (join by IP only).
-
-Before publishing, a non-private host runs one 1-s search. It refuses to host if a game with the same name already answers ("A game with that name already exists!").
-
-### 3.3 Join (client) [static]
-- **Normal LAN flow.** The lobby hand-off (EXE+`0x27e310`) calls `Connect` with the host IP string from WONAPI and an empty detected list. That takes the direct `gethostbyname` path below, exactly like Join By IP.
-- `NESynchronousClient::Connect` → `NPIMConnect(ip, service, game, mode=2 /*UDP*/, …)`:
-  - If the detected list is non-empty, the target must match an entry (ip, service, game); its address is used with the port forced to 33334.
-  - If the list is empty (Join By IP clears it with `SearchForGame(false)`), the target is resolved with `gethostbyname(str)`. If that fails, it falls back to `inet_addr` + `gethostbyaddr`.
-- The client socket is UDP, bound to `INADDR_ANY:0` (ephemeral), with `WSAEventSelect(FD_READ)`. It is never `connect()`ed.
-- The client accepts only datagrams whose source equals `host:33334`.
-- **Handshake** (UDP, every message RC4-wrapped):
-
-| # | Dir | Message | Contents |
+| Dir | Type | Name | Body |
 |---|---|---|---|
-| 1 | C→H | `0x22 NEMClientConnectionRequest` | u8 behindFirewall, UWS **version string** (built at EXE+`0x137fe5`; includes `%04d` = data checksum & 0x1fff), UWS player name, u32 **data checksum** (§8) |
-| 2 | H→C | `0x23 …ConnectionRequestResponse` | u32 result, u8, u8 **send-to slot** (the client's slot), u32 current CT, UWS (host version text for "To join this game you need version %s") |
-| 3 | both | lobby: `0x6a EEMPlayerSlotInfo`, `0x5b EEMFullPlayerInformation`, `0x60 EEMGameOptions` / `0xa9 EEMFullGameOptions`, `0x5a EEMChat`, `0x29/0x2a` connection checks every 3 s | [inferred order] |
-| 4 | H→C | `0x5d EEMStartLoading`, then `0x5e …Response`, `0x94 EEMLoadPercent` | [inferred] |
-| 5 | H→C | `0x2d NEMStartGame` / C→H `0x2e` | then CTs (§5) |
+| C→H | `0x01` | LobbyJoin | u16 n, UTF-16 player name, u16 0 |
+| H→C | `0x02` | LobbyRoster | u16 status (0), u16 host id (1), u16 your id (2), u16 count, count × {u16 id, u16 n, UTF-16 name} |
+| C→H | `0x05` | LobbyChat | u16 flags (0), u16 n, UTF-16 text, u16 0 |
+| H→C | `0x06` | LobbyChatRelay | u16 flags, u16 sender id, u16 n, UTF-16 text, u16 0 |
+| C→H | `0x07` | LobbyLeave | — (seen mid-game, when the lobby connection closes) |
+| both | `0x08` | LobbyGameData | u8 sub + EE-specific body, below |
 
-- **Host acceptance rule** (`NPIMReceiveFrom`): a datagram from an unknown address becomes a new client only if:
-  - it is at least 4 bytes;
-  - byte 1 is `0x22` (connect) or `0x37` (reconnect);
+`0x08` subtypes (EE lobby code):
+
+| Sub | Dir | Name | Body |
+|---|---|---|---|
+| `0x01` | C→H | VersionCheck | u16 `0xfffe`, u16 n, UTF-16 version (`v2.00.2974`), **u32 data checksum** (§8) |
+| `0x02` | H→C | GameSetup | 82 bytes of game settings + slot table (not decoded) |
+| `0x03` | H→C | SlotAssign | `0200 feff 0001` (client id 2, …) |
+| `0x04` / `0x05` | C→H / H→C | SetReady / ReadyState | u8 ready / u16 client id, u8 ready |
+| `0x66` / `0x65` | C→H / H→C | SetSlotAttr / SlotAttr | u8 attr, u8 value / u8 slot, u8 attr, u8 value (attr 1, values 0–2: colour/team/civ, not identified) |
+| **`0x07`** | H→C | **StartGame** | — : the hand-off to 33334 |
+| `0x68` / `0x69` | C→H / H→C | LaunchAck / reply | `01 01` |
+
+**Hand-off sequence** [captured; complete game at t = 1036–1037 s]:
+1. Host (EXE+`0x27d797`): 1-s plugin `EEService` search on UDP 33334 (duplicate-name check; no reply), then `NPIMPublish`.
+2. ~1 s later: host broadcasts LanGameAdvert with in-progress = 1, and sends `0x08/0x07 StartGame` on TCP 33336.
+3. +8 ms: client sends UDP `0x22` to `host:33334`. The host replies `0x23` at once (result 1, slot 0). The client opens TCP 33335 (SYN/SYN-ACK; no payload), and sends LaunchAck on 33336.
+4. CTs follow (§5–6).
+
+### 3.3 Game session handshake, UDP 33334 [captured]
+
+| CT / step | Dir | Message |
+|---|---|---|
+| — | C→H | `0x22` ConnectionRequest: behindFirewall 0, version `v2.00.2974`, player name, data checksum `0x0e998b9e` |
+| — | H→C | `0x23` (top-level): result **1**, u8 1, send-to slot **0**, current CT 0, text `v2.00.2974` |
+| CT 0–1 | H→all | nested `EEMFullGameOptions`, `EEMFullPlayerInformation` (CT 0–3), and `0x23` for slot `0xfe` (CT 1) |
+| CT 3 | H→all | nested `0x23` for slot 0 (result **0**, u8 1), `EEMStartLoading` |
+| CT 6–8 | C→H | `EEMLoadPercent` ×6 (top-level), `EEMStartLoadingResponse` (relayed in CT 8) |
+| CT 9–10 | both | `EEMLoadMainScreen` / `…Response`, `EEMPlayerSlotInfo` |
+| CT 11 | H→all | nested `NEMStartGame` (value 1707214) |
+| CT 12+ | | PTs = 15 per CT. The sim runs |
+| CT 857 | C→H | `EEMResign` |
+| CT 858 | H→C | `NEMPauseGame` (id 858, aux 858) → `0x34` response. CTs 858–895 carry PTs = 0 |
+| CT 895 | H→all | nested `NEMRemovePlayer` (player `0xfe`, gameIsExiting 1) |
+
+- **Client input path:** client inputs went as **standalone datagrams** (`ProcessLocalUserInput`). CT responses carried **no** nested inputs in this session; the guaranteed path was not exercised.
+- **Retries and timeouts** [static]:
+  - Connection request retries at 10 s, then every 5 s.
+  - Client silence timeout 75 s.
+  - Host SendToAllAndWait: 3000 ms × 40, then `BootAllLaggers`.
+- **Host acceptance rule** (`NPIMReceiveFrom`): an unknown source becomes a client only if:
+  - byte 1 is `0x22` or `0x37`;
+  - it is ≥ 4 bytes;
   - new connections are allowed;
-  - the source port is non-zero.
-  The host identifies clients purely by source `ip:port`, and overwrites the wire originating slot with its own index.
-- **Retries and timeouts:**
-  - The client re-sends the connection request after 10 s, then every 5 s, up to `MaxNumConnectionTrys`.
-  - The client gives up on a silent host after **75 s** (engine+`0x52d3f`).
-  - The host's SendToAllAndWait resends every 3000 ms, up to 40 times, then calls `BootAllLaggers`.
+  - the port is ≠ 0.
 
-### 3.4 Network adapter selection [static]
-- **Options list:** `NPIMEnumerateNetworkAdapters` (`TCP Protocol.dll+0x1ce0`) calls `GetAdaptersInfo` with a **fixed 6400-byte buffer**, which fits 10 `IP_ADAPTER_INFO` records.
-  - The list shows the first ≤10 adapters' `Description` strings.
-  - On `ERROR_BUFFER_OVERFLOW` (more than 10 adapters, for example Hyper-V or VPN-heavy PCs) the list is **empty**.
-- **Registry `Network Adapter`** (options+`0x578`, default 0) is a 1-based index into that list. `TCP Protocol.dll+0x1bee`:
-  1. walks to that adapter;
-  2. takes its first `IpAddressList` string;
-  3. looks it up in `gethostbyname(gethostname())->h_addr_list`;
-  4. stores the **index in the hostent list** (0 if not found).
-- That index is used only by:
-  - `NPIMGetLocalAddress`: the "Show my IP address..." display. With no hostent address it falls back to UDP `connect(128.127.126.125:7)` + `getsockname`.
-  - `NPIMSendSingle`: an optional post-game stats datagram.
-  - an unused search variant.
-- **Every socket binds `INADDR_ANY`**, so the adapter choice does not steer traffic.
-- For HLE, `gethostbyname(gethostname())` must list the same IPv4 addresses that `GetAdaptersInfo` reports, so the index lookup succeeds.
+  Clients are identified by `ip:port`. The host overwrites the wire originating slot with its own index.
+
+### 3.4 Network Adapter selection and the host crash [static + captured]
+**Where the index comes from.** At the hand-off both sides call EXE+`0x27db5c`. It sets `Network Adapter` (options+`0x578`, global VA `0x919420`) to the **1-based position** of the lobby's chosen local IP in WONAPI's adapter map (EXE+`0x2add00`). That map is built from a correctly sized `GetAdaptersInfo`; its order is WONAPI's, not necessarily the OS order. If no adapter was chosen, the index is 0. The index is passed into `EEServer`/`EEClient` and on into `NPIMPublish`/`NPIMConnect`/`NPIMGetLocalAddress`.
+
+**The bug.** `TCP Protocol.dll+0x1bee` maps the index to a hostent address:
+1. `buf = malloc(0x1900)`; `GetAdaptersInfo(buf, 6400)`.
+2. It walks `buf = buf->Next` while `i < index`, **overwriting the only copy of the allocation pointer** (`[ebp-4]`).
+3. It uses that adapter's first `IpAddress.String`.
+4. It ends with `free(buf)` (call at `+0x1cd0`, return address **`+0x1cd8`**, through the delete wrapper `+0x4840`, return `+0x484c`).
+
+**What happens per index:**
+- **Index 0:** returns before allocating.
+- **Index 1:** the loop exits at once, so the original pointer is freed. Safe.
+- **Index ≥ 2, adapter exists:** `free()` gets an **interior pointer** (`buf + 640·k`). That corrupts the msvcrt/NT heap, which crashes with an access violation in ntdll. This matches legion's 3/3 host crashes at match start: VMware adapters made Wi-Fi a later entry. [The `+0x7370` frame in the crash report is a bogus `.data` address.]
+- **Index ≥ 2, beyond the list:** `buf` becomes NULL; free(NULL) leaks but does not crash.
+
+**When it fires.** The same routine runs on the client side (`NPIMConnect`) and for the IP display, so a joiner that picks adapter ≥ 2 crashes too.
+
+**Other uses of the index** are display only (`NPIMGetLocalAddress`) and an optional stats `NPIMSendSingle`. Game sockets still bind `INADDR_ANY`.
+
+**The other adapter code is safe:**
+- `NPIMEnumerateNetworkAdapters` (`+0x1ce0`) has the same walk-then-free shape, but stops at NULL (≤ 10 adapters) or never walks (`ERROR_BUFFER_OVERFLOW` with more than 10). It leaks rather than crashes.
+- The lobby's own enumerator (EXE+`0x2add00`) sizes its buffer properly (up to 256,000 bytes).
+
+**Requirements for our port** (also in the §7 checklist):
+1. **Make the free harmless.** Either:
+   - make HLE `free` / `operator delete` ignore, and log, pointers that are not the start of a live block; or
+   - override `TCP Protocol.dll+0x1bee` (PLAN §5.7) to free the original buffer.
+
+   Either one avoids the crash on the Mac whatever the user picks. It is purely local and cannot affect sync.
+2. **List ≤ 10 adapters** in `GetAdaptersInfo`, so the plugin's fixed 6,400-byte buffer works.
+3. **Order adapters most-useful-first,** so the common choice is index 1 (which also keeps Windows peers out of trouble when they copy our advice):
+   1. the primary LAN interface (`en0`/`en1` with IPv4);
+   2. VPN/overlay interfaces with IPv4 (`feth*`/`zt*` ZeroTier, `utun*` Tailscale/WireGuard);
+   3. other up interfaces with IPv4.
+
+   Omit `lo0`, interfaces without IPv4 and down interfaces (`awdl*`, `llw*`, `bridge*` without address, `anpi*`, `ap*`).
+4. **Keep `gethostbyname(gethostname())` consistent:** return the same IPv4 addresses in the same order.
+
+**Advice for Windows friends:** leave Network Adapter at the default, or choose only the **first** listed adapter. With VMware, Hyper-V or VPN adapters, either disable them or raise the LAN adapter's priority (metric) instead of choosing it.
+
+### 3.5 Plugin `EEService` discovery (legacy path) [static; partly captured]
+**Search** (`TCP Protocol.dll+0x2ec6`, thread `+0x32c4`):
+- An unbound UDP socket with `SO_BROADCAST` sends 67 bytes `[k][0x15]["EEService"…65]` to `255.255.255.255:33334`.
+- A socket bound to `*:33334` collects 136-byte `0x16` replies for 1000 ms.
+- It repeats about every 1.05 s while the legacy join screen is open.
+
+**Reply** (`NPIMReceiveFrom`):
+- Sent only if the service matches, connections are allowed, the game is not private and is advertised.
+- 136 bytes `[k][0x16][service 65][game 69]`, from a fresh socket to `searcher-IP:33334`.
+
+**Observed** [captured]:
+- Exactly one search per hosted game: the host's duplicate-name check before `NPIMPublish`. The lobby host's `EEServer` has private = 0, so it searches, and advertise = 0, so nobody replies (EXE+`0x27d797`).
+- One unexplained client search after a game ended.
+- No `0x16` replies at all.
+
+**Legacy UI callers:** `EEUIEMSOpenMultiplayerScreen`, `EEUIEMSJoinGame`, `EEAFindGames`, `EEAJoinOrHostAGame` (EXE+`0x10c0f`, `+0x1021a`, `+0x2091`, `+0x2bb8`).
+
+**Same-host limit:** two instances on one host cannot both bind UDP 33334 or 8585 (no `SO_REUSEADDR`). Mac↔Wine on one Mac must use Join By IP.
 
 ## 4. Transport framing
 
 | Channel | Socket | Framing | Encryption |
 |---|---|---|---|
-| LAN lobby (EXE WONAPI, wsock32) | UDP *:**33336** (`LobbyPort`), polled; **8585** (`LanBroadcastPort`) | not decoded yet | unknown |
-| Lobby file transfer (EXE) | `EEFileTransferPort` **33335** | not decoded yet; same port number as the plugin's xfer listener | unknown |
-| Plugin discovery (legacy path) | UDP *:33334 ↔ broadcast / unicast | fixed 67 / 136-byte datagrams | RC4 per datagram |
-| Game | host UDP *:33334 ↔ client UDP *:ephemeral | 1 datagram = 1 NE message (≤ 576 B: the client receive buffer is 0x240, the host's 0x200; CTs are capped at 0x23f) | RC4 per datagram |
-| File xfer | host TCP listen *:33335 (backlog `SOMAXCONN`) ← client `connect` | stream of fixed **1033-byte** `NEMXferMessage` records: `[hdr4][u8 id: 0 start, 1 data, 2 end, 3 abort][u32 size][1024 data]` | none |
-| (unused) | `NPIMConnect` mode 1 = TCP game connection | `connect` and then `bind` fails on Windows | — |
+| LAN game list | UDP 8585 ↔ 255.255.255.255:8585 / unicast | 1-byte type + body (§3.1) | none |
+| Lobby room | host TCP listen *:33336 ← joiner | `[u16 len][u8 type][body]` records (§3.2) | none |
+| Game | host UDP *:33334 ↔ client UDP *:ephemeral | 1 datagram = 1 NE message (≤ 576 B: client receive buffer 0x240, host 0x200; CTs capped at 0x23f) | RC4 per datagram |
+| Plugin search | UDP → 255.255.255.255:33334 | fixed 67 / 136 bytes | RC4 |
+| File xfer | host TCP listen *:33335 ← client `connect` at game start | fixed 1033-byte `NEMXferMessage` records `[hdr4][u8 id 0 start/1 data/2 end/3 abort][u32 size][1024 data]` [static; no payload captured] | none |
 
-- **RC4 details** [static + emulated]:
-  - **Table generation** (`TCP Protocol.dll+0x1e73`, run at `NPIMActivate`):
-    - `URandom` (engine+`0x2117`) with seed `0xffffffff`;
-    - `s = (0x343fd·s + 0x269ec3) mod 2³¹`;
-    - `T[i] = trunc(s/2³¹ · 255.0)` for i < 261.
-  - **KSA:** `+0x25bb`, standard, with the key length 7.
-  - **PRGA:** `+0x24ba`, standard. It is fresh per datagram.
-  - **Per-datagram key index:** `k = trunc(r·254 + 1)`, where `r` comes from a second URandom seeded with `TMGetTime()`.
-  - SHA-256 of `T` is `df87db49…4ddf` (`eelan.py keytable`).
-  - Executing the DLL's own loop and RC4 under Unicorn (with the engine's URandom) reproduced `T` exactly and matched 200 random encryptions.
-- **Reliability.** UDP has none of its own [static]:
+- **RC4** [static + emulated + captured]:
+  - Table: `URandom` (engine+`0x2117`) with seed `0xffffffff`; `s = (0x343fd·s + 0x269ec3) mod 2³¹`; `T[i] = trunc(s/2³¹·255.0)`, i < 261. SHA-256 `df87db49…4ddf`.
+  - KSA `+0x25bb` (key length 7); PRGA `+0x24ba`, fresh per datagram.
+  - Key index `k = trunc(r·254+1)`.
+  - Unicorn runs of the DLL's own code match. All captured datagrams decode.
+- **Reliability** [static + captured]:
   - CTs are acknowledged by CT responses.
-  - The host's message manager (engine+`0x4feae`, `0x4f786`, `0x4fe4d`) resends unacknowledged "send to all and wait" messages.
-  - A client that sees a repeated CT resends its cached CT response, with the same inputs.
-  - Guaranteed inputs ride inside CT responses (§5.2).
-- **Quirk.** `NPIMSendTo` encrypts **in place**. `NESynchronousServer::BroadcastMessage` (engine+`0x5402c`) exports once and sends the same buffer to every slot, so slots after the first receive a double-encrypted datagram [static]. The normal path (engine+`0x4feae`) re-exports per slot. Our port runs the same code, so the behaviour is preserved; it is only noted here for decoding anomalies.
+  - When a response is missing, the host sends **`NEMServerIsAlive` instead of the next CT** every 350 ms and re-sends the outstanding CT after ~1 s. Captured: CT 147 re-sent after 1051 ms, with two ServerIsAlive in between.
+  - The host then sends the next CT immediately; that "forced" CT 148 carried gen-checksum 0.
+- **Quirk** [static]: `NPIMSendTo` encrypts in place. `BroadcastMessage` (engine+`0x5402c`) re-sends one buffer to several slots (double-encrypted after the first). Not seen in a 2-player capture.
 
 ## 5. Messages
 
-Header: `[0]` key index / 0, `[1]` type, `[2]` for-slot (`0xff` = all), `[3]` originating slot (`0xfe` = host).
+Header: `[0]` key index, `[1]` type, `[2]` for-slot (`0xff` = all), `[3]` originating slot (`0xfe` = host).
 
-### 5.1 Engine messages (NE, engine+`0x4d0cf`) [static]
+### 5.1 Engine messages (NE) [static; ✓ = decoded in captures without size mismatch]
 
 | Type | Class | Body after the 4-byte header |
 |---|---|---|
 | 0x20 | NEMAddPlayer | u8 player index, UWS name |
 | 0x21 | NEMAddPlayerResponse | — |
-| 0x22 | NEMClientConnectionRequest | u8 behindFirewall, UWS version, UWS player name, u32 data checksum |
-| 0x23 | NEMClientConnectionRequestResponse | u32 result, u8 ?, u8 send-to slot, u32 current CT, UWS text |
+| 0x22 ✓ | NEMClientConnectionRequest | u8 behindFirewall, UWS version, UWS player name, u32 data checksum |
+| 0x23 ✓ | NEMClientConnectionRequestResponse | u32 result (1 = top-level ack, 0 = in-CT confirm), u8 (1), u8 send-to slot, u32 current CT, UWS version |
 | 0x24 | NEMClientDisconnectionNotification | u8 isExiting |
 | 0x25 | …NotificationResponse | u32 |
-| **0x26** | **NEMCommunicationsTick** | u32 **CT**, u8 **PTs to perform** (`0xff` = no physics, run the inputs immediately: lobby/load), u8 **PTs per second**, u8 **generate checksum**, u8 **dump the world**, u8 n, n × nested message |
-| **0x27** | **NEMCommunicationsTickResponse** | u32 processed-CT counter, u32 **CT** acknowledged, u16 avg PT time (ms), u8 n, n × nested message |
-| 0x28 | NEMPhysicsTick | u32 number of inputs that follow it in the sim queue, u8 PTs, u8 gen-checksum, u8 dump; PTs/s is kept in memory but not exported. Local only: the client (EXE+`0xb0580`) turns each CT into one PT message followed by the inputs addressed to it (for-slot `0xff` or its own) |
-| 0x29 / 0x2a | NEMPlayerConnectionCheck / Response | u32 host `TMGetTime` stamp (sent every 3 s while pinging) |
-| 0x2b | NEMRemovePlayer | u8 player, u8 **isOOS**, u8 gameIsExiting, u8 wasBooted |
-| 0x2d / 0x2e | NEMStartGame / Response | u32 |
+| **0x26** ✓ | **NEMCommunicationsTick** | u32 **CT**, u8 **PTs to perform** (`0xff` = lobby/load: run inputs only), u8 **PTs per second**, u8 **generate checksum**, u8 **dump the world**, u8 n, n × nested message |
+| **0x27** ✓ | **NEMCommunicationsTickResponse** | u32 processed-CT counter (= CT in 881/896), u32 **CT** acked, u16 avg PT time (always 0 here), u8 n, n × nested |
+| 0x28 | NEMPhysicsTick | local only (client EXE+`0xb0580` → sim queue): u32 number of following inputs, u8 PTs, u8 gen-checksum, u8 dump |
+| 0x29 / 0x2a | PlayerConnectionCheck / Response | u32 host `TMGetTime` (every 3 s while pinging) |
+| 0x2b ✓ | NEMRemovePlayer | u8 player, u8 **isOOS**, u8 gameIsExiting, u8 wasBooted |
+| 0x2d ✓ / 0x2e | NEMStartGame / Response | u32 |
 | 0x2f / 0x30 | NEMStopGame / Response | — |
-| 0x31 | NEMWorldDatabaseChecksum | u32 tick, u8 dump (not seen used) |
-| **0x32** | **NEMWorldDatabaseChecksumResponse** | u32 **tick**, u32 **checksum** |
-| 0x33 / 0x35 | NEMPauseGame / NEMUnPauseGame | u32 id (echoed by the response), u32 aux |
-| 0x34 / 0x36 | …Response | u32 id |
-| 0x37 | NEMClientReconnectionRequest | u32, u32 |
-| 0x38 | …ReconnectionRequestResponse | u32 result, u8 new send-to slot, u32 |
+| 0x31 | NEMWorldDatabaseChecksum | u32 tick, u8 dump (unused) |
+| **0x32** ✓ | **NEMWorldDatabaseChecksumResponse** | u32 **tick (= CT)**, u32 **checksum** |
+| 0x33 ✓ / 0x35 | NEMPauseGame / UnPauseGame | u32 id (echoed by the response), u32 aux. Captured: both = CT |
+| 0x34 ✓ / 0x36 | …Response | u32 id |
+| 0x37 / 0x38 | ClientReconnectionRequest / Response | u32, u32 / u32 result, u8 new slot, u32 |
 | 0x39 | NEMClientRequestPause | — |
-| 0x3a | NEMServerIsAlive | — (sent instead of a CT when `TuneServer` decides the network is too slow) |
-| 0x3b | NEMXferMessage | TCP 33335 only, see §4 |
-| 0x3c | NEMXferStatus | u8 client slot, u8 percent, u32 file, u8 status |
+| 0x3a ✓ | NEMServerIsAlive | — |
+| 0x3b | NEMXferMessage | TCP 33335 only |
+| 0x3c | NEMXferStatus | u8 slot, u8 percent, u32 file, u8 status |
 
-There is no engine message for type `0x2c`.
-
-### 5.2 Game messages (EEM, EXE)
-- **Registration:** EXE+`0xb18a8` registers the EXE factory for types `0x41..0xfd`.
-- **Classes:** 100 classes, 0x41..0xaa. Names come from RTTI; export sizes from each vtable's `ExportSize` (+0x1c) [static].
-- **Body:** every body starts with u8 player.
-- **Full table:** `EEM` in `tools/lan/eelan.py`.
-- **Variable-size types:**
-  - `0x4e–0x50 SelectUnits` family: 6 + n;
-  - `0x5a Chat`, `0x5b FullPlayerInformation`, `0x60 GameOptions`, `0x64 LoadOrSaveGame`, `0x6a PlayerSlotInfo`, `0x7d InGameChat`, `0xa9 FullGameOptions` (each contains a UWS);
-  - `0x7e/0x7f CivUpgrades*`: 11 + 2n + UWS;
-  - `0x96 SelectTheseUnits`: 9 + 4n.
-- **Common in-game types:**
-  - selection: `0x48–0x4b`, `0x76`, `0x96`;
-  - `0x4c AttackUnit`, `0x4d PathTo`, `0x51 GatherResource`, `0x52 ResearchTechnology`, `0x56 BuildUnit`, `0x59 BuildWall`, `0x5f GameSpeed`, `0x7d InGameChat`;
-  - `0xa8 LagStatus`, `0x7a UpdatePingStat`, `0xa3 Resign`.
-- **How inputs travel** (engine+`0x52903`):
-  - `ProcessLocalUserInput` sends immediately as its own datagram.
-  - `ProcessGuaranteedLocalUserInput` queues the input, to ride in the next CT response.
-  - The host puts every player's inputs into the next CT, up to the 0x23f-byte cap.
-  - Clients throttle themselves to **10 throttled inputs per second**.
+### 5.2 Game messages (EEM)
+- **Classes:** 100 classes, `0x41–0xaa`. Names come from RTTI; sizes from each vtable's `ExportSize`. Full table: `EEM` in `tools/lan/eelan.py`.
+- **Captured and decoded without mismatch** (23 types):
+  - selection: `SelectUnit`, `UnselectAllUnits`;
+  - `PathTo`, `GatherResource`, `BuildUnit`, `ResearchTechnology`, `Explore`, `ReplantFarms`;
+  - `CivUpgradesRequested/Purchased`, `CivTimerExpired`, `LoadUnitData`, `InGameChat`;
+  - `ReportStatistics` (about every 10 CTs);
+  - `LoadPercent`, `StartLoading(+Response)`, `LoadMainScreen(+Response)`;
+  - `PlayerSlotInfo`, `FullPlayerInformation`, `FullGameOptions`, `Resign`.
+- **Variable sizes:** `0x4e–0x50` 6 + n; the UWS-bearing types (`0x5a`, `0x5b`, `0x60`, `0x64`, `0x6a`, `0x7d`, `0xa9`); `0x7e/0x7f` 11 + 2n + UWS; `0x96` 9 + 4n.
 
 ## 6. Synchronisation and OOS detection
 
-### 6.1 Tick cadence [static; values to be confirmed by capture]
-- **CT timer:**
-  - The host `Send` thread fires every `send interval` ms, adjusted at run time by `TuneServer` / `TuneForSlowNetwork` / `TuneForSlowCPU`.
-  - The server constructor (EXE+`0xc2536`) passes: 16 players; an initial interval of 350 ms; 60 PTs per CT; and the registry values Step Up 125, Step Down 10, Max/Min PTs per second 125/15, Max CT interval 2250 and PT-rate threshold 30 % (options+`0x558…0x57c`; global options object at EXE VA `0x918ea8`).
-  - The initial PTs per second is `(1000/350, integer) × 60 = 120` (engine+`0x53460`).
-- **PT rate:** each CT tells clients how many PTs to run and at what PT rate. The sim sets its PT period to 1/PTs-per-second (EXE+`0x1470b0`).
-- **Legion single player:** the sim thread ran ~41 PTs/s [measured].
-- **Checksum request:** `SendCommunicationsTick(generateChecksum, …)` is called with `true` when `CT ≥ next` (initially 40, then `next += 1`).
-  - So **every CT from 40 on asks for a checksum**, as long as PTs > 0, the session is multiplayer and the game is not paused [static: the `+0x180` step is only ever set to 1].
-  - Captures must confirm this; otherwise the step is set elsewhere.
+### 6.1 Tick cadence [captured; static where noted]
 
-### 6.2 What is hashed (EXE+`0x145ebf`, `__thiscall` on the sim world object, args `(char dump, uint flags)`) [static]
-- **Return value:** a **plain 32-bit additive sum** (wrapping):
-  - Σ over a linked list of world subsystems (`DAT_918318`, virtual `+0x4c(flags)`);
-  - + world`+0x80` (total PTs performed);
-  - + world`+0x18`;
-  - + the count of executed broadcast inputs (`DAT_919b68`);
-  - plus optional terms by flag (`0x4`, `0x10`, `0x40`, `0x100` continent manager, `0x200` per-unit IDs).
-- **Flags in the network path:** `flags = 1`.
-- **`ESChecksum`** (which `windows/frida/sync_hooks.js` hooks) is used for save games and data files, **not** for OOS. That is why legion saw 0 calls [measured + static].
-- **Timing:** the checksum is taken when the sim dequeues the `NEMPhysicsTick` for a CT with gen-checksum set, **before** that CT's PTs run (EXE+`0x1470b0`).
-- **Tick field:** the response's tick field is the comm object's processed-CT counter (`+0x10`) at that moment.
-  - The counter goes up once per CT the client has handled: either when the sim finishes a PT message, or directly for `0xff` CTs.
-  - A reconnect response (`0x38`) sets it.
-  - So it should equal the CT number when both count from the same origin [inferred; capture item 4].
+| Claim | Status |
+|---|---|
+| Initial interval 350 ms, 60 PTs/CT, PT/s = (1000/350)·60 = 120 (engine+`0x53460`) | **Confirmed** for CTs 0–11 (PTs `0xff`, PT/s 120) |
+| Interval tuned at run time (`TuneServer`, step up 125 / down 10, max 2250) | **Unobserved**: 350 ms throughout a 2-player LAN game |
+| PTs per CT / PT/s | **15 / 44** from CT 12 on (15 × 2.857 = 42.9 PT/s, close to legion's measured ~41 PT/s). The derivation of 15/44 is not traced [open] |
+| Checksum requested on every CT ≥ 40 with PTs > 0 (`+0x180` step = 1) | **Confirmed:** CT 40–857 (817 CTs), the only exception being the forced CT 148 after a resend; none after PTs dropped to 0 (CT 858+) |
+| Checksum taken before the CT's PTs run; tick = processed-CT counter = CT | **Confirmed:** `0x32` tick equals the requesting CT for all 817; it arrives 0–42 ms after the CT, before the next CT |
+| Dump-the-world / OOS removal | **Unobserved** (no mismatch occurred) |
 
-### 6.3 Exchange and verdict [static]
-1. **Clients** send `0x32 {tick, checksum}` to the host with `ProcessLocalUserInput`, as their own datagram.
-2. **The host** logs its own value locally (`LogChecksumResponse`, engine+`0x54154`); **the host's value is never on the wire.**
-3. **Tally.** When the host has responses from all players for a tick:
-   - If they agree, it discards them.
-   - If they differ with **2 players**, both are flagged.
-   - If they differ with **≥3 players**, the most common value wins; on a tie, the group containing the host's value (slot `0xfe`) wins. Everyone else is flagged.
-4. **Dump.** A mismatch sets *dump the world*: the next CT has `dump=1` and `gen=1`. Every machine writes `OOS yyyy.mm.dd - hhh.mmm.sss.log`, a per-player unit/group/air-traffic dump with "OUT OF SYNCH DUMP" lines, and sends no response for that tick.
-5. **Removal.** After that CT, the host calls `RemovePlayerFromGameInProgress(slot, booted=1, isOOS=1, …)` for each flagged slot, which broadcasts `0x2b NEMRemovePlayer`.
-   - Clients see "Player '%s' is out-of-synch and has been removed…", or "You are out-of-synch with the game and have been dropped".
-   - If the host itself loses, host migration follows ("Migrated Server").
-   - "The game is out-of-synch. Log has been written. Your checksum is %u." comes from the same path.
+### 6.2 What is hashed (EXE+`0x145ebf`, `__thiscall` on the world object, args `(char dump, uint flags)`) [static; Frida-confirmed call pattern]
+- A **32-bit wrapping sum** of:
+  - each world subsystem's virtual `+0x4c(flags)`;
+  - + world `+0x80` (total PTs) + world `+0x18` + the executed-broadcast-input count (`DAT_919b68`);
+  - + flag-gated terms.
+- The network path uses `flags = 1`.
+- **Frida:** the host computed it once per tick for 40–857 (dump 0, flags 1), and the values equal the client's wire values 817/817.
+- **`ESChecksum`** is save/data checksumming, not OOS.
+
+### 6.3 Exchange and verdict [static; exchange confirmed]
+1. **Client:** `0x32 {tick, checksum}` as its own datagram [captured].
+2. **Host:** logs its own value locally (`LogChecksumResponse`, engine+`0x54154`). Frida saw it called twice per tick, for slot 0 (client) and slot `0xfe` (host); **the host's value is never on the wire** [captured].
+3. **Tally** once all players have reported:
+   - 2 players: both flagged on a mismatch.
+   - ≥ 3 players: majority wins; ties go to the host's group.
+4. **Mismatch:** the next CT carries dump = 1, every machine writes `OOS yyyy.mm.dd - hhh.mmm.sss.log`, and losers get `NEMRemovePlayer(isOOS=1)`. [static; unobserved]
 
 ### 6.4 "Debug OOS Handling"
-- **Where it lives:** registry → options+`0x5be` (EXE ctor default 0; the Wine/legion registry has 1).
-- **Readers:** a displacement and absolute-address search over the whole EXE found reads only in options load / save / copy and the options dialog (EXE+`0x1c7e4a` → `UICheckBox::SetChecked`) [static].
-- **Conclusion:** it does not change the OOS path in this build [inferred]. A hardware watchpoint on VA `0x919466` during a LAN game would settle it.
+- Stored at options+`0x5be`; only read by load / save / copy and an options checkbox (EXE+`0x1c7e4a`) [static].
+- No effect on OOS is expected [inferred]. A watchpoint on VA `0x919466` would confirm it.
 
-### 6.5 Oracle plan
-- **Wire:** `eelan.py export` gives `checksums.csv` / `checksums.json` (client values per tick) and `ticks.csv` (CT stream with flags and inputs).
-- **Host:** `windows/frida/netcode_hooks.js` records `world` (every EXE+`0x145ebf` call with its tick, on every machine), `logged` (the host's tally) and `removed`.
-- **Comparison:** Mac vs Windows streams compare by `tick`. The first differing tick bounds the divergence to the PTs of the previous CT.
+### 6.5 Oracle
+- **Wire:** `eelan.py export` → `checksums.csv/json` (client values per tick), `ticks.csv`, `session.csv`.
+- **Host:** the Frida `netcode_hooks.js` `world` stream (EXE+`0x145ebf` per tick on every machine) and `logged` (the host's tally).
+  - The Frida `NEMRemovePlayer(uchar&, bool, bool, bool)` hook did **not** fire for the end-of-game removal, which is built another way. Use the wire's nested `0x2b` instead.
+- **Session-2 result:** 817/817 equal [captured]. Mac vs Windows streams compare by tick.
 
-## 7. What the Winsock / iphlpapi HLE must do (ADR-001 gap 12)
+## 7. Winsock / iphlpapi HLE checklist (ADR-001 gap 12)
 
-**Scope** (corrected):
-- The game session uses `TCP Protocol.dll`'s 24 **ws2_32** imports plus `GetAdaptersInfo` [static].
-- **The LAN lobby uses the EXE's 28 wsock32 imports, so they must be functional** (EXE `0x6aa000–0x6b2000`, `0x801f90`; generic WONAPI socket wrappers such as bind at EXE+`0x2ab370`, sendto at `+0x2abde0` and recvfrom at `+0x2abf20`).
-  - Imports include `select`/`__WSAFDIsSet`, `connect`, `listen`, `accept`, `shutdown`, `getsockopt`.
-  - Observed at the Multiplayer screen [measured, Wine]:
-    - `WSAStartup(1.1)`;
-    - `gethostname` plus `gethostbyname(own name)` ×3, to find the local IP;
-    - `setsockopt(SO_BROADCAST)` on `INVALID_SOCKET`, which must fail cleanly with `WSAENOTSOCK`;
-    - a UDP socket with `SO_BROADCAST` and `FIONBIO`, bound to `0.0.0.0:33336`, then non-blocking `recvfrom` polling every ~20 ms from two threads;
-    - `gethostbyname("empireearth.m1.sierra.com")` from a worker thread. It must fail fast: return no host, never wait on DNS.
-  - The `GetAdaptersInfo` / `GetIpForwardTable` / `GetAdaptersAddresses` calls in the trace are probably Wine's own implementation of `gethostbyname(<own host>)` rather than game calls [inferred]. The EXE also loads `GetAdaptersInfo` dynamically (EXE+`0x2add00`).
-
-Checklist:
+**Scope:**
+- **ws2_32** (24 imports, `TCP Protocol.dll`): the game session.
+- **wsock32** (28 imports, EXE WONAPI): the lobby. It must be **functional**: UDP 8585 broadcast, TCP 33336 listen/accept/connect, `select`/`__WSAFDIsSet`.
+- **iphlpapi** `GetAdaptersInfo`: plugin, fixed buffer; WONAPI, sized buffer.
 
 - [ ] **Start-up.**
-  - `WSAStartup(MAKEWORD(2,0))`: the caller *checks* that `wVersion == 2.0`.
-  - Refcounted `WSACleanup`. The DLL calls Cleanup+Startup in the middle of a session (`+0x2269`), so sockets must survive it.
-- [ ] **Sockets.**
-  - `socket(AF_INET, SOCK_DGRAM|SOCK_STREAM, 0)` and `closesocket`.
-  - SOCKET handles are small integers, distinct from HANDLEs.
-- [ ] **Options and modes.**
-  - `setsockopt(SOL_SOCKET=0xffff, SO_BROADCAST=0x20, 1)`.
-  - `ioctlsocket(FIONBIO=0x8004667e, &1)`.
-  - No `SO_REUSEADDR`, and none should be added: a second bind of UDP 33334 must fail with `WSAEADDRINUSE`, as on Windows (§3.1).
-- [ ] **Bind and listen.**
-  - `bind` to `INADDR_ANY` with ports 33334, 33335 or 0.
-  - `getsockname` for the ephemeral port.
-  - `listen(s, 0x7fffffff)` mapped to `SOMAXCONN`.
-- [ ] **Non-blocking I/O** with `WSAEWOULDBLOCK (10035)`:
-  - `recvfrom`, `recv`, `accept`, `send` (TCP: partial sends and a `WOULDBLOCK` retry loop with `Sleep(1)`);
-  - `recv(…, 1, MSG_PEEK)` for `IsAlive`;
-  - a blocking `connect` for TCP xfer, *before* `WSAEventSelect`.
-- [ ] **Datagram sizes.**
-  - The host receives into **512 bytes** and clients into 576.
-  - A larger datagram must fail with `WSAEMSGSIZE` (Windows truncates and errors) and must not be silently delivered.
-- [ ] **`WSAEventSelect`.** This is the critical piece:
-  - Network events signal a Win32 event that engine threads wait on with `WaitForMultipleObjects` (up to 11 handles mixing socket and plain events) or `WaitForSingleObject`.
-  - Masks used: `FD_READ (1)` and `FD_ACCEPT (8)`. A second `WSAEventSelect` on the same socket **replaces** the first: the xfer listener ends up with FD_ACCEPT only.
-  - It sets the socket non-blocking.
-  - **Re-enabling semantics:** the host thread calls `ResetEvent`, then reads **one** datagram per wake-up (engine+`0x54652`). The event must be set again *after each `recvfrom` while more data is queued* (Winsock's FD_READ re-enable). Otherwise queued datagrams stall until the next arrival. The same applies to FD_ACCEPT after `accept`.
-  - Implement with a kqueue thread that sets the guest event on readability, plus a re-arm check in `recv`/`recvfrom`/`accept`.
+  - `WSAStartup(2.0)` (the plugin checks `wVersion == 2.0`) and `WSAStartup(1.1)` (WONAPI).
+  - Refcounted `WSACleanup`. The plugin does Cleanup+Startup mid-session (`+0x2269`), so sockets must survive it.
+- [ ] **Sockets and options.**
+  - TCP/UDP sockets with small-integer handles.
+  - `SO_BROADCAST`, `FIONBIO`.
+  - `setsockopt` on `INVALID_SOCKET` must fail cleanly (`WSAENOTSOCK`) [measured, Wine].
+  - **No `SO_REUSEADDR`:** a second bind of 33334/8585/33336 must fail with `WSAEADDRINUSE`.
+- [ ] **Bind / listen / connect.**
+  - Binds: `INADDR_ANY` on 33334, 33335 and 0; the lobby on 8585 and TCP 33336, possibly bound to the selected adapter IP.
+  - `getsockname`; `listen(0x7fffffff)` mapped to `SOMAXCONN`.
+  - Blocking `connect` for xfer before `WSAEventSelect`.
+- [ ] **Non-blocking I/O** with `WSAEWOULDBLOCK`:
+  - `recvfrom`/`recv`/`accept`/`send` (partial sends retried with `Sleep(1)`);
+  - `recv(MSG_PEEK, 1)` for `IsAlive`;
+  - WONAPI polls `recvfrom` every ~20 ms from two threads [measured, Wine].
+- [ ] **Datagram sizes.** The host receive buffer is 512 bytes, the client's 576; oversize → `WSAEMSGSIZE`.
+- [ ] **`WSAEventSelect`.**
+  - `FD_READ`/`FD_ACCEPT`; a later call replaces the earlier one; it sets non-blocking.
+  - **Re-arm after every `recvfrom`/`accept` while data is still queued.** The host reads one datagram per wake-up (engine+`0x54652`).
+  - Implement with a kqueue thread plus a re-arm check.
 - [ ] **Broadcast.**
-  - `sendto(255.255.255.255:33334)` from an unbound socket.
-  - macOS sends limited broadcast on **one** interface only (the default route), so it never reaches a ZeroTier `feth*` or a second NIC.
-  - **Fan out:** for each up, broadcast-capable IPv4 interface (or only the one selected in *Network Adapter Options*), send to its directed broadcast (e.g. `10.147.17.255`), or use `IP_BOUND_IF` with `255.255.255.255`. Receiving needs nothing special (bound to `INADDR_ANY`).
+  - **Unbound socket to 255.255.255.255:** send to each up IPv4 interface's directed broadcast (or `IP_BOUND_IF` + 255.255.255.255).
+  - **Socket bound to a specific local IP to 255.255.255.255:** send only via that IP's interface.
+  - This makes the lobby list work on ZeroTier/LAN by default (§3.1), unlike Windows.
 - [ ] **Resolution.**
-  - `gethostname`.
-  - `gethostbyname`: must accept dotted quads without DNS (Join By IP) and return the host's own IPv4 list in `GetAdaptersInfo` order.
-  - `gethostbyaddr` (fallback only).
-  - `inet_addr`, `inet_ntoa` (a static buffer per thread is fine), `htons`/`htonl`.
-  - `WSAGetLastError` with the Windows codes, especially 10035, 10048, 10040 and 10054. On Windows a UDP ICMP port-unreachable surfaces as `WSAECONNRESET` on `recvfrom`; the engine treats any error other than 10035 as an error return, so we should *not* surface ECONNREFUSED for UDP [inferred].
-- [ ] **`GetAdaptersInfo`.**
-  - Linked `IP_ADAPTER_INFO` (640 bytes each).
-  - Honour the caller's 6400-byte buffer: return ≤ 10 entries and prefer the interfaces with IPv4 addresses.
-  - `Description` should be readable ("ZeroTier feth0 10.147.17.20").
-  - `IpAddressList.IpAddress.String` must be set.
-- [ ] **kernel32.** `WaitForSingleObject`, `Sleep` and `GetLastError` are used directly by the plugin. The engine threads use `WaitForMultipleObjects` on the same events.
-- [ ] **wsock32 1.1 for the lobby.**
-  - Same socket semantics as above.
-  - `select` / `__WSAFDIsSet` (WONAPI waits).
-  - Broadcast `sendto` with the same per-interface fan-out, presumably to 8585/33336.
-  - Two instances on one host cannot share UDP 33336 either.
-- [ ] **Firewall.** The macOS app needs the inbound prompt for **UDP 8585, UDP 33336, UDP 33334 and TCP 33335**. Every peer, not only the host, receives lobby broadcasts and the 33334 game traffic.
+  - `gethostbyname` accepts dotted quads with no DNS; `gethostbyname(own name)` returns the `GetAdaptersInfo` IPv4 list in the same order.
+  - `gethostbyname("empireearth.m1.sierra.com")` fails **immediately**.
+  - Windows `WSAGetLastError` codes. Do not surface UDP ECONNREFUSED.
+- [ ] **`GetAdaptersInfo`** (§3.4):
+  - ≤ **10** `IP_ADAPTER_INFO` (640 B each).
+  - Correct `ERROR_BUFFER_OVERFLOW` and required-size behaviour (WONAPI first calls with a NULL buffer).
+  - Order: primary LAN, then VPN (`feth*`/`zt*`/`utun*` with IPv4), then others.
+  - Skip `lo0` and adapters with no IPv4 or that are down.
+  - Readable `Description`; `IpAddressList.IpAddress.String` set.
+- [ ] **Heap.** HLE `free`/`delete` must tolerate interior pointers (log and ignore), or override `TCP Protocol.dll+0x1bee`. Without one of them, an adapter choice ≥ 2 crashes us exactly as it crashes Windows.
+- [ ] **Firewall.** Inbound UDP 8585, TCP 33336, UDP 33334, TCP 33335 on every peer.
 
 ## 8. Version / data checksum (must match across Mac and Windows)
 
-**Computation** (EXE+`0x137fe5` at start-up, global VA `0x919868`) [static]:
-- Σ of all **bytes** (32-bit wrapping; EXE+`0x134814` with mode 0) of:
+**Computation** (EXE+`0x137fe5`, global `0x919868`) [static]:
+- Σ of all bytes (32-bit wrap; EXE+`0x134814`) of:
   - `Low-Level Engine.dll`, `sxlrt233.dll`, `TCP Protocol.dll`;
-  - every `Data\Db\*.dat`, `Data\Unit AI Scripts\*.tai` and `Data\Models\*.cem` found through the engine FS layer (archives included);
-- plus each archive's `Timestamp` tag, parsed with `sscanf`.
+  - `Data\Db\*.dat`, `Data\Unit AI Scripts\*.tai`, `Data\Models\*.cem` (through the FS layer, archives included);
+- + each archive's `Timestamp` tag.
 
-**Where it is used:**
-- The value goes into every connection request.
-- `& 0x1fff` is appended as `%04d` to the version string shown in the menu.
+**Captured:**
+- Both peers sent `0x0e998b9e` (GOG files).
+- Version string `v2.00.2974` = `v2.00.` + `%04d`(checksum & 0x1fff).
+- Carried twice: in the lobby `VersionCheck` (TCP 33336) and in `0x22` (UDP 33334).
 
 **Port requirements:**
-- The FS layer must still find the original `Low-Level Engine.dll`, `sxlrt233.dll` and `TCP Protocol.dll` in the game directory, unmodified.
-- The importer must not rebase them on disk, and the translated bundles must not replace them in place.
-- Compare the menu's 4-digit suffix on Mac and Windows as a cheap check.
+- Keep the three original DLLs byte-identical in the game folder, visible to the FS layer.
+- Never rebase them on disk.
+- Check the menu's 4-digit suffix.
 
 ## 9. ZeroTier and VPN notes
 
-- **ZeroTier** (and Hamachi) carry Ethernet broadcast, so discovery works if the broadcast actually leaves through the ZT interface. In the normal flow that is the **lobby's** broadcast (8585/33336); the plugin's 33334 search is the legacy path:
-  - **Windows** sends `255.255.255.255` out of the interface with the best route metric. A ZeroTier user whose games do not show up needs the ZT adapter's metric lowered, or a broadcast relay [inferred; the classic WinIPBroadcast issue].
-  - **Mac port:** our HLE fans out (§7).
-  - Both sides need inbound UDP 8585, 33336 and 33334 (and TCP 33335) allowed. On Windows that means the ZT network must be *Private*, or there must be a rule. legion §7's proposed rules cover only 33334–33336, so **add UDP 8585**.
-- **Tailscale** (no broadcast): the lobby's LAN game list will not see remote games. Use Join By IP (the lobby's `DirectConnectDialog`), whose hand-off is the direct UDP 33334 path. MagicDNS names also work, because the string goes through `gethostbyname`.
-- **Per-packet fit:** game datagrams are ≤ 576 B, well under the ZT/Tailscale MTU. The xfer TCP stream is ordinary TCP.
-- **Adapter selection** does not need to point at the VPN for traffic to flow (§3.4). It only changes the displayed IP. Our `GetAdaptersInfo` should still list the tunnel, so that "Show my IP address" is useful for Join By IP.
+- **Lobby list** = UDP 8585 broadcast. It works over ZeroTier/Hamachi (both carry broadcast) **if the broadcast leaves through the overlay interface.**
+  - **Windows:** the route-preferred adapter wins unless one is chosen, and choosing a non-first adapter crashes at start (§3.4). Windows friends should make the overlay or LAN adapter the preferred route (interface metric), or disable unused virtual adapters.
+  - **Mac port:** fan-out (§7).
+- **Inbound rules on both sides:** UDP 8585, TCP 33336, UDP 33334, TCP 33335. On Windows, either the ZT network is *Private* or there is a rule. **legion §7's proposed rules need UDP 8585 added, and 33336 as TCP.**
+- **Tailscale** (no broadcast): use the lobby's direct connect (`DirectConnectDialog`), which reaches the TCP 33336 room, then the normal hand-off. MagicDNS names resolve via `gethostbyname`.
+- **Sizes:** game datagrams are ≤ 576 B, under any overlay MTU.
 
-## 10. Captures: how to analyse
+## 10. Validation against session 2
+
+Run:
 
 ```sh
-python -I tools/lan/eelan.py summary  analysis/lan-captures/*.pcapng
-python -I tools/lan/eelan.py timeline analysis/lan-captures/lan.pcapng --no-ticks
-python -I tools/lan/eelan.py export   analysis/lan-captures/*.pcapng --out-dir analysis/lan-captures/decoded
+python -I tools/lan/eelan.py summary  analysis/lan-captures/session2/eevm/lan.pcapng
+python -I tools/lan/eelan.py timeline analysis/lan-captures/session2/eevm/lan.pcapng --no-ticks
+python -I tools/lan/eelan.py export   analysis/lan-captures/session2/*/lan.pcapng --out-dir <dir>
 ```
 
-**First captures must confirm or correct:**
-1. Every UDP datagram decrypts to a known type with `size_mismatch` absent. This is the end-to-end check of §4 on real traffic.
-2. Lobby traffic on 8585/33336: who broadcasts what, at what interval, and which side listens on 8585. `eelan.py` shows it raw as `LobbyDatagram`. Then: does any plugin `0x15`/`0x16` traffic on 33334 appear in a normal lobby→game flow? (Expected: none.)
-3. The CT rate, PTs per CT and PTs/s under `TuneServer`, and whether *every* CT ≥ 40 has `generate_checksum=1`.
-4. That `0x32` tick numbers equal the CT numbers they answer, and how far they lag.
-5. The handshake order (§3.3 row 3–5), and the meaning of the unknown fields (`0x23` u8, `0x27` first u32, `0x33/0x35` aux).
-6. The connection-request `data_checksum` from the Wine Mac build vs legion. They must be equal for the game to be joinable.
+Both captures decode identically: 2,687 game datagrams, 0 errors, 0 size mismatches, 0 undecoded types. All lobby records decode.
+
+| Earlier claim | Verdict |
+|---|---|
+| RC4 obfuscation of every 33334 datagram, key table | **Confirmed** |
+| Ports: 33334 UDP game, 33335 TCP xfer | **Confirmed.** 33335: connect at start, no payload in a random-map game |
+| 33336 "unused" (first draft) / "UDP lobby" (second draft) | **Corrected:** TCP lobby room. UDP 33336 is bound (Wine) but carried no traffic |
+| 8585 role | **Corrected/decoded:** UDP broadcast game list (§3.1) |
+| Plugin `EEService` discovery unused in the normal flow | **Corrected:** the host sends one duplicate-name search per hosted game; nobody replies; clients never use it |
+| Client connects directly to `host:33334` at the hand-off | **Confirmed**, 8 ms after StartGame |
+| Handshake order | **Corrected and refined** (§3.3). `0x23` is sent twice (top-level result 1, then in-CT result 0) |
+| Guaranteed inputs ride in CT responses | **Unobserved;** all client inputs were standalone |
+| Message types and sizes | **Confirmed** for the 10 NE and 23 EEM types seen |
+| 350 ms CT, 120 PT/s initial | **Confirmed;** tuning unobserved; steady state 15 PTs, 44 PT/s |
+| Checksum from CT 40, every CT, tick = CT, host value off-wire | **Confirmed** (817/817 equal with Frida) |
+| Resend / ServerIsAlive behaviour | **Confirmed** (CT 147) |
+| Data checksum equal on both peers | **Confirmed** (`0x0e998b9e`); also exchanged in the lobby |
+| Network Adapter is cosmetic | **Corrected:** it picks the lobby's broadcast interface, and index ≥ 2 crashes the plugin (§3.4) |
+| OOS dump/removal, pause/unpause pairs, reconnection, xfer payloads | **Unobserved** |
 
 ## 11. Open questions
 
-- **The LAN lobby protocol on 8585/33336** (WONAPI `LanLogic`): its format, which port is the broadcast target and which the listener, how a joiner learns the host IP, and how the lobby uses 33335. It needs static work on `LanLogic.cpp` (EXE RVA around `0x3cb220`) and a capture. Community-re's source (empire-earth-web) is unverified here.
-- Which `EEServer` construction site the lobby host uses, and so whether it is private (no 33334 search or advert at game start).
-- Whether the lobby's 33335 file transfer and the plugin's TCP 33335 listener can be live at the same time (a bind conflict) or are always sequential.
+- **Lobby fields:**
+  - `0x08/0x02 GameSetup` (82 bytes);
+  - `0x08/0x03`;
+  - slot attribute ids;
+  - the advert's `0x8b49` and `14`.
 
-- The exact host-side handling of the data-checksum / version mismatch: the EXE subclass's `0x22` handler, engine vtable `+0x6c`.
-- Whether the `+0x180` checksum step is ever changed at run time. The capture answers this.
-- How `TuneServer` / `TuneForSlowNetwork` / `TuneForSlowCPU` move the interval and the PT numbers away from the initial 350 ms / 60 PTs per CT / 120 PTs/s, within the registry bounds. The capture's `ticks.csv` answers this.
-- Host migration message flow (`0x37`/`0x38`, "Migrated Server").
-- Whether any real path uses `BroadcastMessage` with more than one recipient (the in-place encryption quirk).
-- `Debug OOS Handling`: confirm "no effect" with a watchpoint.
+  This needs static work on `LanLogic.cpp` (EXE RVA ≈ `0x3cb220`) and the `EELobby*` code (EXE RVA `0x27xxxx`).
+- How 15 PTs / 44 PT/s are derived, and whether tuning ever moves the 350 ms interval (try a slow or lossy link).
+- Host-side handling of a version / data-checksum mismatch, in both the lobby `VersionCheck` and the `0x22` handler (engine vtable `+0x6c`).
+- Host migration (`0x37`/`0x38`, "Migrated Server"). The one unexplained client `EEService` search after a game.
+- Whether the lobby's and the plugin's TCP 33335 can conflict.
+- `Debug OOS Handling` watchpoint.

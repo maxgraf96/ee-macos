@@ -6,7 +6,7 @@ streams we can diff. The protocol itself is described in
 
 | File | What it is |
 |---|---|
-| `eelan.py` | Pure-stdlib decoder: pcap/pcapng reader, RC4 de-obfuscation, NE/EEM message decoder, timeline/summary/export commands |
+| `eelan.py` | Pure-stdlib decoder: pcap/pcapng reader, RC4 de-obfuscation, NE/EEM message decoder, WON LAN lobby decoder (UDP 8585 game list, TCP 33336 lobby room), timeline/summary/export commands |
 | `test_eelan.py` | Builds synthetic captures (pktmon-style pcapng, macOS-style NULL pcap) and checks the decoder |
 | `windows/frida/netcode_hooks.js` | Frida script for `windows/frida/run.py`: world-checksum stream, host checksum tally, OOS removals, plaintext wire oracle |
 
@@ -35,7 +35,7 @@ python -I tools/lan/test_eelan.py      # self-test, no capture needed
 | `checksums.csv` | `NEMWorldDatabaseChecksumResponse` (0x32): tick, checksum, originating slot. This is the wire half of the OOS oracle |
 | `checksums.json` | the same grouped per tick, with `agree` true/false across the captured responses |
 | `discovery.csv` | search (0x15) and advertisement (0x16) packets |
-| `session.csv` | connect, add/remove player (OOS verdicts), start/stop, pause, load events |
+| `session.csv` | connect, add/remove player (OOS verdicts), start/stop, pause, load events, plus lobby events (game adverts, join, roster, chat, ready, StartGame) |
 
 The host computes its own checksum locally and never sends it. A capture therefore shows
 the clients' values only. To get the host's value, use `windows/frida/netcode_hooks.js` on the host
@@ -58,14 +58,19 @@ the clients' values only. To get the host's value, use `windows/frida/netcode_ho
 `feth*` interface, or `-i any` (PKTAP), for VPN play. The NULL/LOOP (lo0, utun), raw-IP,
 Linux SLL/SLL2 and PKTAP link types are supported.
 
-Ports. A filter of `udp port 8585 or udp port 33336 or udp port 33334 or tcp port 33335`
-catches everything:
-- **UDP 8585 and UDP 33336:** the EXE's WON LAN lobby (`WONLobby.cfg` `LanBroadcastPort` /
-  `LobbyPort`). It is shown raw as `LobbyDatagram`, because its format is not decoded yet.
-- **UDP 33334:** all in-game traffic from `TCP Protocol.dll`, plus the plugin's legacy
-  `EEService` discovery, which the normal lobby flow does not use.
-- **TCP 33335:** in-game file transfer from the plugin. The lobby's `EEFileTransferPort` has
-  the same number, and its records show up as `tcp_unparsed`.
+Ports, confirmed by the session-2 captures. Use `udp port 8585 or port 33336 or udp port 33334 or tcp port 33335`:
+- **UDP 8585:** the lobby's LAN game list, decoded as `LanQuery`, `LanGameAdvert`, `LanGameKeepAlive`
+  (every 15 s) and `LanGameClosed`.
+- **TCP 33336:** the lobby room on the host, decoded as `LobbyJoin`, `LobbyRoster`, `LobbyChat`/`ChatRelay`,
+  `LobbyLeave` and `LobbyGameData.*` (VersionCheck with the data checksum, GameSetup, SlotAssign,
+  SetReady/ReadyState, SetSlotAttr/SlotAttr, **StartGame**, LaunchAck). UDP 33336 is shown raw
+  if it ever appears; none has been seen.
+- **UDP 33334:** all in-game traffic from `TCP Protocol.dll`. The host also sends one `EEService` search
+  per hosted game.
+- **TCP 33335:** in-game file transfer from the plugin. The client connects at game start. Lobby
+  file-transfer records on the same port would show up as `tcp_unparsed`.
+
+The pktmon filter needs `-p 33336` without a protocol restriction, because the lobby room is TCP.
 
 ## Frida hooks
 

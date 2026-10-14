@@ -359,23 +359,33 @@ Precedents for the later C phase:
 - Mouse capture/confinement, edge scrolling in windowed mode, Cmd-key mappings (00xJS's mappings are a reference), trackpad scrolling.
 
 ### 5.6 LAN multiplayer
-- **Two layers** (static analysis, emulation and a Wine trace; [netcode.md](reference/netcode.md)):
-  - **Lobby** (game list, chat, Host Game): the EXE's statically linked WON `LanLogic`, over **wsock32**. Ports come from GOG's `WONLobby.cfg`:
-    - **UDP 8585**: LAN broadcast;
-    - **UDP 33336**: lobby. Entering Multiplayer binds `0.0.0.0:33336` with broadcast on [measured under Wine].
-    
-    The lobby's wire format is still to be decoded from a real capture.
-  - **Game:** at the lobby→game hand-off the client connects straight to the host's IP via `TCP Protocol.dll`. This is the same path as *Join By IP Address*.
-    - **UDP 33334** carries all game traffic: one engine message per datagram, RC4-obfuscated with a key table the DLL derives at startup.
-    - **TCP 33335** carries file transfer (maps/scenarios).
-  - The plugin's own `"EEService"` broadcast on 33334 is reachable only from legacy UI actions, so it is not in the normal flow.
+- **Two layers**, validated on real captures from the 2026-10-14 LAN session ([netcode.md](reference/netcode.md) §10 has a claim-by-claim table):
+  - **Lobby:** the EXE's statically linked WON `LanLogic`, over **wsock32**; ports come from GOG's `WONLobby.cfg`.
+    - **UDP 8585, game list:** each lobby broadcasts query, advert, keep-alive (every 15 s) and closed messages to `255.255.255.255:8585`.
+    - **TCP 33336, lobby room on the host:** join, roster, chat, slots, ready, a version check (version string `v2.00.2974` + data checksum), and *start game*.
+    - UDP 33336 is bound but unused on the wire.
+    - Still opaque: the 82-byte game-setup payload.
+  - **Game:** on *start game* the client sends its connection request to the host on **UDP 33334** within ms, via `TCP Protocol.dll`; *Join By IP Address* takes the same path.
+    - One engine message per datagram, RC4-obfuscated: 2,687 datagrams decoded with zero errors.
+    - **TCP 33335** is opened for file transfer (no payload in a random-map game).
+    - The host also sends one plugin `"EEService"` search per hosted game (a duplicate-name check).
+  - **Ticks:** every 350 ms. World checksum requested every tick from 40; the client answers 0–42 ms after the tick.
 - **Winsock HLE checklist** is netcode.md §7:
   - Both wsock32 (lobby) and ws2_32 (game) must really work.
   - `WSAEventSelect` must re-signal while data is still queued.
   - Calls on an invalid socket must fail cleanly; the dead Sierra DNS lookup must fail instantly.
-  - **macOS sends the limited broadcast out of only one interface**, so we fan broadcasts out per interface (Wi-Fi *and* ZeroTier) for both 8585 and 33334.
-- **Data checksum on join:** the connect request carries a byte-sum of `Low-Level Engine.dll`, `sxlrt233.dll`, `TCP Protocol.dll` and the `Data\Db`, `Unit AI Scripts` and `Models` files. Keep those files byte-identical in the game folder even though they're translated.
-- **Network adapters:** the *Network Adapter Options* setting only changes the displayed IP; sockets bind to any address. `GetAdaptersInfo` should still report real interfaces with readable names.
+  - **macOS sends the limited broadcast out of only one interface**, so we fan broadcasts out per interface (Wi-Fi *and* ZeroTier) for 8585 and 33334. A socket bound to one IP broadcasts only on that interface.
+- **Data checksum on join:** the connect request carries a byte-sum of `Low-Level Engine.dll`, `sxlrt233.dll`, `TCP Protocol.dll` and the `Data\Db`, `Unit AI Scripts` and `Models` files. It is identical on both peers (`0x0e998b9e`). Keep those files byte-identical in the game folder even though they're translated.
+- **Network adapters matter** (the lobby's broadcasts leave via the chosen adapter). **An original-game bug:**
+  - **What happens:** `TCP Protocol.dll+0x1bee` walks the `GetAdaptersInfo` list to the chosen index, then `free()`s the advanced pointer.
+  - **Effect:** index ≥ 2 corrupts the heap, which explains legion's 3/3 crashes with VMware adapters listed first. With the default adapter, legion's lobby broadcasts went out via a VMware adapter, which is why the VM never saw them.
+  - **Our iphlpapi HLE:**
+    - report ≤ 10 adapters, ordered primary `en*` first, then ZeroTier (`feth*`/`zt*`) and `utun*` with IPv4, then others;
+    - skip `lo0`, down interfaces and those without IPv4;
+    - return `gethostbyname(own name)` in the same order;
+    - and either our `free` tolerates interior pointers, or we override `+0x1bee`.
+  - **Windows friends:** leave the adapter on default, or pick the first entry.
+- **First real LAN session (2026-10-14, legion ↔ VMware VM on legion, by session neoee-macos-b4):** the host's per-tick world-checksum stream (Frida) and the client's wire responses **agree on 817/817 ticks**, and `tools/lan/eelan.py` decodes both captures identically. Captures are in `analysis/lan-captures/session2/` (git-ignored).
 - **Virtual LANs:**
   - **Hamachi / ZeroTier** forward broadcasts, so games appear automatically.
   - **Tailscale** does not forward broadcasts, so use the game's built-in **Join By IP Address**.
@@ -385,7 +395,7 @@ Precedents for the later C phase:
   - Retail 2.00 + CD key: to check, and that's where your key could matter.
   - **CD key:** GOG's installer writes `HKLM\SOFTWARE\WOW6432Node\Sierra\CDKeys\EmpireEarth` (REG_BINARY) from its install script. Our importer reads the value from the player's own GOG files into the registry emulation, and never ships it. Since the group already plays GOG↔GOG over ZeroTier, a shared GOG key evidently doesn't block LAN games.
 - **Display plugin is per-client:** GOG's installer defaults to `Direct3D Hardware TnL`, 16-bit, 1024×768, so Windows friends likely run the T&L plugin. Rendering runs on its own thread and shouldn't affect sync; verify in a LAN test.
-- **Firewall:** Windows' "Allow" prompt creates **Private-only** rules, and a ZeroTier network usually starts as **Public**. Friends' ZeroTier networks must be set to Private, or need a Public rule scoped to the ZeroTier subnet. Every peer needs **inbound UDP 8585, UDP 33336, UDP 33334 and TCP 33335**. Our friend-facing guide will say this; [reference/legion.md](reference/legion.md) §7 has commands.
+- **Firewall:** Windows' "Allow" prompt creates **Private-only** rules, and a ZeroTier network usually starts as **Public**. Friends' ZeroTier networks must be set to Private, or need a Public rule scoped to the ZeroTier subnet. Every peer needs **inbound UDP 8585, TCP 33336, UDP 33334 and TCP 33335**. Our friend-facing guide will say this; [reference/legion.md](reference/legion.md) §7 has commands.
 - **Firewall:** the app requests incoming connections (macOS firewall prompt). Document the VPN setup for friends.
 
 ### 5.8 Bundled first-run compiler (D10)
@@ -460,7 +470,7 @@ Rough focused-engineering weeks for one developer with AI agents; Phases 0–1 r
 - `com_census.js`: D3D7/DInput calls in-game;
 - ~~`x87_runner.py` + `ummath_vectors.js`: hardware vectors that gate ADR-002~~ **done 2026-10-14, passed**;
 - `music_hooks.js` + loopback recording;
-- `netcode_hooks.js` + `pktmon`: LAN session with a second Windows client.
+- ~~`netcode_hooks.js` + `pktmon`: LAN session with a second Windows client~~ **done 2026-10-14** (legion ↔ VMware VM; 817/817 ticks agree).
 
 Thread roles come from these censuses, not the static DB.
 
