@@ -12,11 +12,78 @@ For each such bookmark: if the code unit at B is not a function entry and nothin
 references point at it, clear it (data) or its run of instructions outside every function
 body, disassemble at A, and re-derive the body of the function containing C. Anything
 else is left alone and reported.
+
+One instruction can hold two relocated dwords (MOV [abs], imm32), and the address-table
+analyzer makes both into pointers; clearing only B then leaves the instruction blocked by
+the second, and Ghidra fails again without a new bookmark (Default.dll+0x6caa, a guarded
+static initializer). So every data unit the instruction at A would overlap is cleared, on
+the same conditions, and the straight-line flow from A is followed past further such
+pointers until it joins existing code.
 """
 import re
 
 BAD = re.compile(r"Failed to disassemble at ([0-9a-f]+) due to conflicting (instruction|data) at "
                  r"([0-9a-f]+) \(flow from ([0-9a-f]+)\)")
+
+
+def clear_for_instruction(program, addr):
+    """Clear the data units the instruction that decodes at `addr` would overlap, if
+    each is plain data: no function entry, no flow reference to it. False when no
+    instruction decodes there or a unit may not be cleared."""
+    from ghidra.app.util import PseudoDisassembler
+    listing = program.getListing()
+    fm = program.getFunctionManager()
+    rm = program.getReferenceManager()
+    try:
+        pi = PseudoDisassembler(program).disassemble(addr)
+    except Exception:  # noqa: BLE001 - undecodable bytes
+        return False
+    if pi is None:
+        return False
+    end = addr.add(pi.getLength() - 1)
+    units = []
+    it = listing.getDefinedData(program.getAddressFactory().getAddressSet(addr, end), True)
+    while it.hasNext():
+        units.append(it.next())
+    first = listing.getDefinedDataContaining(addr)
+    if first is not None and first not in units:
+        units.append(first)
+    if listing.getInstructionContaining(addr) is not None or any(
+            listing.getInstructionContaining(addr.add(k)) is not None for k in range(pi.getLength())):
+        return False
+    for d in units:
+        start = d.getMinAddress()
+        if fm.getFunctionAt(start) is not None or any(
+                r.getReferenceType().isFlow() for r in rm.getReferencesTo(start)):
+            return False
+    for d in units:
+        listing.clearCodeUnits(d.getMinAddress(), d.getMaxAddress(), False)
+    return True
+
+
+def disassemble_through(program, addr, limit=64):
+    """Disassemble at `addr` and along its fall-through, clearing plain data that blocks
+    an instruction (clear_for_instruction), until the flow ends or joins existing code."""
+    from ghidra.app.cmd.disassemble import DisassembleCommand
+    from ghidra.util.task import TaskMonitor
+    listing = program.getListing()
+    fm = program.getFunctionManager()
+    at = addr
+    for _ in range(limit):
+        ins = listing.getInstructionAt(at)
+        if ins is None:
+            if not clear_for_instruction(program, at):
+                return
+            DisassembleCommand(at, None, True).applyTo(program, TaskMonitor.DUMMY)
+            ins = listing.getInstructionAt(at)
+            if ins is None:
+                return
+        elif at != addr:
+            return                      # joined code that was already there
+        ft = ins.getFallThrough()
+        if ft is None or fm.getFunctionAt(ft) is not None:
+            return
+        at = ft
 
 
 def repair_conflicts(program):
@@ -74,6 +141,7 @@ def repair_conflicts(program):
                     end = nxt.getMaxAddress()
                 listing.clearCodeUnits(start, end, False)
             DisassembleCommand(A, None, True).applyTo(program, TaskMonitor.DUMMY)
+            disassemble_through(program, A)
             f = fm.getFunctionContaining(C)
             if f is not None:
                 CreateFunctionCmd.fixupFunctionBody(program, f, TaskMonitor.DUMMY)

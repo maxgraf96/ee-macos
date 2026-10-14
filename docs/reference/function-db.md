@@ -95,7 +95,7 @@ References *from* the DRM sections never count as evidence for game code. Withou
 - relocation-table pointer data inside not-yet-decoded `MOV [abs], imm32` instructions (DX7 plugins, Default.dll, the mixer);
 - targets of DRM references and of numeric constants (EXE).
 
-Each Error bookmark `conflicting data/instruction at B` is cleared when B has only data references, then re-disassembled and the function body re-derived. One jump table (EXE+0x3c985f [0x7c985f], `CMP EDI,3; JA; JMP [EDI*4+0x7c9b1c]`) was only half resolved by Ghidra. Its two missing cases are added as computed-jump flows.
+Each Error bookmark `conflicting data/instruction at B` is cleared when B has only data references, then re-disassembled and the function body re-derived. Every other plain data unit that the instruction at the flow target overlaps is cleared too, and the straight-line flow is followed past further such units. One `MOV [abs], imm32` holds two relocated dwords, and clearing only B left Default.dll+0x6c9a's initializer tail (+0x6caa, 20 bytes) as data, with no new bookmark; the DB was regenerated for Default.dll (Phase 2 workstream A). One jump table (EXE+0x3c985f [0x7c985f], `CMP EDI,3; JA; JMP [EDI*4+0x7c9b1c]`) was only half resolved by Ghidra. Its two missing cases are added as computed-jump flows.
 
 ### 2.4 Code vs data in the EXE
 
