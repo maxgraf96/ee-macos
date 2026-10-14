@@ -64,3 +64,4 @@ No game bytes, generated C, captures or Ghidra databases in either repo. The kit
   Both are in progress (`phase2/m1-fix`).
 - The legion operator is running the 49-case matrix unattended. Groups B and E need setup-screen input and come after.
 - **02:00:** with the ctx-block capture fix (`ca06a0f`), the `__dllonexit` replay shim (`54ee9cf`, Mac `2bd107b`) and narrow documented compare masks (`fee5bff`), **case A06 is 9/9 on the Mac (bundles + linked), identical to Windows.** Pre-fix cases S00b and A01–A05 match Windows failure for failure and are being re-captured. Watch item: an exit-only EXE object in A05 `GenerateResources`.
+- **03:00:** Mac replay of the post-fix cases **A06–A11 (Continental Gigantic; Highlands Tiny…Huge): 6 cases, 54/54 packs pass, 0 mismatch**, on both builds, identical to Windows (9/9 each). M1 needs ≥ 50 cases; the legion matrix continues from A12, then groups B/E and the re-captures of S00b and A01–A05.
