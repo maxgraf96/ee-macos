@@ -1,6 +1,6 @@
 # Booting the whole game: `ee_boot`
 
-Status: Phase 3, workstream P3-A (exe-boot), 2026-10-14. The GOG `Empire Earth.exe` and all eight DLLs, translated, boot natively on arm64 macOS **in strict mode, headless, to the main menu's message loop**, render the main menu at 1024×768 through the kit's DirectDraw 7 (P3-B, software renderer), and exit cleanly on `WM_CLOSE`. The menu shows the version **`v2.00.2974`**, the data checksum both Windows peers sent (netcode.md §8) [measured]. Sound and input are null, and temporary stand-ins fill gaps other workstreams own (§5). Context: [phase3.md](../phase3.md), [build.md](build.md), [legion.md](legion.md).
+Status: Phase 3, workstream P3-A (exe-boot), 2026-10-14. The GOG `Empire Earth.exe` and all eight DLLs, translated, boot natively on arm64 macOS **in strict mode, headless, to the main menu's message loop**, render the main menu at 1024×768 through the kit's DirectDraw 7 (P3-B, software renderer) with the kit's user32/gdi32 text in the system's Tahoma (P3-C), and exit cleanly on `WM_CLOSE`. The menu shows the version **`v2.00.2974`**, the data checksum both Windows peers sent (netcode.md §8) [measured]. Sound and input are null; temporary stand-ins remain only for audio (Phase 4) and one user32 behaviour (§5). Kit `ee` d4bac5b + `feat/boot`. Context: [phase3.md](../phase3.md), [build.md](build.md), [legion.md](legion.md).
 
 Labels: **[measured]** = output of the commands here (M4 Max, macOS 15.5); **[static]** = read from the binaries or the DB; **[inferred]** = reasoning.
 
@@ -29,7 +29,7 @@ build/recomp/ee_boot [--seconds 120] [--trace FILE] [--frames DIR [--frame-every
 - **`--trace FILE`** writes every import call: thread, `DLL!name`, its stdcall arguments, the string argument of path and name calls, and the result.
 - **Movies.** By default Escape is pressed (100 ms of every second) while a Bink movie is open, as a player does on Windows (legion.md §6). `--play-movies` lets the three intro movies run to the end (about 2 minutes).
 - **Strict mode** is on unless `--no-strict` or `RECOMP_STRICT=0`.
-- **Debugging.** `EE_MSG_DEBUG=1` prints every message a thread takes from the queue.
+- **Focus.** The host reports the application focused for the whole run (`host_app_state(true, false)`), so the kit's user32 activates each window the game shows from inside `ShowWindow`, as Windows does for the foreground application; the report says whether the application is active at the end.
 - Every kit environment variable applies (`RECOMP_LOG=2` traces every import from inside the kit).
 
 The host is `app/ee_main.cpp` over the kit's shared boot (`host/boot.cpp`): mem_init, the loader, the shims, the heartbeat, the watchdog and the fault handler are the kit's. It links the executable's translation and the eight DLLs' (`pop_link_gen`, all `[modules.aux.*]`), `recomp_dx` with no GPU or audio host (presentation reaches `ee_main.cpp`'s `host_display_present_window`), the mod foundation (for the overlay) and `app/pending_*.cpp`.
@@ -98,7 +98,7 @@ Still logging-only in those DLLs, by choice: `GetThreadContext` (the executable'
 | Change | Why | Tests |
 |---|---|---|
 | Translator: a DLL with an empty relocation table and `IMAGE_FILE_RELOCS_STRIPPED` clear is movable; a module with no code lists no functions | `Language.dll` is resources only (no code, no entry point, an 8-byte `.reloc`) and must sit at 0x10400000 | `test_function_db.py` |
-| kernel32 resources of any mapped module: `FindResourceA`, `FindResourceExA/W`, `EnumResourceNamesA`, `EnumResourceLanguagesA/W`, `GetUserDefaultLangID`, `GetSystemDefaultLangID`; `resources.h` takes a module and a LANGID; `resource_string_in` | the engine reads its UI strings from `Language.dll`'s handle | `loader_tests` (a synthetic DLL with RT_STRING in two languages and a named RT_RCDATA) |
+| kernel32 resources of any mapped module: `FindResourceA`, `FindResourceExA/W`, `EnumResourceNamesA`, `EnumResourceLanguagesA/W`, `GetUserDefaultLangID`, `GetSystemDefaultLangID`; `resources.h` takes a module and a LANGID (one API with P3-C's `resource_find_in`; by default the loader's language order: neutral, the user's, its primary language, the first); `resource_string_in` | the engine reads its UI strings from `Language.dll`'s handle | `loader_tests` (a synthetic DLL with RT_STRING in two languages and a named RT_RCDATA) |
 | `MapViewOfFile` maps the file's pages (`os_vm_map_file`, `os_vm_reset`, `os_vm_page_size`); misaligned offsets are `ERROR_MAPPED_ALIGNMENT` | two 156 MB views of `data.ssa` were copied into the heap and the second did not fit | `loader_tests` |
 | Winsock: WS2_32 shares WSOCK32's `WSAStartup`/`WSACleanup` (versions, counting), `WSAGetLastError`/`WSASetLastError`, byte order, `inet_addr`, a `gethostbyname` without DNS | `TCP Protocol.dll` checks `wVersion == 2.0` and aborts otherwise; the dead Sierra lookup must fail at once (netcode.md §7) | `loader_tests` |
 | `com_register_guest_class`: `CoCreateInstance` serves classes a host builds | an inert DirectMusic without touching the kit's COM model | `dx_tests` |
@@ -108,7 +108,7 @@ Still logging-only in those DLLs, by choice: `GetThreadContext` (the executable'
 
 ## 5. Stand-ins and gaps by owner
 
-Called at boot with nothing behind them, after this workstream: only `WS2_32!socket` and `WS2_32!closesocket` (Phase 5). Everything else in P3-C, Phase 4 and Phase 5 below is a **temporary stand-in in this repository** (`app/pending_*.cpp`), registered so the kit's shim wins the moment it exists; each says so once on stderr.
+Called at boot with nothing behind them: only `WS2_32!socket` and `WS2_32!closesocket` (Phase 5). The stand-ins below that live in this repository (`app/pending_*.cpp`, and one function in `ee_main.cpp`) are registered so the kit's own shim wins the moment it exists; each says so once on stderr.
 
 ### P3-B (ddraw/d3d)
 - **Merged and in use** (`ee` 3534522, `[runtime] ddraw7 = true`): both display plugins validate, DX7HRDisplay activates, the intro movies play through the kit's Bink onto DirectDraw 7 surfaces and the main menu renders. No DirectDraw or Direct3D call at boot logs anything [measured]. Until the merge a null DirectDraw 7 stood in here; what it showed the plugins need is in the triage log (§6, step 5).
@@ -116,16 +116,9 @@ Called at boot with nothing behind them, after this workstream: only `WS2_32!soc
 - `RECOMP_D3D7_DUMP_DIR` dumps only from the GPU renderer; a headless host takes the software renderer's frames from `host_display_present_window`.
 
 ### P3-C (user32/gdi32/dinput/imm32)
-- **Per-thread message queues** (`pending_win32.cpp`). The kit's queue is the process's: a worker's `PeekMessageA` loop took the main window's `WM_SIZE`, its activation and `WM_CLOSE`, and the splash thread's `WM_QUIT` reached the main loop. The stand-in sets other threads' window messages and pending paints aside while the kit's `PeekMessageA` runs, keeps thread messages per thread, and routes `PostQuitMessage` to the caller's thread.
-- **`PostThreadMessageA`** is missing in the kit: the main thread posts 0x404 to a worker and retries with `Sleep(1)` until the post succeeds, a worker posts 0x418 back, and without it both spin forever.
-- **Window destruction at thread exit**: the splash thread ends with its window alive; Windows destroys a thread's windows when it exits.
-- **Activation of a later window**: the kit's boot activates the first window shown (the splash); the game's window (`0x2001c`) needs `WM_ACTIVATEAPP`/`WM_ACTIVATE`/`WM_SETFOCUS` when it appears. `ee_main.cpp` posts them, and `WM_CLOSE` goes to the game's window, not `host_main_window()`.
-- **`LoadStringA`** (kit has only `LoadStringW`, and it reads the executable's table whatever the `hInstance`) and **`LoadBitmapA`** (likewise): the stand-ins use the kit's module-aware `resource_string_in`/`resource_find_in`.
-- **`CreateFontA`, `ExtTextOutA`, `GetTextExtentPoint32A`**: stand-ins convert to the kit's `CreateFontIndirectW`, `ExtTextOutW`, `GetTextExtentPointA`.
-- **`SetWindowsHookExA`/`UnhookWindowsHookEx`/`CallNextHookEx`**: the executable asks for `WH_CALLWNDPROC` on every thread with no module (EXE 0x536099), which Windows refuses with `ERROR_HOOK_NEEDS_HMOD` [inferred]; the stand-in does the same.
-- The UI font `Tahoma` is drawn with the kit's bundled Open Sans (`gdi: "Tahoma" is a Windows font the program did not register`); metrics differ from Windows (phase3.md: text metrics against legion's GDI vectors).
-- With the null DirectDraw (before P3-B merged) the splash screen's `BitBlt` was refused (`gdi: REFUSED blit … src=…(-1x-1)`); not seen on the kit's DirectDraw 7.
-- `GetProcAddress(user32, "GetMonitorInfoA")` → 0 (DX7HRDisplay's multi-monitor path; it copes). `dinput: GetObjectInfo is not supported`.
+- **Merged and in use** (`ee` d4bac5b, `[runtime] relative_mouse` and `system_fonts`): per-thread message queues and `PostThreadMessageA`, module-aware `LoadStringA`/`LoadBitmapA` (over `resource_find_in`, §4), ANSI GDI text with the installed Tahoma, Arial, Times New Roman and Courier New, the refused `WH_CALLWNDPROC` hook, and activation from `host_app_state`. `pending_win32.cpp`, which stood in for all of these, is gone; what it showed the game needs is in the triage log (§6, steps 3–4, 11–13).
+- **Still a stand-in (`ee_main.cpp`, `destroy_thread_windows`): a thread's windows are destroyed when it ends.** The splash thread (EXE 0x5344fb) leaves its loop on `WM_QUIT` and returns without `DestroyWindow`; Windows destroys the window at thread exit. Without that, the splash stays the window `host_main_window()` names: the boot activates it and the deadline's `WM_CLOSE` goes to it, and the game never exits [measured]. The stand-in runs on the kit's thread-exit observer (`sched_set_thread_exit_observer`) and calls `DestroyWindow` for the thread's top-level windows on that thread.
+- `GetProcAddress(user32, "GetMonitorInfoA")` → 0 (DX7HRDisplay's multi-monitor path; it copes). With the null DirectDraw (before P3-B merged) the splash screen's `BitBlt` was refused; not seen since.
 
 ### Phase 4 (audio)
 - **`pending_mss32.cpp`**: the Miles calls the sound plugin makes that the kit lacks — `AIL_open_digital_driver` (over the kit's `AIL_waveOutOpen`), `close_digital_driver`, `set_redist_directory`, `last_error`, `get_DirectSound_info` (a kit `IDirectSound`; the mixer asks its caps for the voice count), `mem_alloc_lock`, `file_size`, the sample position and rate calls, and **`AIL_get_preference` with Miles 6 defaults** (`DIG_DS_FRAGMENT_SIZE` 8 ms, `_CNT` 96, `DIG_DS_MIX_FRAGMENT_CNT` 8): the kit's table starts at 0 and the mixer divides by it (Miles Sound System Mixer.dll+0x194f, a strict-mode divide error).
@@ -154,10 +147,11 @@ Each step is one blocker, in the order the boot met them [measured].
 12. `WM_CLOSE` ignored: a worker's `PeekMessageA` took it (and the activation, and `WM_SIZE`). Per-thread `PeekMessageA` stand-in; posts from the host's tick deferred to the next `PeekMessageA` so a worker inside the kit's pump cannot take them. Clean exit.
 13. ANSI GDI text and hooks: stand-ins. Boot clean but for the Phase 5 sockets.
 14. P3-B's DirectDraw 7 merged: `[runtime] ddraw7 = true`, the null stand-in removed, the software renderer headless. Same milestones; the main menu renders.
+15. P3-C's user32/gdi32/dinput/imm32 merged: `pending_win32.cpp` removed. The splash window then outlived its thread and took the activation and the deadline's `WM_CLOSE` (a forced unwind, then a fault in the simulation thread during teardown); a thread's windows are destroyed at its end (stand-in), the host reports focus, and the boot is clean again with the UI in Tahoma.
 
 ---
 
 ## 7. For legion (P3-D)
 
 - The requested boot API trace (`analysis/legion-captures/boot-trace/`) has not landed yet. When it does, compare the sequence in §2: plugin scan order and count, the two `data.ssa` views, the DirectDraw probe sequence per plugin, Miles and DirectMusic init, `WSAStartup` versions and the `socket` probe.
-- Please confirm: `SetWindowsHookExA(WH_CALLWNDPROC, EXE+0x136099, NULL, 0)`'s result and last error on Windows 11; the `CreateFileA("…\0_Error.log", 0, 0, NULL, CREATE_NEW)` result on a clean install; and whether `Load Game Name`, `Starting Keyboard Layout`, `Victory Allowed` exist in legion's `HKCU\Software\SSSI\Empire Earth` after a run.
+- Please confirm: the `CreateFileA("…\0_Error.log", 0, 0, NULL, CREATE_NEW)` result on a clean install; and whether `Load Game Name`, `Starting Keyboard Layout`, `Victory Allowed` exist in legion's `HKCU\Software\SSSI\Empire Earth` after a run.
