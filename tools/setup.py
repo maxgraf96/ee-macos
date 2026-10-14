@@ -64,7 +64,7 @@ def main():
         return 0
     if not args.funcdb_python.is_file():
         sys.exit("No func-db environment at %s; see docs/reference/function-db.md §9" % args.funcdb_python)
-    work = Path(os.environ.get("FUNCDB_WORK", ROOT / "analysis/func-db"))
+    work = Path(os.environ.get("FUNCDB_WORK", ROOT / "analysis/func-db")).resolve()  # Ghidra needs absolute paths
     for name, _, _, listings in modules(cfg):
         slug = SLUGS[name]
         if not (work / "ghidra" / slug / ("%s.gpr" % slug)).is_file():

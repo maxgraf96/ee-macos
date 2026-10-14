@@ -9,7 +9,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 GAME_DIR = Path(os.environ.get("EE_GAME_DIR", REPO / "original/gog/Empire Earth"))
-WORK = Path(os.environ.get("FUNCDB_WORK", REPO / "analysis/func-db"))
+WORK = Path(os.environ.get("FUNCDB_WORK", REPO / "analysis/func-db")).resolve()  # Ghidra needs absolute paths
 DB_DIR = REPO / "db/functions"
 GHIDRA_HOME = Path(os.environ.get("GHIDRA_HOME", "/opt/homebrew/Cellar/ghidra/12.1.4/libexec"))
 JAVA_HOME = os.environ.get("JAVA_HOME", "/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home")
