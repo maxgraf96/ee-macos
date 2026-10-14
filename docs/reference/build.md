@@ -34,7 +34,7 @@ git submodule update --init kit
 
 ## 3. The base map
 
-Every EE DLL prefers 0x10000000, so each is translated for, and loaded at, its own base. A base other than the preferred one is reached through the DLL's base relocations: the translator applies them to the image it reads and moves the Ghidra listings (exported at the preferred base) by the same delta; the kit's multi-module loader (gap 1, workstream B) must apply the same relocations when it maps the file. All bases are 64 KB aligned, above the kit's shim trampolines (0x0ff00000–0x10000000) [static: SizeOfImage from the DB].
+Every EE DLL prefers 0x10000000, so each is translated for, and loaded at, its own base. A base other than the preferred one is reached through the DLL's base relocations: the translator applies them to the image it reads and moves the Ghidra listings (exported at the preferred base) by the same delta, and the kit's loader applies the same relocations to the original file when it maps it (9,655 for sxlrt233 and 1,644 for Default.dll [measured]). No relocated copies are involved. All bases are 64 KB aligned, above the kit's shim trampolines (0x0ff00000–0x10000000) [static: SizeOfImage from the DB].
 
 | Module | Preferred | **Load base** | SizeOfImage | End | game.toml key |
 |---|---|---|---|---|---|
@@ -49,9 +49,9 @@ Every EE DLL prefers 0x10000000, so each is translated for, and loaded at, its o
 | Miles Sound System Mixer.dll | 0x10000000 | 0x10800000 (reserved) | 0x7000 | | |
 
 - The engine keeps its preferred base, so the DB's, Ghidra's and the community symbols' engine addresses are run-time addresses. For sxlrt233 and Default.dll, run-time = DB VA + 0x200000 / + 0x300000.
-- On Windows the bases differ per process (legion's code census: sxlrt233 at 0x10000000, the engine relocated to 0x012d0000) [measured, `analysis/legion-captures/census`]. Byte-identical results do not depend on bases; captured pointers into a DLL must be translated by module + RVA [inferred].
-- Keys sort in dependency order (sxlrt233 ← engine ← Default.dll, from the DB's imports): today's kit loader maps auxiliary modules in key order and binds each one's imports when it maps it. `tests/test_game_config.py` checks the order, the alignment, the sizes and that nothing overlaps.
-- `[game] guest_size = 0x11000000` covers the reserved slots until workstream B's 4 GB arena.
+- On Windows the loader picks bases per process (legion's code census: sxlrt233 at 0x10000000, the engine relocated to 0x012d0000) [measured, `analysis/legion-captures/census`]. **For the M1 oracle** (`docs/reference/rmg.md`), Windows captures are taken with DLL copies rebased to **this same map** on legion, so captured addresses match the translated modules.
+- Keys sort in dependency order (sxlrt233 ← engine ← Default.dll, from the DB's imports), which keeps the generated `aux-<key>/` directories in that order. The loader maps every module before it binds any imports, and runs DllMains in dependency order by itself. `tests/test_game_config.py` checks the order, the alignment, the sizes and that nothing overlaps.
+- `[game] guest_size = 0x11000000` covers the reserved slots. The kit reserves the whole 4 GB guest space and reports any access past `guest_size` with its guest address.
 
 ## 4. Build
 
@@ -69,7 +69,7 @@ Function-DB inputs, no allowance flags (`--allow-table-gaps`/`--allow-unmodelled
 
 | Module | Translated | Entry points (alternate) | Failures | Table gaps / undecoded | Unmodelled | Scan entries (data pointers / immediates) | Not in the DB | Time |
 |---|---|---|---|---|---|---|---|---|
-| Default.dll @0x10300000 | 835 / 835 | 857 (+22) | 0 | 0 / 0 | 0 | 0 / 0 | 1 | 0.8 s |
+| Default.dll @0x10300000 | 834 / 834 | 856 (+22) | 0 | 0 / 0 | 0 | 0 / 0 | 0 | 0.7 s |
 | sxlrt233.dll @0x10200000 | 3,351 / 3,351 | 3,372 (+21) | 0 | 0 / 0 | 0 | 0 / 0 | 1 | 4.9 s |
 | Low-Level Engine.dll @0x10000000 | 5,221 / 5,221 | 5,292 (+71) | 0 | 0 / 0 | 0 | 0 / 0 | 3 | 4.5 s |
 | Empire Earth.exe | 36,888 / 36,888 | 40,598 (+3,710) | 0 | 0 / 0 | 0 | 0 / 0 | 1 | 26.8 s, 2.0 GB RSS |
@@ -77,7 +77,7 @@ Function-DB inputs, no allowance flags (`--allow-table-gaps`/`--allow-unmodelled
 Generated C: EXE 262 MB in `gen/` with the three DLLs at 28 + 29 + 4.4 MB.
 
 "Not in the DB" are bodies exact branch following reached that the DB does not list. Each is a DB gap, reported rather than hidden:
-- **Default.dll+0x6caa** (20 bytes): code that the DB classifies as data (`data_in_code` 0x6caa/0x6cb0/0x6cb4). Function +0x6c9a is a guarded static initializer: `TEST [flag],1; JNZ; OR [flag],1`, then `MOV [..],imm32; MOV ECX,..; JMP` at +0x6caa, whose relocated immediate Ghidra had made a pointer. Its tail is reachable and needed. Fix in `repair.py` (the "relocation pointer inside an undecoded `MOV [abs],imm32`" case) [static].
+- **Fixed: Default.dll+0x6caa.** The DB used to classify 20 bytes of code as data. Function +0x6c9a is a guarded static initializer (`TEST [flag],1; JNZ; OR [flag],1`, then `MOV [abs],imm32; MOV ECX,..; JMP` at +0x6caa). Ghidra's address-table analyzer had turned both relocated dwords of that `MOV` into pointers. `repair.py` cleared only one, so the instruction stayed blocked, with no new bookmark. `repair.py` now clears every pointer an instruction overlaps and follows the flow past them. The regenerated DB has +0x6c9a as one 37-byte body, and the translation finds nothing outside the DB [measured]. The other DLLs' DBs were not regenerated; the DX7 plugins and the mixer had the same repair pattern.
 - **sxlrt233+0xa1055, engine+0x1c47e/+0x5f601/+0x842db, EXE 0x7eab2a**: the DB's "unknown" byte runs (`stats.coverage.*.largest_unknown`), i.e. the bytes after a call Ghidra treats as non-returning. The translator falls through to them because it treats the call as returning. Harmless either way [static].
 
 The translation of a pre-relocated copy of a DLL is byte-identical to the translation of the original at the same base, except for the binary hash in `symbols.json`. The rewritten listings agree with capstone's decoding of the relocated image on every address literal: 0 mismatches in 31,193 (Default.dll) + 207,776 (sxlrt233) instructions [measured].
@@ -121,21 +121,32 @@ What remains for "builds without the CLT" (M1 DoD): the runtime and hosts are st
 
 ```sh
 .venv/bin/python tools/test.py                    # tests/test_*.py, then the kit's portable suites
-.venv/bin/python tools/test.py --m1 [--regenerate] [--prerebased]   # the M1 harness
+.venv/bin/python tools/test.py --m1 [--regenerate]   # the M1 harness
 .venv/bin/python tools/test.py --native           # any other option: the kit's test.py for this game
 ```
 
 - `tests/test_game_config.py`: hashes against PLAN §2.4 and the DB, the base map, the dependency order, the DB-driven inputs, and the curated `globals.toml` addresses against the DB's exports at the load bases.
-- **The M1 harness** (`tests/m1/run_harness.py`) builds both harnesses, then runs each with `--check --rmv Continental`. It requires:
-  - each module's translation to register and its DllMain to return TRUE, in Windows' order: sxlrt233, then the engine, then Default.dll;
+- **The M1 harness** (`tests/m1/run_harness.py`) builds both harnesses, then runs each with `--check --rmv Continental`. They use the kit's own loader and C runtime, on the original DLL files. It requires:
+  - each module's translation to register (the bundles: one registration per `dlopen`);
+  - each module at its `game.toml` base, relocated where it prefers another;
+  - the loader to attach the modules as Windows does. `loader_attach_static` attaches the EXE's static imports (sxlrt233, then the engine), then `loader_module_load` (`LoadLibrary`) attaches Default.dll. Every DllMain must return TRUE, in that order;
   - `PIMGetName` → a `UString` holding "Default", `PIMGetType` → 0x726d6170 ('pamr'), `PIMIsValid` → 1;
-  - `EERMPIMSetRandomMapValues` on Continental.rmv to fill the (synthetic) context **identically** in the bundle build and the linked build.
+  - **`--rmv`**: `EERMPIMSetRandomMapValues`, up to and including its `.rmv` read, filling a synthetic context **identically** in the bundle build and the linked build.
+    - It replays the five set-up calls Default.dll+0xc268 makes, then the reader at +0xde77 [static].
+    - The context gets a `URandom` at +0x10 and the scripts' `FSFileSpec` at +0x20, built with the engine's constructors [inferred from call sites].
+    - The digest covers the values in ctx[0x40,0x2000), leaving out heap pointers, which depend on the allocator.
+    - The rest of the function derives the map from fields the EXE fills, and it faults on a synthetic context. The real context comes from the M1 captures.
 
-  [measured] Both pass: 3 bundles registered (3,372 / 5,292 / 857 entries); 5 script files read; 74 non-zero context dwords; context digest `bd488b9c` in both builds.
+  **[measured]** Both builds pass:
+  - bundles registered with 3,372 / 5,292 / 856 entries; 9,655 / 0 / 1,644 relocations applied;
+  - DllMains #1–#3 in order, x87 CW 0x027f;
+  - 80 values plus 29 heap pointers; digest `d4f04678` in both builds; ctx+0x260 = 32.0, as the spike read it.
 
-### Temporary pieces (delete when the named kit work is on `ee`)
-- `--prerebased` (`tools/prerebase.py`, `tests/test_prerebase.py`): today's kit loader refuses a DLL whose PE ImageBase is not its configured base. This stages relocated copies (and a copy of the EXE, since the loader looks for DLLs beside its real path) in `build/prerebased/install/`, plus a derived game directory `build/prerebased/` whose `game.toml` names them. It is removed when **workstream B's** relocating loader lands; the harness then runs from `game.toml` directly.
-- `tests/m1/harness/crt_stopgap.cpp`: the spike's ~50 msvcrt shims. They are registered before the kit's tables, so each one the kit implements replaces ours. It is removed when **workstream D's** msvcrt lands. `EE_M1_NO_CRT_STOPGAP=1` runs without it.
+  **Why the spike's digest `bd488b9c` no longer reproduces:** the scripts are CRLF. The spike's stopgap `fgets` was the host's and kept the `\r`, so keywords mis-parsed. The kit's msvcrt strips `\r` in text mode, as Windows does. With correctly terminated lines, the script's random draws reach a zeroed `URandom` (a `#DE` in `URandom::Generate`), and post-processing reads past the arena. The old digest also covered heap addresses.
+- `EE_M1_TRACE_IMPORTS=1` prints every import call and result; `EE_M1_DUMP=1` prints the context values.
+
+### Temporary pieces
+- `tests/m1/harness/crt_pending.cpp`: stand-ins only for the msvcrt functions the kit does not have yet: the x87 control word (`_controlfp`, `_control87`, `__control87_2`; workstream C) and MSVC exception handling (`_CxxThrowException`, `__CxxFrameHandler`, `__CxxLongjmpUnwind`, `_except_handler3`, `_setjmp3`, `longjmp`; workstream E). They are registered before the kit's tables, so each one the kit gains replaces ours. The exception stand-ins stop the run by name if they are reached.
 
 ## 7. Outputs and disk
 Everything is ignored: `analysis/kit/` (listings, 208 MB, EXE 163 MB), `build/` (translation ~330 MB per build root; CMake tree with SDL3 + FFmpeg; bundles ~37 MB for the DLLs) [measured]. `build/` can be deleted at any time; `analysis/kit/` is re-exported by `tools/setup.py`.
