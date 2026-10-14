@@ -1,0 +1,1943 @@
+{
+ "modules": {
+  "Empire Earth.exe": {
+   "sha256": "957e35d75ba80309d094cbfb7367f7c6d61c5fd19fc5f7ca3f2e1cf636a065ab",
+   "image_base": "0x400000"
+  },
+  "Low-Level Engine.dll": {
+   "sha256": "e3f6a2f6d1ec5c3144f7cdd918cf54166de86547d4bbb6b3c9177d3eeb003214",
+   "image_base": "0x10000000"
+  },
+  "sxlrt233.dll": {
+   "sha256": "ccf6f97d21bdf07abfb709a19fd7e75c585a972bada6341d61952b4700b4440b",
+   "image_base": "0x10000000"
+  },
+  "Language.dll": {
+   "sha256": "2539f8b76ee3a6c6b6e03e5ce76d43e891c8b41533d058e249feea5ca8ca3456",
+   "image_base": "0x10000000"
+  },
+  "DX7HRDisplay.dll": {
+   "sha256": "46a69ac011e9a934b1edd484a3f91f3482a5c85a3d47a44eddd1e4545746ff53",
+   "image_base": "0x10000000"
+  },
+  "DX7HRTnLDisplay.dll": {
+   "sha256": "f0c5b16a7db0409e7915af7ff6ded3ac61eb29835f557aad5c5a68b37085b154",
+   "image_base": "0x10000000"
+  },
+  "Default.dll": {
+   "sha256": "ab0e791039e558ac93f250594003995a4037883864cbdbbb6ded6f8faa4f9d3e",
+   "image_base": "0x10000000"
+  },
+  "TCP Protocol.dll": {
+   "sha256": "b695886b01f63b7f699d204e89f38fcd03fb374a543866ed898381a194c170f0",
+   "image_base": "0x10000000"
+  },
+  "Miles Sound System Mixer.dll": {
+   "sha256": "6e1a5145d31dfe325d2c7c5b62daaa49af233bb24fede22c56bc66ac11265e09",
+   "image_base": "0x10000000"
+  }
+ },
+ "internal_imports": {
+  "Empire Earth.exe -> sxlrt233.dll": 68,
+  "Empire Earth.exe -> low-level engine.dll": 1293,
+  "Low-Level Engine.dll -> sxlrt233.dll": 8,
+  "DX7HRDisplay.dll -> sxlrt233.dll": 7,
+  "DX7HRDisplay.dll -> low-level engine.dll": 112,
+  "DX7HRTnLDisplay.dll -> sxlrt233.dll": 7,
+  "DX7HRTnLDisplay.dll -> low-level engine.dll": 112,
+  "Default.dll -> sxlrt233.dll": 7,
+  "Default.dll -> low-level engine.dll": 41,
+  "TCP Protocol.dll -> low-level engine.dll": 39,
+  "TCP Protocol.dll -> sxlrt233.dll": 7,
+  "Miles Sound System Mixer.dll -> sxlrt233.dll": 7,
+  "Miles Sound System Mixer.dll -> low-level engine.dll": 15
+ },
+ "external": {
+  "advapi32.dll": {
+   "RegCloseKey": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "RegCreateKeyExA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "RegDeleteKeyA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "RegDeleteValueA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "RegOpenKeyExA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "RegQueryValueExA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "RegSetValueExA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ]
+  },
+  "binkw32.dll": {
+   "_BinkClose@4": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "_BinkCopyToBuffer@28": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "_BinkDDSurfaceType@4": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "_BinkDoFrame@4": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "_BinkNextFrame@4": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "_BinkOpen@8": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "_BinkOpenDirectSound@4": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "_BinkSetSoundSystem@8": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "_BinkWait@4": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ]
+  },
+  "ddraw.dll": {
+   "DirectDrawCreateEx": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "DirectDrawEnumerateA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "DirectDrawEnumerateExA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ]
+  },
+  "dinput.dll": {
+   "DirectInputCreateA": [
+    "Low-Level Engine.dll"
+   ]
+  },
+  "gdi32.dll": {
+   "Arc": [
+    "Empire Earth.exe"
+   ],
+   "BitBlt": [
+    "Empire Earth.exe"
+   ],
+   "CreateBrushIndirect": [
+    "Empire Earth.exe"
+   ],
+   "CreateCompatibleBitmap": [
+    "Empire Earth.exe"
+   ],
+   "CreateCompatibleDC": [
+    "Empire Earth.exe"
+   ],
+   "CreateDIBSection": [
+    "Empire Earth.exe"
+   ],
+   "CreateDIBitmap": [
+    "Empire Earth.exe"
+   ],
+   "CreateFontA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "CreatePen": [
+    "Empire Earth.exe"
+   ],
+   "CreateSolidBrush": [
+    "Empire Earth.exe"
+   ],
+   "DPtoLP": [
+    "Empire Earth.exe"
+   ],
+   "DeleteDC": [
+    "Empire Earth.exe"
+   ],
+   "DeleteObject": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "Ellipse": [
+    "Empire Earth.exe"
+   ],
+   "ExtTextOutA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "GetCharWidthW": [
+    "Empire Earth.exe"
+   ],
+   "GetCurrentObject": [
+    "Low-Level Engine.dll"
+   ],
+   "GetDIBits": [
+    "Empire Earth.exe"
+   ],
+   "GetDeviceCaps": [
+    "Low-Level Engine.dll"
+   ],
+   "GetObjectA": [
+    "Empire Earth.exe"
+   ],
+   "GetPixel": [
+    "Empire Earth.exe"
+   ],
+   "GetStockObject": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "GetTextExtentPoint32A": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Low-Level Engine.dll"
+   ],
+   "GetTextExtentPoint32W": [
+    "Empire Earth.exe"
+   ],
+   "GetTextMetricsA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "IntersectClipRect": [
+    "Empire Earth.exe"
+   ],
+   "Polygon": [
+    "Empire Earth.exe"
+   ],
+   "Polyline": [
+    "Empire Earth.exe"
+   ],
+   "Rectangle": [
+    "Empire Earth.exe"
+   ],
+   "SelectClipRgn": [
+    "Empire Earth.exe"
+   ],
+   "SelectObject": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "SetBkColor": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "SetBkMode": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "SetPixel": [
+    "Empire Earth.exe"
+   ],
+   "SetTextColor": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "TextOutW": [
+    "Empire Earth.exe"
+   ]
+  },
+  "imm32.dll": {
+   "ImmGetCandidateListA": [
+    "Empire Earth.exe"
+   ],
+   "ImmGetCompositionStringA": [
+    "Empire Earth.exe"
+   ],
+   "ImmGetCompositionStringW": [
+    "Empire Earth.exe"
+   ],
+   "ImmGetContext": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "ImmNotifyIME": [
+    "Low-Level Engine.dll"
+   ],
+   "ImmReleaseContext": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "ImmSetOpenStatus": [
+    "Empire Earth.exe"
+   ]
+  },
+  "iphlpapi.dll": {
+   "GetAdaptersInfo": [
+    "TCP Protocol.dll"
+   ]
+  },
+  "kernel32.dll": {
+   "CloseHandle": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "CompareFileTime": [
+    "Low-Level Engine.dll"
+   ],
+   "CopyFileA": [
+    "Low-Level Engine.dll"
+   ],
+   "CreateDirectoryA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "CreateEventA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "CreateFileA": [
+    "Low-Level Engine.dll"
+   ],
+   "CreateFileMappingA": [
+    "Low-Level Engine.dll"
+   ],
+   "CreateMutexA": [
+    "Empire Earth.exe"
+   ],
+   "CreateProcessA": [
+    "Empire Earth.exe"
+   ],
+   "CreateThread": [
+    "Low-Level Engine.dll"
+   ],
+   "DeleteCriticalSection": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "DeleteFileA": [
+    "Low-Level Engine.dll"
+   ],
+   "DisableThreadLibraryCalls": [
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "DuplicateHandle": [
+    "Low-Level Engine.dll"
+   ],
+   "EnterCriticalSection": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "EnumResourceLanguagesA": [
+    "Low-Level Engine.dll"
+   ],
+   "EnumResourceNamesA": [
+    "Low-Level Engine.dll"
+   ],
+   "ExitThread": [
+    "Low-Level Engine.dll"
+   ],
+   "FindClose": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "FindFirstFileA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "FindNextFileA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "FreeLibrary": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetCurrentDirectoryA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetCurrentProcess": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetCurrentThread": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetCurrentThreadId": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetDiskFreeSpaceA": [
+    "Empire Earth.exe"
+   ],
+   "GetExitCodeThread": [
+    "Low-Level Engine.dll"
+   ],
+   "GetFileAttributesA": [
+    "Low-Level Engine.dll"
+   ],
+   "GetFileAttributesExA": [
+    "Empire Earth.exe"
+   ],
+   "GetFileSize": [
+    "Low-Level Engine.dll"
+   ],
+   "GetFileTime": [
+    "Low-Level Engine.dll"
+   ],
+   "GetLastError": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "TCP Protocol.dll"
+   ],
+   "GetLocalTime": [
+    "Low-Level Engine.dll"
+   ],
+   "GetLocaleInfoA": [
+    "Empire Earth.exe"
+   ],
+   "GetModuleFileNameA": [
+    "Empire Earth.exe"
+   ],
+   "GetModuleHandleA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "GetProcAddress": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetShortPathNameA": [
+    "Empire Earth.exe"
+   ],
+   "GetStartupInfoA": [
+    "Empire Earth.exe"
+   ],
+   "GetSystemTimeAsFileTime": [
+    "Empire Earth.exe"
+   ],
+   "GetTempFileNameA": [
+    "Low-Level Engine.dll"
+   ],
+   "GetTempPathA": [
+    "Low-Level Engine.dll"
+   ],
+   "GetThreadContext": [
+    "Empire Earth.exe"
+   ],
+   "GetThreadPriority": [
+    "Low-Level Engine.dll"
+   ],
+   "GetTickCount": [
+    "Empire Earth.exe"
+   ],
+   "GetUserDefaultLangID": [
+    "Low-Level Engine.dll"
+   ],
+   "GetVersion": [
+    "Low-Level Engine.dll"
+   ],
+   "GetVolumeInformationA": [
+    "Empire Earth.exe"
+   ],
+   "GetWindowsDirectoryA": [
+    "Empire Earth.exe"
+   ],
+   "GlobalAlloc": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GlobalLock": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GlobalSize": [
+    "Low-Level Engine.dll"
+   ],
+   "GlobalUnlock": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "InitializeCriticalSection": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "InterlockedDecrement": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "InterlockedIncrement": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "LeaveCriticalSection": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "LoadLibraryA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "LoadLibraryExA": [
+    "Low-Level Engine.dll"
+   ],
+   "MapViewOfFile": [
+    "Low-Level Engine.dll"
+   ],
+   "MulDiv": [
+    "Empire Earth.exe"
+   ],
+   "MultiByteToWideChar": [
+    "Empire Earth.exe"
+   ],
+   "OutputDebugStringA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "QueryPerformanceCounter": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "QueryPerformanceFrequency": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "ReadFile": [
+    "Low-Level Engine.dll"
+   ],
+   "RemoveDirectoryA": [
+    "Low-Level Engine.dll"
+   ],
+   "ResetEvent": [
+    "Low-Level Engine.dll"
+   ],
+   "ResumeThread": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "SetEndOfFile": [
+    "Low-Level Engine.dll"
+   ],
+   "SetEvent": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "SetFileAttributesA": [
+    "Low-Level Engine.dll"
+   ],
+   "SetFilePointer": [
+    "Low-Level Engine.dll"
+   ],
+   "SetThreadPriority": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "Sleep": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "TCP Protocol.dll"
+   ],
+   "SuspendThread": [
+    "Low-Level Engine.dll"
+   ],
+   "TerminateThread": [
+    "Low-Level Engine.dll"
+   ],
+   "UnmapViewOfFile": [
+    "Low-Level Engine.dll"
+   ],
+   "VirtualQueryEx": [
+    "Empire Earth.exe"
+   ],
+   "WaitForMultipleObjects": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "WaitForSingleObject": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "TCP Protocol.dll"
+   ],
+   "WaitForSingleObjectEx": [
+    "Empire Earth.exe"
+   ],
+   "WideCharToMultiByte": [
+    "Empire Earth.exe"
+   ],
+   "WriteFile": [
+    "Low-Level Engine.dll"
+   ],
+   "lstrcatA": [
+    "Empire Earth.exe"
+   ],
+   "lstrcpyA": [
+    "Empire Earth.exe"
+   ],
+   "lstrcpynA": [
+    "Empire Earth.exe"
+   ]
+  },
+  "mss32.dll": {
+   "_AIL_allocate_sample_handle@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_close_digital_driver@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_digital_CPU_percent@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_end_sample@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_file_read@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_file_size@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_get_DirectSound_info@12": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_get_preference@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_get_timer_highest_delay@0": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_init_sample@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_last_error@0": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_mem_alloc_lock@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_mem_free_lock@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_open_digital_driver@16": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_release_sample_handle@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_sample_granularity@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_sample_ms_position@12": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_sample_playback_rate@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_sample_position@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_sample_status@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_serve@0": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_DirectSound_HWND@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_digital_master_volume@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_named_sample_file@20": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_preference@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_redist_directory@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_sample_loop_count@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_sample_pan@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_sample_playback_rate@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_sample_position@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_set_sample_volume@8": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_shutdown@0": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_start_sample@4": [
+    "Miles Sound System Mixer.dll"
+   ],
+   "_AIL_startup@0": [
+    "Miles Sound System Mixer.dll"
+   ]
+  },
+  "msvcp60.dll": {
+   "??0_Lockit@std@@QAE@XZ": [
+    "sxlrt233.dll"
+   ],
+   "??0bad_cast@std@@QAE@PBD@Z": [
+    "sxlrt233.dll"
+   ],
+   "??1_Lockit@std@@QAE@XZ": [
+    "sxlrt233.dll"
+   ],
+   "??1bad_cast@std@@UAE@XZ": [
+    "sxlrt233.dll"
+   ],
+   "??4_Lockit@std@@QAEAAV01@ABV01@@Z": [
+    "sxlrt233.dll"
+   ],
+   "??_7bad_cast@std@@6B@": [
+    "sxlrt233.dll"
+   ],
+   "_Getcoll": [
+    "sxlrt233.dll"
+   ],
+   "_Getctype": [
+    "sxlrt233.dll"
+   ],
+   "_Getcvt": [
+    "sxlrt233.dll"
+   ],
+   "_Mbrtowc": [
+    "sxlrt233.dll"
+   ],
+   "_Strcoll": [
+    "sxlrt233.dll"
+   ],
+   "_Strxfrm": [
+    "sxlrt233.dll"
+   ],
+   "_Tolower": [
+    "sxlrt233.dll"
+   ],
+   "_Toupper": [
+    "sxlrt233.dll"
+   ],
+   "_Wcrtomb": [
+    "sxlrt233.dll"
+   ],
+   "btowc": [
+    "sxlrt233.dll"
+   ],
+   "wctob": [
+    "sxlrt233.dll"
+   ]
+  },
+  "msvcrt.dll": {
+   "??1type_info@@UAE@XZ": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll",
+    "sxlrt233.dll"
+   ],
+   "??2@YAPAXI@Z": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll",
+    "sxlrt233.dll"
+   ],
+   "??3@YAXPAX@Z": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll"
+   ],
+   "?_set_new_handler@@YAP6AHI@ZP6AHI@Z@Z": [
+    "sxlrt233.dll"
+   ],
+   "?name@type_info@@QBEPBDXZ": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "?terminate@@YAXXZ": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "_CIatan2": [
+    "sxlrt233.dll"
+   ],
+   "_CIcos": [
+    "sxlrt233.dll"
+   ],
+   "_CIexp": [
+    "sxlrt233.dll"
+   ],
+   "_CIlog": [
+    "sxlrt233.dll"
+   ],
+   "_CIpow": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "_CIsin": [
+    "sxlrt233.dll"
+   ],
+   "_CIsqrt": [
+    "sxlrt233.dll"
+   ],
+   "_CItan": [
+    "sxlrt233.dll"
+   ],
+   "_CxxThrowException": [
+    "Empire Earth.exe"
+   ],
+   "_Getdays": [
+    "sxlrt233.dll"
+   ],
+   "_Getmonths": [
+    "sxlrt233.dll"
+   ],
+   "_Gettnames": [
+    "sxlrt233.dll"
+   ],
+   "_Strftime": [
+    "sxlrt233.dll"
+   ],
+   "_XcptFilter": [
+    "Empire Earth.exe"
+   ],
+   "__CxxFrameHandler": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "__CxxLongjmpUnwind": [
+    "Empire Earth.exe"
+   ],
+   "__RTDynamicCast": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll"
+   ],
+   "__dllonexit": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll",
+    "sxlrt233.dll"
+   ],
+   "__getmainargs": [
+    "Empire Earth.exe"
+   ],
+   "__mb_cur_max": [
+    "sxlrt233.dll"
+   ],
+   "__p__commode": [
+    "Empire Earth.exe"
+   ],
+   "__p__fmode": [
+    "Empire Earth.exe"
+   ],
+   "__set_app_type": [
+    "Empire Earth.exe"
+   ],
+   "__setusermatherr": [
+    "Empire Earth.exe"
+   ],
+   "_acmdln": [
+    "Empire Earth.exe"
+   ],
+   "_adjust_fdiv": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll",
+    "sxlrt233.dll"
+   ],
+   "_atoi64": [
+    "sxlrt233.dll"
+   ],
+   "_beginthreadex": [
+    "Empire Earth.exe"
+   ],
+   "_callnewh": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "_chmod": [
+    "Empire Earth.exe"
+   ],
+   "_controlfp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_endthreadex": [
+    "Low-Level Engine.dll"
+   ],
+   "_errno": [
+    "sxlrt233.dll"
+   ],
+   "_except_handler3": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "_exit": [
+    "Empire Earth.exe"
+   ],
+   "_finite": [
+    "Low-Level Engine.dll"
+   ],
+   "_ftol": [
+    "sxlrt233.dll"
+   ],
+   "_fullpath": [
+    "Empire Earth.exe"
+   ],
+   "_getw": [
+    "Low-Level Engine.dll"
+   ],
+   "_initterm": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll",
+    "sxlrt233.dll"
+   ],
+   "_iob": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "_ismbblead": [
+    "Low-Level Engine.dll"
+   ],
+   "_ismbcdigit": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_ismbcspace": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_itoa": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbschr": [
+    "Low-Level Engine.dll"
+   ],
+   "_mbscmp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbsdec": [
+    "Empire Earth.exe"
+   ],
+   "_mbsicmp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbsinc": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbslen": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbslwr": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbsnbcat": [
+    "Low-Level Engine.dll"
+   ],
+   "_mbsnbcmp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbsnbcnt": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbsnbicmp": [
+    "Low-Level Engine.dll"
+   ],
+   "_mbsnccnt": [
+    "Low-Level Engine.dll"
+   ],
+   "_mbsncmp": [
+    "Low-Level Engine.dll"
+   ],
+   "_mbsncpy": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbsninc": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_mbsupr": [
+    "Low-Level Engine.dll"
+   ],
+   "_onexit": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll",
+    "sxlrt233.dll"
+   ],
+   "_purecall": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_putw": [
+    "Low-Level Engine.dll"
+   ],
+   "_setjmp3": [
+    "Empire Earth.exe"
+   ],
+   "_snprintf": [
+    "Empire Earth.exe"
+   ],
+   "_splitpath": [
+    "Empire Earth.exe"
+   ],
+   "_stat": [
+    "Empire Earth.exe"
+   ],
+   "_strdup": [
+    "Empire Earth.exe"
+   ],
+   "_stricmp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_strnicmp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "_timezone": [
+    "Empire Earth.exe"
+   ],
+   "_utime": [
+    "Empire Earth.exe"
+   ],
+   "abort": [
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "abs": [
+    "Empire Earth.exe"
+   ],
+   "asctime": [
+    "Empire Earth.exe"
+   ],
+   "atof": [
+    "Empire Earth.exe"
+   ],
+   "atoi": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "calloc": [
+    "Empire Earth.exe"
+   ],
+   "exit": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "fabs": [
+    "Empire Earth.exe"
+   ],
+   "fclose": [
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "fflush": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "fgetc": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "fgetpos": [
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "fgets": [
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "fgetwc": [
+    "sxlrt233.dll"
+   ],
+   "fopen": [
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "fprintf": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "fputc": [
+    "sxlrt233.dll"
+   ],
+   "fputs": [
+    "sxlrt233.dll"
+   ],
+   "fputwc": [
+    "sxlrt233.dll"
+   ],
+   "fread": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "free": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll",
+    "sxlrt233.dll"
+   ],
+   "fscanf": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "fseek": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "fsetpos": [
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "ftell": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "fwrite": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "sxlrt233.dll"
+   ],
+   "getenv": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "gmtime": [
+    "Empire Earth.exe"
+   ],
+   "isalnum": [
+    "Empire Earth.exe"
+   ],
+   "isalpha": [
+    "Empire Earth.exe"
+   ],
+   "isdigit": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "isspace": [
+    "Empire Earth.exe"
+   ],
+   "iswctype": [
+    "Empire Earth.exe"
+   ],
+   "isxdigit": [
+    "Empire Earth.exe"
+   ],
+   "ldexp": [
+    "sxlrt233.dll"
+   ],
+   "localeconv": [
+    "sxlrt233.dll"
+   ],
+   "localtime": [
+    "Empire Earth.exe"
+   ],
+   "log": [
+    "Low-Level Engine.dll"
+   ],
+   "longjmp": [
+    "Empire Earth.exe"
+   ],
+   "malloc": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll",
+    "sxlrt233.dll"
+   ],
+   "mbstowcs": [
+    "Low-Level Engine.dll"
+   ],
+   "memchr": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "memcmp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "memcpy": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll"
+   ],
+   "memmove": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "memset": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "TCP Protocol.dll"
+   ],
+   "mktime": [
+    "Empire Earth.exe"
+   ],
+   "pow": [
+    "Empire Earth.exe"
+   ],
+   "printf": [
+    "Default.dll",
+    "Low-Level Engine.dll"
+   ],
+   "rand": [
+    "Empire Earth.exe"
+   ],
+   "realloc": [
+    "sxlrt233.dll"
+   ],
+   "remove": [
+    "Empire Earth.exe"
+   ],
+   "rewind": [
+    "Empire Earth.exe"
+   ],
+   "setlocale": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "setvbuf": [
+    "sxlrt233.dll"
+   ],
+   "sin": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "sprintf": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "sxlrt233.dll"
+   ],
+   "sqrt": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "srand": [
+    "Empire Earth.exe"
+   ],
+   "sscanf": [
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "strcat": [
+    "Low-Level Engine.dll"
+   ],
+   "strchr": [
+    "Empire Earth.exe"
+   ],
+   "strcmp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "TCP Protocol.dll"
+   ],
+   "strcpy": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "TCP Protocol.dll"
+   ],
+   "strcspn": [
+    "sxlrt233.dll"
+   ],
+   "strftime": [
+    "Empire Earth.exe"
+   ],
+   "strlen": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Default.dll",
+    "Empire Earth.exe",
+    "Low-Level Engine.dll",
+    "Miles Sound System Mixer.dll",
+    "TCP Protocol.dll"
+   ],
+   "strncmp": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "strncpy": [
+    "Empire Earth.exe"
+   ],
+   "strrchr": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "strstr": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "strtod": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "strtok": [
+    "Empire Earth.exe"
+   ],
+   "strtol": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "strtoul": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "time": [
+    "Empire Earth.exe"
+   ],
+   "tmpfile": [
+    "Empire Earth.exe"
+   ],
+   "tolower": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "toupper": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "towlower": [
+    "sxlrt233.dll"
+   ],
+   "towupper": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "ungetc": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "ungetwc": [
+    "sxlrt233.dll"
+   ],
+   "vsprintf": [
+    "Low-Level Engine.dll"
+   ],
+   "wcscmp": [
+    "Empire Earth.exe"
+   ],
+   "wcscpy": [
+    "Low-Level Engine.dll"
+   ],
+   "wcslen": [
+    "Empire Earth.exe",
+    "sxlrt233.dll"
+   ],
+   "wcstombs": [
+    "Empire Earth.exe"
+   ]
+  },
+  "ole32.dll": {
+   "CoCreateInstance": [
+    "Low-Level Engine.dll"
+   ],
+   "CoInitialize": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "CoUninitialize": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ]
+  },
+  "shell32.dll": {
+   "ShellExecuteA": [
+    "Empire Earth.exe"
+   ]
+  },
+  "user32.dll": {
+   "AdjustWindowRect": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Low-Level Engine.dll"
+   ],
+   "BeginPaint": [
+    "Empire Earth.exe"
+   ],
+   "CallNextHookEx": [
+    "Empire Earth.exe"
+   ],
+   "ChangeDisplaySettingsA": [
+    "Empire Earth.exe"
+   ],
+   "ClientToScreen": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "CloseClipboard": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "CloseWindow": [
+    "Empire Earth.exe"
+   ],
+   "CreateCursor": [
+    "Empire Earth.exe"
+   ],
+   "CreateIconIndirect": [
+    "Empire Earth.exe"
+   ],
+   "CreateWindowExA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "DefWindowProcA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "DestroyCursor": [
+    "Empire Earth.exe"
+   ],
+   "DestroyIcon": [
+    "Empire Earth.exe"
+   ],
+   "DestroyWindow": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "DispatchMessageA": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "EmptyClipboard": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "EndPaint": [
+    "Empire Earth.exe"
+   ],
+   "EnumDisplaySettingsA": [
+    "Empire Earth.exe"
+   ],
+   "GetClassInfoA": [
+    "Empire Earth.exe"
+   ],
+   "GetClassInfoExA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll"
+   ],
+   "GetClassNameA": [
+    "Empire Earth.exe"
+   ],
+   "GetClientRect": [
+    "Empire Earth.exe"
+   ],
+   "GetClipboardData": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetCursorPos": [
+    "Empire Earth.exe"
+   ],
+   "GetDC": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetDesktopWindow": [
+    "Empire Earth.exe"
+   ],
+   "GetKeyState": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetKeyboardLayout": [
+    "Empire Earth.exe"
+   ],
+   "GetMessageA": [
+    "Empire Earth.exe"
+   ],
+   "GetParent": [
+    "Empire Earth.exe"
+   ],
+   "GetSysColor": [
+    "Empire Earth.exe"
+   ],
+   "GetSystemMetrics": [
+    "Empire Earth.exe"
+   ],
+   "GetWindowLongA": [
+    "Empire Earth.exe"
+   ],
+   "GetWindowPlacement": [
+    "Empire Earth.exe"
+   ],
+   "GetWindowRect": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "GetWindowTextA": [
+    "Empire Earth.exe"
+   ],
+   "InvalidateRect": [
+    "Empire Earth.exe"
+   ],
+   "IsClipboardFormatAvailable": [
+    "Low-Level Engine.dll"
+   ],
+   "IsWindowVisible": [
+    "Empire Earth.exe"
+   ],
+   "KillTimer": [
+    "Empire Earth.exe"
+   ],
+   "LoadBitmapA": [
+    "Empire Earth.exe"
+   ],
+   "LoadCursorA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "LoadIconA": [
+    "Empire Earth.exe"
+   ],
+   "LoadStringA": [
+    "Low-Level Engine.dll"
+   ],
+   "MoveWindow": [
+    "Empire Earth.exe"
+   ],
+   "OpenClipboard": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "PeekMessageA": [
+    "Low-Level Engine.dll"
+   ],
+   "PostMessageA": [
+    "Empire Earth.exe"
+   ],
+   "PostQuitMessage": [
+    "Empire Earth.exe"
+   ],
+   "PostThreadMessageA": [
+    "Low-Level Engine.dll"
+   ],
+   "RedrawWindow": [
+    "Empire Earth.exe"
+   ],
+   "RegisterClassA": [
+    "Empire Earth.exe"
+   ],
+   "RegisterClassExA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "ReleaseCapture": [
+    "Empire Earth.exe"
+   ],
+   "ReleaseDC": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "ScreenToClient": [
+    "Empire Earth.exe"
+   ],
+   "SendMessageA": [
+    "Empire Earth.exe"
+   ],
+   "SetCapture": [
+    "Empire Earth.exe"
+   ],
+   "SetClipboardData": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "SetCursor": [
+    "Empire Earth.exe"
+   ],
+   "SetCursorPos": [
+    "Empire Earth.exe"
+   ],
+   "SetFocus": [
+    "Empire Earth.exe"
+   ],
+   "SetTimer": [
+    "Empire Earth.exe"
+   ],
+   "SetWindowLongA": [
+    "Empire Earth.exe"
+   ],
+   "SetWindowPos": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "SetWindowTextA": [
+    "Empire Earth.exe"
+   ],
+   "SetWindowsHookExA": [
+    "Empire Earth.exe"
+   ],
+   "ShowCursor": [
+    "Empire Earth.exe"
+   ],
+   "ShowWindow": [
+    "Empire Earth.exe"
+   ],
+   "TranslateMessage": [
+    "Empire Earth.exe",
+    "Low-Level Engine.dll"
+   ],
+   "UnhookWindowsHookEx": [
+    "Empire Earth.exe"
+   ],
+   "UnregisterClassA": [
+    "DX7HRDisplay.dll",
+    "DX7HRTnLDisplay.dll",
+    "Empire Earth.exe"
+   ],
+   "WindowFromPoint": [
+    "Empire Earth.exe"
+   ],
+   "wsprintfA": [
+    "Empire Earth.exe"
+   ]
+  },
+  "version.dll": {
+   "GetFileVersionInfoA": [
+    "Empire Earth.exe"
+   ],
+   "GetFileVersionInfoSizeA": [
+    "Empire Earth.exe"
+   ],
+   "VerQueryValueA": [
+    "Empire Earth.exe"
+   ]
+  },
+  "winmm.dll": {
+   "auxGetDevCapsA": [
+    "Low-Level Engine.dll"
+   ],
+   "auxGetNumDevs": [
+    "Low-Level Engine.dll"
+   ],
+   "auxGetVolume": [
+    "Low-Level Engine.dll"
+   ],
+   "auxSetVolume": [
+    "Low-Level Engine.dll"
+   ],
+   "mciSendCommandA": [
+    "Low-Level Engine.dll"
+   ],
+   "mixerGetControlDetailsA": [
+    "Low-Level Engine.dll"
+   ],
+   "mixerGetDevCapsA": [
+    "Low-Level Engine.dll"
+   ],
+   "mixerGetLineControlsA": [
+    "Low-Level Engine.dll"
+   ],
+   "mixerGetLineInfoA": [
+    "Low-Level Engine.dll"
+   ],
+   "mixerGetNumDevs": [
+    "Low-Level Engine.dll"
+   ],
+   "mixerSetControlDetails": [
+    "Low-Level Engine.dll"
+   ],
+   "timeBeginPeriod": [
+    "Low-Level Engine.dll"
+   ],
+   "timeEndPeriod": [
+    "Low-Level Engine.dll"
+   ],
+   "timeGetTime": [
+    "Low-Level Engine.dll"
+   ],
+   "timeKillEvent": [
+    "Low-Level Engine.dll"
+   ],
+   "timeSetEvent": [
+    "Low-Level Engine.dll"
+   ]
+  },
+  "ws2_32.dll": {
+   "WSACleanup": [
+    "TCP Protocol.dll"
+   ],
+   "WSAEventSelect": [
+    "TCP Protocol.dll"
+   ],
+   "WSAGetLastError": [
+    "TCP Protocol.dll"
+   ],
+   "WSAStartup": [
+    "TCP Protocol.dll"
+   ],
+   "accept": [
+    "TCP Protocol.dll"
+   ],
+   "bind": [
+    "TCP Protocol.dll"
+   ],
+   "closesocket": [
+    "TCP Protocol.dll"
+   ],
+   "connect": [
+    "TCP Protocol.dll"
+   ],
+   "gethostbyaddr": [
+    "TCP Protocol.dll"
+   ],
+   "gethostbyname": [
+    "TCP Protocol.dll"
+   ],
+   "gethostname": [
+    "TCP Protocol.dll"
+   ],
+   "getsockname": [
+    "TCP Protocol.dll"
+   ],
+   "htonl": [
+    "TCP Protocol.dll"
+   ],
+   "htons": [
+    "TCP Protocol.dll"
+   ],
+   "inet_addr": [
+    "TCP Protocol.dll"
+   ],
+   "inet_ntoa": [
+    "TCP Protocol.dll"
+   ],
+   "ioctlsocket": [
+    "TCP Protocol.dll"
+   ],
+   "listen": [
+    "TCP Protocol.dll"
+   ],
+   "recv": [
+    "TCP Protocol.dll"
+   ],
+   "recvfrom": [
+    "TCP Protocol.dll"
+   ],
+   "send": [
+    "TCP Protocol.dll"
+   ],
+   "sendto": [
+    "TCP Protocol.dll"
+   ],
+   "setsockopt": [
+    "TCP Protocol.dll"
+   ],
+   "socket": [
+    "TCP Protocol.dll"
+   ]
+  },
+  "wsock32.dll": {
+   "WSACleanup": [
+    "Empire Earth.exe"
+   ],
+   "WSAGetLastError": [
+    "Empire Earth.exe"
+   ],
+   "WSAStartup": [
+    "Empire Earth.exe"
+   ],
+   "__WSAFDIsSet": [
+    "Empire Earth.exe"
+   ],
+   "accept": [
+    "Empire Earth.exe"
+   ],
+   "bind": [
+    "Empire Earth.exe"
+   ],
+   "closesocket": [
+    "Empire Earth.exe"
+   ],
+   "connect": [
+    "Empire Earth.exe"
+   ],
+   "gethostbyname": [
+    "Empire Earth.exe"
+   ],
+   "gethostname": [
+    "Empire Earth.exe"
+   ],
+   "getsockname": [
+    "Empire Earth.exe"
+   ],
+   "getsockopt": [
+    "Empire Earth.exe"
+   ],
+   "htonl": [
+    "Empire Earth.exe"
+   ],
+   "htons": [
+    "Empire Earth.exe"
+   ],
+   "inet_addr": [
+    "Empire Earth.exe"
+   ],
+   "inet_ntoa": [
+    "Empire Earth.exe"
+   ],
+   "ioctlsocket": [
+    "Empire Earth.exe"
+   ],
+   "listen": [
+    "Empire Earth.exe"
+   ],
+   "ntohl": [
+    "Empire Earth.exe"
+   ],
+   "ntohs": [
+    "Empire Earth.exe"
+   ],
+   "recv": [
+    "Empire Earth.exe"
+   ],
+   "recvfrom": [
+    "Empire Earth.exe"
+   ],
+   "select": [
+    "Empire Earth.exe"
+   ],
+   "send": [
+    "Empire Earth.exe"
+   ],
+   "sendto": [
+    "Empire Earth.exe"
+   ],
+   "setsockopt": [
+    "Empire Earth.exe"
+   ],
+   "shutdown": [
+    "Empire Earth.exe"
+   ],
+   "socket": [
+    "Empire Earth.exe"
+   ]
+  }
+ },
+ "totals": {
+  "advapi32.dll": 7,
+  "binkw32.dll": 9,
+  "ddraw.dll": 3,
+  "dinput.dll": 1,
+  "gdi32.dll": 36,
+  "imm32.dll": 7,
+  "iphlpapi.dll": 1,
+  "kernel32.dll": 88,
+  "mss32.dll": 34,
+  "msvcp60.dll": 17,
+  "msvcrt.dll": 167,
+  "ole32.dll": 3,
+  "shell32.dll": 1,
+  "user32.dll": 74,
+  "version.dll": 3,
+  "winmm.dll": 16,
+  "ws2_32.dll": 24,
+  "wsock32.dll": 28,
+  "_all": 519
+ }
+}

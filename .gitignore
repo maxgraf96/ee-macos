@@ -1,0 +1,25 @@
+# Game files and installers: never tracked (copyrighted; supplied by each player)
+original/
+*.exe
+*.dll
+*.ssa
+*.bik
+
+# Analysis databases and listings (derived from game binaries)
+analysis/
+*.gpr
+*.rep/
+
+# Build outputs, including generated C translated from game code
+build/
+gen/
+
+# Throwaway experiments (conclusions go to docs/decisions/)
+spikes/
+
+# Tooling
+.venv/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
