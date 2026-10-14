@@ -19,7 +19,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/r
 
 In the game: click in the window to capture the mouse (the game draws its own cursor from relative motion); Escape skips the intro movies (~2 minutes otherwise); hold Escape to release the mouse; Command-Q quits through the game's own exit. Display is Metal at the game's 1024×768 menu mode in a 4:3 window. **No audio yet** (Phase 4), and Multiplayer's networking is Phase 5.
 
-Smoke test [measured, 2026-10-15]: the window opens with focus, the three intro movies play on Metal at 640×480, the main menu renders at 1024×768 (frame dumped with `RECOMP_D3D7_DUMP_DIR`), and SIGTERM / Command-Q ends in `ExitProcess(0)`. DirectInput creates the keyboard and mouse and acquires both on activation (headless trace: 6 `Acquire` → DI_OK, 1 → S_FALSE). Clicking through the menus is the player's to try: input could not be driven from here.
+Smoke test [measured, 2026-10-15]: the window opens with focus, the three intro movies play on Metal at 640×480, the main menu renders at 1024×768 (frame dumped with `RECOMP_D3D7_DUMP_DIR`, which writes every presented frame: ~3 MB each, 40 GB in five minutes, so stop the app soon after the menu appears), and SIGTERM / Command-Q ends in `ExitProcess(0)`. DirectInput creates the keyboard and mouse and acquires both on activation (headless trace: 6 `Acquire` → DI_OK, 1 → S_FALSE). Clicking through the menus is the player's to try: input could not be driven from here.
 
 ## 1. How to run headless
 
