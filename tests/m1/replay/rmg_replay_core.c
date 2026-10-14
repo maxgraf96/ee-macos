@@ -148,6 +148,7 @@ int rr_needed_ranges(const rr_pack *pk, rr_range **out, uint32_t *n)
 static const rr_platform *g_pf;
 static const rr_pack *g_pk;
 static int g_active;
+static int g_trace;                       /* opt->verbose > 2: print every allocator event */
 static uint32_t g_ai, g_fi;
 /* sizes of blocks known to the replay (captured heap regions, blocks allocated so far) */
 static struct blk { uint32_t addr, size; } *g_blk;
@@ -203,6 +204,26 @@ static const char *op_name(uint32_t op)
 
 int rr_active(void) { return g_active; }
 
+/* A DLL registering an atexit handler during the call (a function-local static constructed on
+   first use): the DLL's static CRT calls msvcrt's __dllonexit(func, &begin, &end), which grows the
+   table with msvcrt-internal _msize/realloc that the capture cannot see. In the replay the table is
+   a restored heap block, so the real __dllonexit corrupts the heap. Do what it does while the
+   block has room; stop if it would have to grow (that realloc is not in the capture). */
+uint32_t rr_shim_dllonexit(uint32_t func, uint32_t pbegin, uint32_t pend)
+{
+    uint32_t b, e, cap;
+    g_pf->read(g_pf->user, pbegin, &b, 4);
+    g_pf->read(g_pf->user, pend, &e, 4);
+    if (g_trace) logf_("  [atexit] func %#x table %#x end %#x", func, b, e);
+    if (!blk_size(b, &cap)) fatalf(2, "__dllonexit: atexit table %#x is not a captured heap block", b);
+    if (e < b || e + 4 > b + cap)
+        fatalf(2, "__dllonexit: atexit table %#x is full (%#x of %#x bytes); msvcrt would grow it", b, e - b, cap);
+    g_pf->write(g_pf->user, e, &func, 4);
+    e += 4;
+    g_pf->write(g_pf->user, pend, &e, 4);
+    return func;
+}
+
 uint32_t rr_shim_alloc(int op, uint32_t a, uint32_t b)
 {
     const rr_alloc_rec *r;
@@ -214,6 +235,7 @@ uint32_t rr_shim_alloc(int op, uint32_t a, uint32_t b)
         fatalf(1, "allocation %u differs: recorded %s(%#x, %#x), replay %s(%#x, %#x)", g_ai, op_name(r->op), r->a, r->b,
                op_name((uint32_t)op), a, b);
     size = alloc_size(r);
+    if (g_trace) logf_("  [alloc %u] %s(%#x, %#x) -> %#x", g_ai, op_name((uint32_t)op), a, b, r->ret);
     if (r->ret) {
         if (r->init_len) {
             g_pf->write(g_pf->user, r->ret, g_pk->allocs[g_ai].data, r->init_len);
@@ -246,6 +268,7 @@ void rr_shim_free(int op, uint32_t p)
     r = (const rr_alloc_rec *)g_pk->allocs[g_ai].rec;
     if (r->op != (uint32_t)op || r->a != p)
         fatalf(1, "allocator call %u differs: recorded %s(%#x), replay %s(%#x)", g_ai, op_name(r->op), r->a, op_name((uint32_t)op), p);
+    if (g_trace) logf_("  [alloc %u] %s(%#x)", g_ai, op_name((uint32_t)op), p);
     g_ai++;
 }
 
@@ -325,7 +348,7 @@ int rr_replay(const rr_platform *pf, const rr_pack *pk, const rr_options *opt)
     int status = 0, max_report = opt->max_report > 0 ? opt->max_report : 20;
     char name[49];
 
-    g_pf = pf; g_pk = pk; g_active = 0; g_ai = g_fi = 0; g_nblk = 0;
+    g_pf = pf; g_pk = pk; g_active = 0; g_ai = g_fi = 0; g_nblk = 0; g_trace = opt->verbose > 2;
     memcpy(name, h->export_name, 48); name[48] = 0;
 
     if (pf->load_modules(pf->user, pk->mods, pk->nmods)) { logf_("ERROR seq=%u: module load failed", h->seq); return 2; }

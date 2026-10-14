@@ -164,5 +164,7 @@ void rr_shim_free(int op, uint32_t p);
 uint32_t rr_shim_fopen(uint32_t path, uint32_t mode);
 uint32_t rr_shim_fgets(uint32_t buf, int32_t n, uint32_t fp);
 int32_t rr_shim_fclose(uint32_t fp);
+/* msvcrt __dllonexit(func, &begin, &end) during the call (see rmg_replay_core.c). */
+uint32_t rr_shim_dllonexit(uint32_t func, uint32_t pbegin, uint32_t pend);
 
 #endif
