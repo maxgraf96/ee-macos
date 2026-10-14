@@ -17,3 +17,9 @@ Started 2026-10-15, in parallel with Phase 3. Context:
 |---|---|---|
 | P4-A dmusic | `ole32` `CoCreateInstance` for the DirectMusic CLSIDs plus the ~40-method `IDirectMusic*` surface (audio.md §2.9). A **pinned GothicKit/dmusic fork** with our patches: bank select, master groove, segment repeats, reverb. GM bank via macOS `gs_instruments.dls` at runtime, falling back to the kit's soundfont. Mixer output through the kit's audio host. | kit `feat/dmusic` |
 | P4-B miles-dsound | `mss32` (the 17 AIL functions missing of EE's 34), the shared stub DirectSound, Bink audio, MP3 decode caching | kit `feat/miles` |
+
+## Status
+| ID | State | Result |
+|---|---|---|
+| P4-A dmusic | running | |
+| P4-B miles-dsound | **merged** (`ee` 40bb320) | **Miles:** all 34 EE AIL imports, the rules derived from Miles 6.1a behaviour, MP3 decode cache, end-of-sample callbacks, linear balance pan law (fixes the kit's −51 dB bug). **DirectSound:** one shared device across Miles, DirectMusic and Bink. **Bink audio** in sync within 11–23 ms. **Data:** 758 WAVs + 3 MP3s from `data.ssa` decode with 0 failures. **In a test build:** strict boot to the menu with the intro audio, the menu music (`EEIntro.mp3` at 62%) and click sounds. To do: an SFX level/pan comparison with a Windows recording. |
