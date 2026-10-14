@@ -1,0 +1,110 @@
+# Empire Earth (2001, GOG base game) on recomp-kit (kit/, our fork; branch ee).
+#
+# The game is one executable and eight DLLs (PLAN.md §2.4). The executable is
+# the kit's main image at its fixed base; every DLL prefers 0x10000000, so each
+# is translated for, and loaded at, its own base below (the base map,
+# docs/reference/build.md). A base other than the preferred one is reached
+# through the DLL's base relocations, which the translator applies; the kit's
+# loader must apply the same ones (the multi-module loader, Phase 2 gap 1).
+#
+# Translation inputs come from the function DB (db/functions/, docs/reference/
+# function-db.md), not from Ghidra's default analysis: tools/setup.py exports
+# listings plus a funcdb.json per module into the ignored analysis/kit/, and
+# `function_db` makes that file authoritative (no data-pointer scan).
+#
+# Paths are relative to this file. original/ and analysis/ are ignored.
+
+[game]
+id = "ee"
+name = "Empire Earth"
+app_name = "EmpireEarth"
+bundle_id = "dev.neoee.empireearth"
+executable = "Empire Earth.exe"
+sha256 = "957e35d75ba80309d094cbfb7367f7c6d61c5fd19fc5f7ca3f2e1cf636a065ab"
+image_base = 0x00400000
+entry_point = 0x00683798          # WinMainCRTStartup (the DRM stub in .cms_t is never translated)
+guest_root = 'C:\Empire Earth'
+developer_exe = "original/gog/Empire Earth/Empire Earth.exe"
+# The arena reaches past the last reserved DLL slot (base map). Runtime-core
+# (gap 3) replaces this with a guarded 4 GB arena.
+guest_size = 0x11000000
+windows_version = "5.1"
+
+[translate]
+listings = "analysis/kit/exe"
+function_db = "analysis/kit/exe/funcdb.json"
+globals = "globals.toml"
+# EE has no audited animation counter; a sentinel in the unmapped arena.
+animation_counter = 0x00f00100
+volatile_reads = []
+entry_points = []
+
+# ---------------------------------------------------------------- base map --
+# Keys sort in dependency order (sxlrt233 <- engine <- Default): today's kit
+# maps auxiliary modules in key order and binds each one's imports when it is
+# mapped. `size` is the PE's SizeOfImage. Reserved slots for the other DLLs:
+#   Language.dll 0x10400000, DX7HRDisplay.dll 0x10500000,
+#   DX7HRTnLDisplay.dll 0x10600000, TCP Protocol.dll 0x10700000,
+#   Miles Sound System Mixer.dll 0x10800000.
+
+[modules.aux.a_sxlrt233]
+name = "sxlrt233.dll"
+path = "original/gog/Empire Earth/sxlrt233.dll"
+sha256 = "ccf6f97d21bdf07abfb709a19fd7e75c585a972bada6341d61952b4700b4440b"
+base = 0x10200000                 # preferred 0x10000000
+size = 0x000e4000
+listings = "analysis/kit/sxlrt233"
+function_db = "analysis/kit/sxlrt233/funcdb.json"
+
+[modules.aux.b_engine]
+name = "Low-Level Engine.dll"
+path = "original/gog/Empire Earth/Low-Level Engine.dll"
+sha256 = "e3f6a2f6d1ec5c3144f7cdd918cf54166de86547d4bbb6b3c9177d3eeb003214"
+base = 0x10000000                 # its preferred base: DB and Ghidra addresses are run-time addresses
+size = 0x00130000
+listings = "analysis/kit/engine"
+function_db = "analysis/kit/engine/funcdb.json"
+
+[modules.aux.c_default]
+name = "Default.dll"
+path = "original/gog/Empire Earth/Default.dll"
+sha256 = "ab0e791039e558ac93f250594003995a4037883864cbdbbb6ded6f8faa4f9d3e"
+base = 0x10300000                 # preferred 0x10000000
+size = 0x0001d000
+listings = "analysis/kit/default"
+function_db = "analysis/kit/default/funcdb.json"
+
+[hooks]
+# The kit's Populous-shaped hooks do not apply to EE: sentinels in the
+# unmapped arena between the EXE and the heap, which never match.
+frame_clock_begin = 0x00f00200
+frame_clock_wait = 0x00f00204
+frame_clock_wait_clamp = 0x00f00208
+frame_clock_clamp_deadline = 0x00f00210
+frame_clock_wait_deadline = 0x00f00214
+cursor_surface_ptrs = [0x00f00220, 0x00f00224]
+mouse_vtable = 0x00f00230
+mouse_device_ptr = 0x00f00234
+mouse_device_right = 0x00f00238
+camera = 0x00f00240
+sprites = []
+
+[mods]
+builtin = "none"
+
+[settings]
+rows = ["window", "performance_overlay"]
+
+[controls]
+default_layout = "hidden"
+pad = "off"
+
+[launcher]
+title = "Empire Earth"
+install_names = ["Empire Earth"]
+
+[setup]
+required_dirs = ["Data"]
+
+[bundle]
+exclude = []
