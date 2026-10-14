@@ -3,4 +3,5 @@
 include(${CMAKE_CURRENT_LIST_DIR}/../tests/m1/harness/CMakeLists.txt)
 include(${CMAKE_CURRENT_LIST_DIR}/../tests/m1/replay/CMakeLists.txt)
 include(${CMAKE_CURRENT_LIST_DIR}/../tests/eh/CMakeLists.txt)
+include(${CMAKE_CURRENT_LIST_DIR}/../tests/lan/plugin/CMakeLists.txt)
 include(${CMAKE_CURRENT_LIST_DIR}/../app/CMakeLists.txt)

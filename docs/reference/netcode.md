@@ -336,6 +336,8 @@ Header: `[0]` key index, `[1]` type, `[2]` for-slot (`0xff` = all), `[3]` origin
 
 ## 7. Winsock / iphlpapi HLE checklist (ADR-001 gap 12)
 
+How the Mac port meets each item: §12 (P5-A).
+
 **Scope:**
 - **ws2_32** (24 imports, `TCP Protocol.dll`): the game session.
 - **wsock32** (28 imports, EXE WONAPI): the lobby. It must be **functional**: UDP 8585 broadcast, TCP 33336 listen/accept/connect, `select`/`__WSAFDIsSet`.
@@ -455,3 +457,61 @@ Both captures decode identically: 2,687 game datagrams, 0 errors, 0 size mismatc
 The main menu shows **v2.00.2974** with the original GOG files, but **v2.00.3644** with DLL copies rebased via `editbin` (the M1 capture copy, `C:\EEPort\game-m1`) [measured]. The displayed version and the connect-request data checksum (§8) are computed from the module **files**. So:
 - M1 captures from rebased copies are fine for single player, but such a copy can't join LAN games with original installs.
 - The Mac port must keep the original files byte-identical on disk. It does: the kit's loader relocates in memory only, and the native boot shows v2.00.2974 (`boot.md`).
+
+## 12. Mac Winsock HLE (P5-A, 2026-10-15)
+
+The kit's Winsock, IP helper API and Netbios, on BSD sockets (kit `feat/winsock`; the kit's own documentation is `runtime/README.md`, "Networking"). Labels: **[measured]** = `winsock_tests`, `platform_tests` and the plugin harness below on an M4 Max (macOS 15.5, one active interface `en0` 192.168.1.227, no ZeroTier); **[static]** = read from the code or `db/win32-imports.json`; **[inferred]** = reasoning.
+
+### 12.1 Coverage [static]
+| DLL | EE imports | Implemented | Also there |
+|---|---|---|---|
+| wsock32 (EXE, WONAPI lobby) | 28 | 28 | `getpeername`, the Winsock 1.1 blocking-hook calls, `WSARecvEx` |
+| ws2_32 (`TCP Protocol.dll`) | 24 | 24 | `WSAEnumNetworkEvents`, the `WSA*Event` calls, `WSAIoctl` (`FIONBIO`, `FIONREAD`, `SIO_GET_INTERFACE_LIST`), `WSASocketA/W`, `WSARecv*`/`WSASend*` without overlapped I/O |
+| iphlpapi | `GetAdaptersInfo` (plugin import; the EXE's by `GetProcAddress`) | yes | `GetAdaptersAddresses`, `GetIpForwardTable`, `GetBestInterface`, `GetBestRoute`, `GetIpAddrTable`, `GetNumberOfInterfaces` |
+| netapi32 | none | `Netbios`: `NCBENUM`, `NCBRESET`, `NCBASTAT` (MAC address) | |
+
+The EXE also asks `wininet.dll` for `InternetGetConnectedState` (WONAPI) [static: EXE strings]; the kit does not serve wininet, so that `LoadLibrary` fails. Not part of P5-A; P5-B should check what the lobby does with that.
+
+### 12.2 The §7 checklist on the Mac
+| Item | Status |
+|---|---|
+| Start-up | `WSAStartup` 2.0 grants 2.0 (the plugin's `wVersion` check), 1.1 grants 1.1; start-ups are counted; `WSACleanup` never closes sockets, so the plugin's Cleanup + Startup inside `NPIMPublish` keeps them [measured] |
+| Handles, `SO_BROADCAST`, `FIONBIO` | small integers from 0x100; `setsockopt(INVALID_SOCKET, SO_BROADCAST)` fails with `WSAENOTSOCK` [measured] |
+| No `SO_REUSEADDR` | a second bind of a UDP or TCP port fails with `WSAEADDRINUSE`; TCP sockets carry `SO_REUSEADDR` on the host only so that a port can be bound again while old connections are in TIME_WAIT, as on Windows [measured] |
+| Bind / listen / connect | `listen(0x7fffffff)` takes the host maximum; a blocking `connect` is a guest wait (other guest threads run) [measured] |
+| Non-blocking I/O | `WSAEWOULDBLOCK` at once; `recv(MSG_PEEK)`; non-blocking `connect` is `WSAEWOULDBLOCK`, a refused one lands in `select`'s except set with `SO_ERROR` `WSAECONNREFUSED` [measured] |
+| Datagram sizes | a datagram longer than the buffer: `WSAEMSGSIZE`, the part that fit kept [measured]. No ICMP error is ever surfaced on a UDP socket |
+| `WSAEventSelect` | a selection records what already holds, a later one replaces it, an accepted socket inherits it; FD_READ is re-signalled after each `recvfrom` while datagrams are queued and quiet after the last (3 queued datagrams, one per wake-up) [measured]. A host thread polls the selected sockets and sets the event; an arrival during a wait woke it in well under a second [measured] |
+| Broadcast | `255.255.255.255` from a wildcard socket goes to every adapter's directed broadcast (point-to-point tunnels: by interface index); from a socket bound to one adapter's address, to that adapter only. On fake adapters: 3 copies for 3 adapters, 1 for a bound socket; on the real `en0`, one copy to 192.168.1.255 that looped back [measured] |
+| Resolution | dotted addresses, `localhost` and the own name without DNS; `gethostbyname(gethostname())` lists every adapter address in `GetAdaptersInfo` order [measured]. `empireearth.m1.sierra.com` is in `game.toml` `[network] offline_hosts` and fails with `WSAHOST_NOT_FOUND` in 0.01 ms [measured]. Other names go to the system resolver off the guest baton (Tailscale MagicDNS for direct connect, §9) |
+| `GetAdaptersInfo` | ≤ 10 records and never more than the plugin's 6,400 bytes; `ERROR_BUFFER_OVERFLOW` with the size for a NULL or short buffer; order: `en*` (the default route's first), ZeroTier `feth*`/`zt*`, `utun*`/`tun*`/`wg*`..., others; no `lo0`, no down interface, no interface without IPv4; `Description` like "Ethernet or Wi-Fi (en0)", `IpAddress.String` set [measured]. `RECOMP_NET_ADAPTERS=en0,feth1234` picks and orders by hand |
+| Heap | the kit CRT ignores and logs the interior `operator delete`: adapter index 2 and 3 freed `buf + 640·k` from `TCP Protocol.dll+0x484c`, exactly the §3.4 path, and the run went on [measured] |
+| Firewall | the macOS application firewall (off on this Mac) would ask once per binary for incoming connections [inferred] |
+
+**A socket bound to one adapter's address** (the lobby, when *Network Adapter* is set: §3.1 [inferred]) receives broadcasts on Windows, but BSD delivers broadcasts to wildcard sockets only. The kit binds such a UDP socket to the wildcard on the host, reports the guest's address from `getsockname`, and drops what Windows would not deliver (anything not addressed to that address or broadcast on that interface) [measured on fake adapters].
+
+**Index 1 is the primary `en*`** in our list, so a Mac player who picks the first adapter (or none) never takes the plugin's index-≥ 2 path; and when they pick another, the CRT absorbs the bad free anyway.
+
+### 12.3 The plugin harness: `tests/lan/plugin` [measured]
+`ee_tcp_plugin_harness` maps sxlrt233, the engine and `TCP Protocol.dll` with the kit's loader (translations linked, as the M1 harness does) and drives the plugin's NPIM entry points on the kit's Winsock over loopback; `run_plugin.py` runs it and decodes its datagram with `tools/lan/eelan.py`.
+
+```sh
+.venv/bin/python tools/build.py --cmake-target ee_tcp_plugin_harness   # needs aux-a_sxlrt233, -b_engine, -g_tcp
+.venv/bin/python -I tests/lan/plugin/run_plugin.py
+```
+
+All 34 harness checks and the 5 decoding checks pass:
+1. `NPIMActivate` → 0 (`WSAStartup(2.0)`, probe socket, key table); `PIMIsValid` 0 → 1; the Sierra lookup fails in 0.01 ms.
+2. `NPIMEnumerateNetworkAdapters` → 1 adapter, "Ethernet or Wi-Fi (en0)"; `NPIMGetLocalAddress(1)` → 192.168.1.227. On three fake adapters, indices 1–3 → 10.99.0.1, 10.100.0.1, 10.147.0.1, with the interior free logged twice.
+3. `NPIMConnect(UDP, "127.0.0.1")` and `NPIMSend` of a 41-byte `0x22`: a plain socket on 127.0.0.1:33334 caught `01c130933e76…` (key index 1). eelan.py decrypts it to exactly the bytes sent: `NEMClientConnectionRequest`, version `v2.00.2974`, player `MacHarness`, checksum `0x0e998b9e`, no size mismatch.
+4. `NPIMPublish` (UDP 33334, TCP 33335, private), `NPIMAllowNewConnections`; the request again: the server's event is signalled by `WSAEventSelect`, `NPIMReceiveFrom` decrypts it and puts the client in slot 0, the event is quiet afterwards; `NPIMSendTo(slot 0)` of a `0x23` is signalled on the client and `NPIMReceive` decrypts it.
+5. `NPIMConnectForXfer` (blocking connect to 33335), `FD_ACCEPT` on the server's accept event, `NPIMAcceptForXfer` matches client 0, `NPIMIsAlive`, `NPIMCloseConnection`, `NPIMDeactivate`.
+
+The private-game path (no `EEService` search) is used so that the harness sends nothing beyond the loopback interface.
+
+### 12.4 Left for P5-B
+- Mac↔legion sessions: the 8585 lobby list, the 33336 room, the 33334 game and 33335 transfer, with checksum streams. `RECOMP_NET_TRACE=1` prints every socket call, every broadcast per adapter, and every lookup.
+- The EXE's WONAPI lobby has not run on the Mac yet: its `select`-based socket threads, its two `recvfrom` pollers and whether it binds the chosen adapter's address are exercised only by the kit's generic tests. `InternetGetConnectedState` (§12.1).
+- ZeroTier: no ZeroTier interface here; fan-out to `feth*` is tested on fake interfaces only. A limited broadcast out of a point-to-point `utun` by interface index is untested on a real tunnel (Tailscale and WireGuard drop broadcasts anyway).
+- The host's `EEService` search (`private = 0`): it broadcasts to 33334 on every adapter; not run here to keep the test bed on loopback.
+- Two instances on one Mac still cannot both bind 8585 or 33334, as on Windows (§3.5).
