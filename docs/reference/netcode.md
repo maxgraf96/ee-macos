@@ -450,3 +450,8 @@ Both captures decode identically: 2,687 game datagrams, 0 errors, 0 size mismatc
 - Host migration (`0x37`/`0x38`, "Migrated Server"). The one unexplained client `EEService` search after a game.
 - Whether the lobby's and the plugin's TCP 33335 can conflict.
 - `Debug OOS Handling` watchpoint.
+
+## Note: the version string depends on module bytes (2026-10-15, legion)
+The main menu shows **v2.00.2974** with the original GOG files, but **v2.00.3644** with DLL copies rebased via `editbin` (the M1 capture copy, `C:\EEPort\game-m1`) [measured]. The displayed version and the connect-request data checksum (§8) are computed from the module **files**. So:
+- M1 captures from rebased copies are fine for single player, but such a copy can't join LAN games with original installs.
+- The Mac port must keep the original files byte-identical on disk. It does: the kit's loader relocates in memory only, and the native boot shows v2.00.2974 (`boot.md`).
