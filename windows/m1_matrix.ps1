@@ -37,7 +37,7 @@ if ($Only) { $cases = @($cases | Where-Object { $Only -contains $_.id }) }
 if ($From) {
   $i = 0; while ($i -lt $cases.Count -and $cases[$i].id -ne $From) { $i++ }
   if ($i -ge $cases.Count) { throw "no case $From" }
-  $cases = @($cases)[$i..($cases.Count - 1)]
+  $cases = @($cases | Select-Object -Skip $i)
 }
 
 $before = Get-ItemProperty $key | Select-Object 'Map Type', 'Map Size', 'Starting Epoch'
