@@ -137,6 +137,16 @@ class Exact:
         k, r, fl = X.isqrt_round(a[1], pc, -16382, rc, dq(pc))
         return (k, r, 0), fl
 
+    def operand(self, tv):
+        """A memory operand of an arithmetic instruction: as load(), except that a
+        signalling NaN stays signalling, so a quiet NaN in ST(0) wins over it (SDM
+        table 4-7; the legion recording of FSUBR m64 shows it)."""
+        v = X.decode_typed(tv)
+        fl = X.FLAG_DE if _is_denorm(tv) else 0
+        if v[0] == "nan" and not v[3]:
+            fl |= X.FLAG_IE
+        return v, fl
+
     def load(self, tv):
         v = X.decode_typed(tv)
         fl = X.FLAG_DE if _is_denorm(tv) and not tv.startswith("x80") else 0
@@ -284,7 +294,7 @@ class Exact:
             kind, rev = AR[base]
             a = ins[0]
             if o["mem"]:
-                b, fl = self.load(v["m"])
+                b, fl = self.operand(v["m"])
                 flags |= fl
             else:
                 b = ins[1]

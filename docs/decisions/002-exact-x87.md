@@ -298,6 +298,17 @@ Run with the procedure in "Running on legion" below. Results are in `build/x87/*
   - The corpus, `insn-2-legion.jsonl.gz` (sha256 `752d4214…cd7bad`), is the Phase 2 reference for criterion 1. It is kept on legion (`C:\EEPort\x87\`) and in the git-ignored `build/x87/big/`, and is regenerable from seed 2.
 - **Conclusion:** the design holds. The reference model is right about real hardware, and the double fast path is exact for everything the simulation does. Criteria 1–2 are scaled to the full vector counts when the translated code exists (Phase 2).
 
+### Hardware validation, round 2 (2026-10-15, legion, same CPU)
+- **Implementation request set:** 17,864 instruction vectors, run with 0 skips. It covers:
+  - the four forms the seed corpora never used (`fsubr_m64`, `fcom_m64`, `fild_m16`, `fild_m32`);
+  - the fast path's edges: products rounding up to DBL_MIN, PC=24 sums landing on a 24-bit midpoint, quotients beside DBL_MIN.
+- **One rule corrected.** With ST(0) a QNaN and an m64 operand an SNaN, hardware returns ST(0)'s QNaN, payload and all. The model and the kit had quietened the memory operand first and picked by significand, which gave 18 differences, all `fsubr_m64` across the six CWs. The rule is SDM table 4-7: an SNaN and a QNaN give the QNaN, whichever operand holds it.
+  - The kit is fixed on `feat/x87-nan`; m32 operands keep their signalling bit too. `model_run.py` is fixed here.
+  - Both now give 0 differences on the set [measured]. The two big corpora stay at 0 non-transcendental differences (169,766 and 981,092 vectors) [measured].
+- **Criterion 2 at scale:** 131,208 call vectors recorded inside the game (`um-3`), run through the translated modules (`tests/x87/run_um.py --with-exe`).
+  - **113,180 required vectors equal the recording bit for bit**, at 0x027f and 0x007f: UMArcCos, UMArcTan, UMArcTan2, UMCos, UMTan, UMQuadraticEquation, UMFastMath::Sqrt, msvcrt `sqrt`/`_CIsqrt`/`_ftol`, and the executable's ftol helper [measured].
+  - Informational: msvcrt `pow`/`_CIpow`/`sin`/`_CIsin`/`log` still differ, because they use the host libm. `atof` and `sscanf "%f"` now match (0 of 5,028).
+
 ### Acceptance criteria
 1. **Instruction vectors.** All non-transcendental suites, at least 10⁶ vectors over CWs 0x027F, 0x007F, 0x037F, 0x0E7F, 0x067F and 0x0A7F, plus the game idioms. The port's translated x87 must equal legion **bit for bit**: register values, memory outputs and C0–C3.
 2. **Call vectors.** At least 10⁵ vectors at PC53 and PC24 for UM\*, `UMFastMath::Sqrt`, msvcrt `sqrt` and the three truncating ftol helpers. The translated modules must equal legion's Frida results bit for bit, including ST(0) as 80 bits.
