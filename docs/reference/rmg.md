@@ -452,6 +452,8 @@ Struct definitions are in `rmg_replay.h`. `rmg_pack.py` refuses calls with captu
 - **Output:** one `PASS`/`FAIL` line per pack, `MISMATCH` details, then `n/m packs passed`. Exit 0, 1 or 2.
 
 ### 7.4 Mac (kit)
+Implemented: `ee_m1_replay` / `ee_m1_replay_static`, `tools/test.py --m1-replay`, and the matrix runner `tools/m1/run_matrix.py`. See [m1-replay.md](m1-replay.md).
+
 The same `rmg_replay_core.c` behind an `rr_platform` implemented by the kit harness. The interface, and what it needs from workstreams A and B, are in the replay README:
 - exact-address guest mapping in the 4 GB arena;
 - module load at given bases with import overrides;
