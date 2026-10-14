@@ -11,7 +11,8 @@ set(EE_M1_KEYS a_sxlrt233 b_engine c_default)
 set(EE_M1_SOURCES ${CMAKE_CURRENT_LIST_DIR}/m1_harness.cpp
     # --um: ADR-002 criterion 2, the engine's maths against the recorded calls.
     ${CMAKE_CURRENT_LIST_DIR}/um_vectors.cpp
-    # The msvcrt functions the kit does not implement yet (control word, EH).
+    # Stand-ins for msvcrt functions the kit lacked; registered before imports_init, so
+    # the kit's own shims (x87 control word, EH, now all present) take precedence.
     ${CMAKE_CURRENT_LIST_DIR}/crt_pending.cpp)
 set(EE_M1_LIBS recomp_platform recomp_runtime recomp_dx_null)
 

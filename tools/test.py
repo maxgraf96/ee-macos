@@ -3,6 +3,7 @@
 
     .venv/bin/python tools/test.py                 # this repository's checks, then the kit's portable suites
     .venv/bin/python tools/test.py --m1 [--regenerate]   # the M1 harness (tests/m1/)
+    .venv/bin/python tools/test.py --eh [--regenerate]   # the EH harness (tests/eh/)
     .venv/bin/python tools/test.py --native ...    # any other option: kit/tools/test.py's, for this game
 
 --kit DIR (or RECOMP_KIT_DIR) tests against another kit checkout than kit/.
@@ -21,6 +22,9 @@ def main(argv):
     if "--m1" in argv:
         argv = [a for a in argv if a != "--m1"]
         return subprocess.call([sys.executable, str(kitpath.ROOT / "tests/m1/run_harness.py")] + argv)
+    if "--eh" in argv:
+        argv = [a for a in argv if a != "--eh"]
+        return subprocess.call([sys.executable, str(kitpath.ROOT / "tests/eh/run_eh.py")] + argv)
     kit, rest = kitpath.take_kit(list(argv))
     if not rest:
         # This repository's own checks (game.toml, globals.toml, tools), against the chosen kit.
