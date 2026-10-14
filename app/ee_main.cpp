@@ -26,10 +26,8 @@
 //     frames; sound and input are null. Escape is pressed through the intro
 //     movies (--play-movies turns that off), as a player does to reach the
 //     menu in seconds.
-//   - TEMPORARY stand-ins for gaps other workstreams own, each registered so
-//     the kit's own shim wins as soon as it exists (docs/reference/boot.md §5):
-//     the Miles calls the sound plugin makes (pending_mss32.cpp), an inert
-//     DirectMusic (pending_dmusic.cpp).
+//   - What every Empire Earth host adds to the kit, the user directory and
+//     the temporary stand-ins, is ee_standins.cpp's (shared with the app).
 //   - A boot report: the milestones reached, the threads the game started and
 //     the x87 control word each ran at, and every import that was called with
 //     no implementation behind it. --trace writes every import call.
@@ -44,7 +42,6 @@
 #include "../runtime/imports.h"
 #include "../runtime/loader.h"
 #include "../runtime/memory.h"
-#include "../runtime/user32_internal.h"
 #include "../runtime/win32.h"
 #include "../platform/os.h"
 
@@ -57,10 +54,6 @@
 #include <set>
 #include <string>
 #include <vector>
-
-void ee_pending_mss32_register(); // pending_mss32.cpp
-void ee_pending_mss32_over_kit();
-void ee_pending_dmusic_register(); // pending_dmusic.cpp
 
 namespace {
 
@@ -225,7 +218,10 @@ bool observe_call(const char *desc, const uint32_t *args, uint32_t argc, uint32_
 
 // The trace's results, and the thread a CreateThread made: its id is in the
 // caller's out-parameter once the call returns.
+ImportReturnObserver g_next_return_observer = nullptr; // the kit's (dx failure reports)
 void observe_return(const char *desc, uint32_t eax) {
+    if (g_next_return_observer)
+        g_next_return_observer(desc, eax);
     const uint32_t tid = guest_current_thread_id();
     if (g_trace)
         fprintf(g_trace, "%u   -> %08x %s\n", tid, eax, after_bang(desc));
@@ -305,25 +301,6 @@ extern "C" void host_input_state(HostInputState *out) {
 namespace {
 
 // --- the host ----------------------------------------------------------------
-// TEMPORARY (P3-C, docs/reference/boot.md §5): when a thread ends, Windows
-// destroys the windows it created, sending them WM_DESTROY on that thread. The
-// splash thread (EXE 0x5344fb) relies on it: it leaves its loop on WM_QUIT and
-// returns without DestroyWindow. Without this the splash stays the window
-// host_main_window() names, the one the boot activates and closes.
-void destroy_thread_windows() {
-    const uint32_t tid = guest_current_thread_id();
-    std::vector<uint32_t> mine;
-    for (const auto &kv : user32::windows())
-        if (kv.second.thread == tid && !kv.second.parent)
-            mine.push_back(kv.first);
-    const uint32_t destroy = mine.empty() ? 0 : imports_resolve("USER32.dll", "DestroyWindow");
-    for (uint32_t hwnd : mine)
-        if (destroy && user32::find_window(hwnd)) {
-            printf("[ee] thread %u ended: destroying its window %08x\n", tid, hwnd);
-            guest_call(guest_current_context(), destroy, hwnd);
-        }
-}
-
 // The deadline: WM_CLOSE to the main window, as closing it does; the game
 // then shuts down through its own exit path.
 void tick() {
@@ -448,9 +425,6 @@ int main(int argc, char **argv) {
     if (!trace.empty() && !(g_trace = fopen(trace.c_str(), "w")))
         fprintf(stderr, "[ee] cannot write %s\n", trace.c_str());
 
-    ee_pending_mss32_register();
-    ee_pending_dmusic_register();
-
     BootOptions opts;
     opts.name = "EmpireEarth";
     // The application has the foreground for the whole run, as a player's
@@ -466,15 +440,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "[ee] loading failed: %s\n", loader_error());
         return 2;
     }
-    ee_pending_mss32_over_kit();
     reach(kLoaded);
     printf("[ee] %s; user data %s; strict %s\n", loader_exe_path().c_str(), user.c_str(),
            getenv("RECOMP_STRICT"));
     for (uint32_t i = 0; const LoaderModule *m = loader_module(i); ++i)
         printf("[ee]   %-30s %08x..%08x (prefers %08x, %u relocations)\n", m->name.c_str(), m->base,
                m->base + m->size, m->preferred_base, m->relocations);
-    sched_set_thread_exit_observer(destroy_thread_windows);
     imports_set_call_observer(observe_call);
+    g_next_return_observer = imports_set_return_observer_get();
     imports_set_return_observer(observe_return);
 
     host_app_state(true, false);

@@ -116,32 +116,6 @@ void sample_playback_rate(X86 *c) {
     set_eax(c, 22050);
 }
 
-// AIL_set_preference / AIL_get_preference with Miles 6's defaults. The kit's
-// table starts at zero, and the mixer divides by DIG_DS_FRAGMENT_SIZE
-// (Miles Sound System Mixer.dll+0x194f): 8 ms fragments, 96 of them, 8 mixed
-// ahead, as Miles 6 ships them.
-int32_t g_prefs[64] = {};
-bool g_prefs_seeded = false;
-void seed_prefs() {
-    if (g_prefs_seeded)
-        return;
-    g_prefs_seeded = true;
-    g_prefs[34] = 8;  // DIG_DS_FRAGMENT_SIZE (ms)
-    g_prefs[35] = 96; // DIG_DS_FRAGMENT_CNT
-    g_prefs[42] = 8;  // DIG_DS_MIX_FRAGMENT_CNT
-}
-void set_preference(X86 *c) {
-    seed_prefs();
-    uint32_t i = arg(c, 0);
-    set_eax(c, i < 64 ? (uint32_t)g_prefs[i] : 0);
-    if (i < 64)
-        g_prefs[i] = (int32_t)arg(c, 1);
-}
-void get_preference(X86 *c) {
-    seed_prefs();
-    set_eax(c, arg(c, 0) < 64 ? (uint32_t)g_prefs[arg(c, 0)] : 0);
-}
-
 #define AIL(name, bytes, fn) {"mss32.dll", "_AIL_" #name "@" #bytes, (bytes) / 4, fn}
 const ImportShim kPending[] = {
     AIL(open_digital_driver, 16, open_digital_driver),
@@ -163,17 +137,8 @@ const ImportShim kPending[] = {
     AIL(set_sample_position, 8, ret0),
 };
 
-const ImportShim kOverKit[] = {
-    AIL(set_preference, 8, set_preference),
-    AIL(get_preference, 4, get_preference),
-};
-
 } // namespace
 
 void ee_pending_mss32_register() {
     imports_register(kPending, sizeof kPending / sizeof kPending[0]);
-}
-// After the kit's tables (boot_load): these replace the kit's own.
-void ee_pending_mss32_over_kit() {
-    imports_register(kOverKit, sizeof kOverKit / sizeof kOverKit[0]);
 }
