@@ -1,0 +1,4 @@
+[submodule "kit"]
+	path = kit
+	url = git@codeberg.org:maxgraf/recomp-kit.git
+	branch = ee
