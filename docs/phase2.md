@@ -45,10 +45,10 @@ No game bytes, generated C, captures or Ghidra databases in either repo. The kit
 |---|---|---|
 | A game-repo | **merged** (`ee` 67fe69f, ee-macos 884a1c2) | DB-driven translation: Default 834, sxlrt233 3,351, engine 5,221, EXE 36,888 functions, 0 failures/gaps/unmodelled. Freestanding bundles linked by `ld64.lld`. `game.toml` base map. The M1 harness runs the original DLLs through the kit's loader. |
 | B runtime-core | **merged** (`ee` 35624d7) | Multi-module loader (relocation, binding, Windows DllMain order, LoadLibrary refcounts, TLS), strict mode, 4 GB guarded arena, argc for 518/519 imports, CW `0x027f`. |
-| C x87 | running | ADR-002 implementation |
+| C x87 | **merged** (`ee` 0f7a705) | ADR-002 implemented: 0 differences on 1.15 M non-transcendental hardware vectors (both corpora); transcendentals within 1 ulp; criterion 2 at 45,380 `UM*` calls, 0 differences, through the translated engine; `_controlfp` family; FMA check; SoftFloat-80 vendored freestanding. Extra hardware vectors and a 131k `UM*` set are pending (legion 0009). |
 | D crt | **merged** (`ee` 381fa1a) | msvcrt 160/167, msvcp60 17/17; 42k unit checks. The Windows reference run is pending (legion 0008). |
 | E eh | running (started after A) | MSVC SEH + C++ EH |
 | F m1-oracle | legion 0006 + 0007 queued | replay driver build; capture environment with DLLs rebased to the `game.toml` map; S00 smoke |
 | G m1-re | **merged** (ee-macos 1401ee9) | [rmg.md](reference/rmg.md): pipeline, context, capture/replay spec, 60-case matrix |
 
-Next: merge C and E, run the legion S00 capture → Windows replay → Mac replay, then the 60-case matrix (M1).
+Next: merge E, run the legion S00 capture → Windows replay → Mac replay, then the 60-case matrix (M1).
