@@ -1,25 +1,34 @@
 """Reference model of msvcrt.dll's decimal-to-binary conversion, with its open variants.
 
-The kit implements the measured model (kit/runtime/msvcrt_format.cpp, "Decimal -> binary"):
-digits accumulate into an integer truncated to its 64 most significant bits, the integer
-times 10^E is exact, it is rounded half-down (up only past half) to the significand, and a
-denormal is rounded again half-down at half its unit and that bit truncated.
+The kit implements the measured model (kit/runtime/msvcrt_format.cpp, "Decimal -> binary"),
+which reproduces every strtod, atof and sscanf("%f"/"%lf") result measured on legion
+(14,000 inputs, among them 1,200 chosen to tell models apart):
 
-legion's 4,267 strtod and 4,267 sscanf("%f") results cannot tell apart the variants below;
-`gen_vectors.py --suite decimal` writes inputs on which they disagree, and `fit_decimal.py`
-says which variant Windows follows.
+  1. The significand's digits, without leading or trailing zeros, form an integer that is
+     truncated to its 64 most significant bits.
+  2. That integer times 10^E is truncated to 80 significant bits (one rounding of the exact
+     product stands for the extended-precision arithmetic msvcrt does).
+  3. A normal result is rounded half-down from those 80 bits: up only past half, so an
+     exact tie goes down.
+  4. A denormal is rounded from the same 80 bits half-down at half its unit, and that bit is
+     then truncated.
 
-  stepwise   truncate after every digit (True) or once, over all digits (False)
-  max_digits ignore digits after this many (None: all)
-  stage1     a denormal is first rounded to the full significand (True) or straight from
-             the exact value (False)
-  scale_bits None: exact scaling; n: the product is truncated to n bits before rounding
+`gen_vectors.py --suite decimal2` writes inputs on which the variants below disagree;
+`fit_decimal.py` scores them against a run.
+
+  stepwise      truncate after every digit instead of once
+  max_digits    ignore digits after this many (None: all)
+  strip_zeros   drop trailing zeros before accumulating
+  product_bits  significant bits the scaled product keeps (None: exact)
+  product_mode  "trunc" or "nearest" for that step
+  stage1        round a denormal to the full significand first
 """
 from fractions import Fraction
 import re
 
 NUM = re.compile(r'^[ \t\n\r\v\f]*([+-]?)(\d*)(?:\.(\d*))?(?:[eEdD]([+-]?\d+))?')
-DEFAULT = dict(stepwise=True, max_digits=None, stage1=True, scale_bits=None)
+DEFAULT = dict(stepwise=False, max_digits=None, strip_zeros=True, product_bits=80,
+               product_mode="trunc", stage1=False)
 
 
 def parse(s):
@@ -43,24 +52,43 @@ def trunc_bits(n, bits):
     return (n >> s) << s
 
 
-def accumulate(digits, stepwise, max_digits):
+def accumulate(digits, stepwise, max_digits, strip_zeros):
     if max_digits:
         digits = digits[:max_digits]
+    if strip_zeros:
+        digits = digits.rstrip("0")
+    if not digits:
+        return 0, 0
     if stepwise:
         acc = 0
         for ch in digits:
             acc = trunc_bits(acc * 10 + (ord(ch) - 48), 64)
         return acc, len(digits)
-    return trunc_bits(int(digits), 64) if digits else 0, len(digits)
+    return trunc_bits(int(digits), 64), len(digits)
 
 
-def round_ms(q, P, emin, emax, stage1=True):
-    """Fraction q > 0 -> Fraction result (None for overflow)."""
+def exp2(q):
     e = q.numerator.bit_length() - q.denominator.bit_length()
     if Fraction(2) ** e > q:
         e -= 1
     if Fraction(2) ** (e + 1) <= q:
         e += 1
+    return e
+
+
+def round_to_bits(q, bits, mode):
+    e = exp2(q)
+    x = q * Fraction(2) ** (bits - 1 - e)
+    n = x.numerator // x.denominator
+    r = x - n
+    if mode == "nearest" and (r > Fraction(1, 2) or (r == Fraction(1, 2) and n & 1)):
+        n += 1
+    return Fraction(n) * Fraction(2) ** (e - (bits - 1))
+
+
+def round_ms(q, P, emin, emax, stage1=False):
+    """Fraction q > 0 -> Fraction result (None for overflow)."""
+    e = exp2(q)
     if e >= emin or stage1:
         x = q * Fraction(2) ** (P - 1 - e)
         m = x.numerator // x.denominator
@@ -94,25 +122,20 @@ def convert(s, P=53, emin=-1022, emax=1023, **variant):
         return None, neg
     if e < -400:
         return Fraction(0), neg
-    acc, n = accumulate(digits, v["stepwise"], v["max_digits"])
+    acc, n = accumulate(digits, v["stepwise"], v["max_digits"], v["strip_zeros"])
     if acc == 0:
         return Fraction(0), neg
     q = Fraction(acc) * Fraction(10) ** (e - n)
-    if v["scale_bits"]:
-        exp = q.numerator.bit_length() - q.denominator.bit_length() + 1
-        scaled = q * Fraction(2) ** (v["scale_bits"] - exp)
-        q = Fraction(scaled.numerator // scaled.denominator) * Fraction(2) ** (exp - v["scale_bits"])
+    if v["product_bits"]:
+        q = round_to_bits(q, v["product_bits"], v["product_mode"])
     return round_ms(q, P, emin, emax, v["stage1"]), neg
 
 
 def to_bits(value, neg, P=53):
     import struct
-    if value is None:
-        x = float("inf")
-    else:
-        x = float(value) if P == 53 else value
     if P == 53:
-        b = struct.unpack("<Q", struct.pack("<d", x if value is None else float(value)))[0]
+        x = float("inf") if value is None else float(value)
+        b = struct.unpack("<Q", struct.pack("<d", x))[0]
         return "%016x" % (b | (1 << 63) if neg else b)
     if value is None:
         b = 0x7F800000

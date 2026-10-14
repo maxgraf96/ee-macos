@@ -373,17 +373,22 @@ def wide_suite(g):
 
 VARIANTS = {
     "measured": {},
-    "whole": dict(stepwise=False),
-    "cap20": dict(max_digits=20),
-    "cap21": dict(max_digits=21),
-    "cap25": dict(max_digits=25),
-    "no_stage1": dict(stage1=False),
-    "scale64": dict(scale_bits=64),
-    "scale80": dict(scale_bits=80),
+    "stepwise": dict(stepwise=True),
+    "keep_zeros": dict(strip_zeros=False),
+    "cap24": dict(max_digits=24),
+    "cap28": dict(max_digits=28),
+    "cap32": dict(max_digits=32),
+    "exact_product": dict(product_bits=None),
+    "product79": dict(product_bits=79),
+    "product81": dict(product_bits=81),
+    "product78_nearest": dict(product_bits=78, product_mode="nearest"),
+    "product79_nearest": dict(product_bits=79, product_mode="nearest"),
+    "product80_nearest": dict(product_bits=80, product_mode="nearest"),
+    "stage1": dict(stage1=True),
 }
 
 
-def decimal_suite(g, count=400):
+def decimal_suite(g, count=400, long_inputs=False):
     """Inputs on which the variants of decimal_model.py disagree (fit_decimal.py)."""
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -425,8 +430,13 @@ def decimal_suite(g, count=400):
             n = rng.randint(1, 1 << 52)
             q = (Decimal(n) + Decimal(rng.choice([0.5, 0.25, 0.75, 0.4999999, 0.5000001]))) * Decimal(2) ** -1074
             text = format(q, f".{rng.randint(17, 24)}e")
-        else:  # 19-digit integers times large powers of ten: the scaling precision
+        elif not long_inputs or kind < 0.92:  # 19-digit integers times large powers of ten
             text = "%d" % rng.randint(10 ** 18, 10 ** 19) + "e" + str(rng.randint(-330, 290))
+        else:  # 24..40 digits with trailing zeros mixed in: the digit limit and the zeros
+            digits = "%d" % rng.randint(10 ** 23, 10 ** rng.randint(24, 40))
+            if rng.random() < 0.5:
+                digits = digits[:rng.randint(19, len(digits))] + "0" * rng.randint(1, 6)
+            text = digits[0] + "." + digits[1:] + "e" + str(rng.randint(-320, 300))
         consider(text)
     for text in kept:
         g.add("strtod", "C", hx(text))
@@ -438,7 +448,7 @@ def decimal_suite(g, count=400):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--suite", choices=["all", "wide", "decimal"], default="all",
+    ap.add_argument("--suite", choices=["all", "wide", "decimal", "decimal2"], default="all",
                     help="wide: only the full-BMP wctype measurement (131,072 vectors); "
                     "decimal: inputs that decide between decimal_model.py's variants")
     ap.add_argument("--game-numbers", help="TSV from extract_game_numbers.py")
@@ -452,8 +462,8 @@ def main():
     if args.suite == "wide":
         wide_suite(g)
         return write(g, args.output)
-    if args.suite == "decimal":
-        decimal_suite(g)
+    if args.suite in ("decimal", "decimal2"):
+        decimal_suite(g, long_inputs=args.suite == "decimal2")
         return write(g, args.output)
     g.rand()
     g.parsing()

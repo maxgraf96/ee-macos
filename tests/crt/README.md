@@ -14,7 +14,7 @@ sides. These files measure that on a real Windows machine (legion) and compare i
 | `compare.py` | Diffs the Windows results with the HLE's and writes a Markdown report. |
 | `build_wine.sh` | Builds `crtvec.exe` on the Mac with LLVM for a dry run under Wine (no SDK needed). |
 | `decimal_model.py` | Python reference of msvcrt's decimal-to-binary conversion, with the variants the data has not yet ruled out. |
-| `fit_decimal.py` | Scores those variants against a run of `gen_vectors.py --suite decimal`. |
+| `fit_decimal.py` | Scores those variants against a run of `gen_vectors.py --suite decimal` or `decimal2`. |
 | `wide_table.py` | Turns measured `wctype` results into the input of the kit's `tools/gen_msvcrt_unicode.py --measured`. |
 
 The HLE side runs the same file with the kit's test binary:
@@ -143,25 +143,29 @@ run confirms or corrects it ([inferred] until measured).
 ## Measured on legion (msvcrt.dll 7.0.26100.9444, 2026-10-14)
 
 The first run (65,232 vectors, no crash) showed 1,054 strict differences; the HLE now has
-**0** on both vector sets, the documented divergences below aside. Every one of the 13,275
+**0** on all four sets (main, no-game, decimal, wide: 197,504 vectors), the documented
+divergences below aside. Every one of the 13,275
 vectors built from the game's own numbers matched before and after.
 
-- **Decimal input is not correctly rounded.** msvcrt accumulates the digits into an integer
-  truncated to 64 significant bits, scales it exactly by the power of ten, and rounds up only
-  past half (an exact tie goes down, for floats too: `"645605600"` is 0x4e19eca3). A denormal
-  is rounded again, half down, at half its unit, and that bit is truncated
-  (`"1.28392112e-43"` as a float is 91 units, not 92). This reproduces all 8,575 strtod and
-  sscanf results; `decimal_model.py` is the reference, `--suite decimal` (1,200 vectors)
-  separates the variants still open. `atof` sets no errno; strtod's ERANGE is for zero and
-  infinity only.
+- **Decimal input is not correctly rounded.** The significand's digits, without leading or
+  trailing zeros, form an integer truncated to its 64 most significant bits; that integer
+  times the power of ten keeps 80 bits, truncated; a normal result rounds up from those 80
+  bits only past half (an exact tie goes down, for floats too: `"645605600"` is
+  0x4e19eca3); a denormal is rounded from the same 80 bits half down at half its unit, and
+  that bit is truncated (`"1.28392112e-43"` as a float is 91 units, not 92). This
+  reproduces all ~14,000 strtod/atof/sscanf results, including the 1,200 inputs of
+  `--suite decimal` chosen to separate models (2026-10-15). `decimal_model.py` is the
+  reference; `--suite decimal2` (300 vectors) separates the variants still tied with it
+  (a digit limit above 32, 79 bits or rounding to nearest for the product). `atof` sets no
+  errno; strtod's ERANGE is for zero and infinity only.
 - printf: `%#g` of zero prints P digits after the point. Nothing else differed in 14,224.
 - `tolower`/`toupper` outside 0..255 (EOF included) map the low byte through code page 1252
   in any locale; `_mbsupr`/`_mbslwr` use code page 1252 in the "C" locale too;
   `_stricmp`-like functions give -1/0/1 under "C" and the difference under a real locale.
-- Wide characters follow Windows' own (older, Unicode 5-era) data, which no single Unicode
-  version reproduces: the kit generates its tables from measurements (`wide_table.py`), with
-  Unicode 3.2 rules for code points not yet measured. `--suite wide` (131,072 vectors)
-  measures the whole BMP.
+- Wide characters follow Windows' own (Unicode 5-era) data, which no single Unicode version
+  reproduces. The kit's tables are generated from the full-BMP measurement (`--suite wide`,
+  131,072 vectors, 2026-10-15) through `wide_table.py`: classes are the same in both locales
+  for every code point, and all 65,536 now match.
 - `_atoi64` saturates; `fabs` of a NaN keeps its sign and sets EDOM; `ldexp` reports no
   underflow; `gmtime(-1)` is second −1 of 1970-01-01; `_splitpath` empties every part when
   one is too long; `"british"` is not a locale; `localeconv`'s sign positions per locale;
