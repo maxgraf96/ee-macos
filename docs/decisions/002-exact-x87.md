@@ -1,5 +1,5 @@
 # 002: Exact x87: design of the fork's floating-point layer
-Status: proposed
+Status: accepted (design; the acceptance criteria below gate the Phase 2 implementation)
 Date: 2026-10-14
 
 This is the exact-x87 design note that ADR-001 makes a Phase 2 gate (gap 6), and that PLAN §5.2 asks for.
@@ -285,6 +285,15 @@ Library calls are negligible: `sqrt` at 2.9k/s and UM\* at 2.3k/s cost microseco
 | Game functions | `gen_vectors.py --suite um`. `um_unicorn.py` runs the user's LLE and EXE in Unicorn with msvcrt stand-ins. `um_model.py` is the double model of UM\*. | `windows/frida/ummath_vectors.js` calls the real functions in the running game, with the same stub bytes as `x87ops.build_call_stub` [measured: identical for all 14 signatures]. | `compare.py --by fn,cw` |
 | Translated code (Phase 2) | Instruction vectors assembled into a tiny module, run through the fork's translator and executed natively. Call vectors run against the translated LLE and EXE bundles (`ee_harness`). | n/a | same files |
 | Game | per-tick checksum streams; `Debug OOS Handling` "OUT OF SYNCH DUMP" text (positions and transforms printed `%6.6f`); M1 byte-identical random maps | LAN sessions | PLAN §6 |
+
+### Hardware validation (2026-10-14, legion: Intel Core Ultra 9 275HX)
+Run with the procedure in "Running on legion" below. Results are in `build/x87/*.md`, which is git-ignored and can be regenerated.
+- **Instruction vectors: 187,182 run on hardware.** Against the **exact model** (`model_run.py --model exact`), every non-transcendental suite (arithmetic, ties, range, specials, memory loads and stores, integer conversions) matches **bit for bit at every tested control word**: `0x027F`, `0x007F`, `0x037F`, `0x0E7F`, `0x067F`. The only differences are transcendental instructions.
+  - With the π/66-bit reduction model (`--pi66`), those are 660 cases, all within 1 ulp. Hardware transcendentals are not correctly rounded, so we model them as "informational" (criterion 6).
+- **The kit's double model vs hardware** differs only where the game never goes: 64-bit-precision inputs, range escapes, specials, PC64, and non-nearest rounding. Game-shaped arithmetic at `0x027F`/`0x007F` has 0 differences.
+- **Game maths called inside the real game** (Frida, 52,608 vectors, 0 errors): at the simulation's `0x027F`, `UMArcTan2`, `UMArcCos`, `UMArcTan`, `UMCos`, `UMTan`, `UMFastMath::Sqrt`, `UMQuadraticEquation` and msvcrt `sqrt` equal the double model with **0 differences** in about 24,000 calls.
+  - The msvcrt `pow`/`atan2`/`sin`/… suites and the PC24 call rows aren't modelled by `um_model.py` yet. They are off the simulation path; they move to Phase 2 with the msvcrt HLE.
+- **Conclusion:** the design holds. The reference model is right about real hardware, and the double fast path is exact for everything the simulation does. Criteria 1–2 are scaled to the full vector counts when the translated code exists (Phase 2).
 
 ### Acceptance criteria
 1. **Instruction vectors.** All non-transcendental suites, at least 10⁶ vectors over CWs 0x027F, 0x007F, 0x037F, 0x0E7F, 0x067F and 0x0A7F, plus the game idioms. The port's translated x87 must equal legion **bit for bit**: register values, memory outputs and C0–C3.

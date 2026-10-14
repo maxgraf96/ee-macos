@@ -305,7 +305,10 @@ Precedents for the later C phase:
     - a truncating helper (567 call sites) built on `FISTP m64`, which never touches the control word.
   - **Measured:** the kit's double model is **already bit-exact** on game-shaped work: 0 differences on 13,577 PC53 and 7,700 PC24 vectors, and on 22,076 `UM*` vectors vs Unicorn running the real engine. Rosetta's x87 matches our reference model on 184k vectors.
 - **Design (ADR-002):** a hybrid. The double fast path is selected by a per-thread mode word (PC53, round-nearest, no extended value live); a free exponent guard routes rare edge cases to SoftFloat-80; PC24 uses midpoint-safe rounding; CW starts at `0x027f`; `_controlfp` is a cheap HLE; build with `-ffp-contract=off` and a CI check for FMA. **3.5–4.5 weeks.**
-- **Acceptance:** before acceptance, the legion hardware vectors must pass (raw instructions plus the `UM*` functions called inside the real game). An AMD run is a nice-to-have. Intel and AMD transcendentals differ, but none feed EE's simulation.
+- **Validated on legion hardware (2026-10-14), so ADR-002 is accepted:**
+  - Instructions: 187k vectors; the exact model equals Intel hardware bit for bit on every non-transcendental case at all tested control words.
+  - Game maths: the real `UM*` functions inside the game equal the double model with 0 differences at the simulation's `0x027f`.
+  - Remaining: implementation acceptance in Phase 2 (ADR-002 criteria). An AMD run is a nice-to-have; Intel/AMD transcendentals differ, but none feed EE's simulation.
 - **Oracles:**
   - **The game's own sync check:** a per-tick world checksum at `EXE+0x145ebf`, sent to the host as message `0x32`; out-of-sync players are removed.
   - `windows/frida/netcode_hooks.js` for per-machine checksum streams.
@@ -455,14 +458,14 @@ Rough focused-engineering weeks for one developer with AI agents; Phases 0–1 r
 **Pending runs on `legion`** (scripts ready):
 - `code_census.js`: executed code vs DB, expecting 0 blocks outside it;
 - `com_census.js`: D3D7/DInput calls in-game;
-- `x87_runner.py` + `ummath_vectors.js`: hardware vectors that gate ADR-002;
+- ~~`x87_runner.py` + `ummath_vectors.js`: hardware vectors that gate ADR-002~~ **done 2026-10-14, passed**;
 - `music_hooks.js` + loopback recording;
 - `netcode_hooks.js` + `pktmon`: LAN session with a second Windows client.
 
 Thread roles come from these censuses, not the static DB.
 
 ### Phase 2: Translation core → **M1: native random-map generator** (≈7–12 wk, per ADR-001 gaps 1–7)
-- **Gate:** the exact-x87 design note now exists as [ADR-002](decisions/002-exact-x87.md) (proposed). It is accepted once the legion hardware vectors pass. If the fork's x87 layer can't meet §5.2 within ~6 weeks, replace that layer only.
+- **Gate passed:** [ADR-002](decisions/002-exact-x87.md) is accepted, with the design validated on legion hardware. Implement it within ~3.5–4.5 weeks; if the fork's x87 layer can't meet §5.2 within ~6 weeks, replace that layer only.
 - **Gap 2 (EXE hygiene)** is reduced to ~2–3 days of kit changes: make the DB authoritative in `game_config.py`, take code ranges from the DB, disable the data-pointer scan, feed `data_in_code` into the jump-table ranges, exclude DRM (function-db.md §7.4).
 - Close the fork's gaps:
   - multi-module loader (relocations, cross-module imports, DllMain order);
