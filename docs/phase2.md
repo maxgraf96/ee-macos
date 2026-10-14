@@ -39,3 +39,16 @@ The capture format is specified by the `m1-re` workstream in `docs/reference/rmg
 
 ## Legal hygiene (unchanged)
 No game bytes, generated C, captures or Ghidra databases in either repo. The kit stays game-neutral.
+
+## Status (2026-10-14, evening)
+| ID | State | Result |
+|---|---|---|
+| A game-repo | **merged** (`ee` 67fe69f, ee-macos 884a1c2) | DB-driven translation: Default 834, sxlrt233 3,351, engine 5,221, EXE 36,888 functions, 0 failures/gaps/unmodelled. Freestanding bundles linked by `ld64.lld`. `game.toml` base map. The M1 harness runs the original DLLs through the kit's loader. |
+| B runtime-core | **merged** (`ee` 35624d7) | Multi-module loader (relocation, binding, Windows DllMain order, LoadLibrary refcounts, TLS), strict mode, 4 GB guarded arena, argc for 518/519 imports, CW `0x027f`. |
+| C x87 | running | ADR-002 implementation |
+| D crt | **merged** (`ee` 381fa1a) | msvcrt 160/167, msvcp60 17/17; 42k unit checks. The Windows reference run is pending (legion 0008). |
+| E eh | running (started after A) | MSVC SEH + C++ EH |
+| F m1-oracle | legion 0006 + 0007 queued | replay driver build; capture environment with DLLs rebased to the `game.toml` map; S00 smoke |
+| G m1-re | **merged** (ee-macos 1401ee9) | [rmg.md](reference/rmg.md): pipeline, context, capture/replay spec, 60-case matrix |
+
+Next: merge C and E, run the legion S00 capture → Windows replay → Mac replay, then the 60-case matrix (M1).
