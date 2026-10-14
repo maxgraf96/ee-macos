@@ -496,8 +496,25 @@ function stackWindow(esp) {
   if (r) { lo = Math.max(lo, u32(r.base)); hi = Math.min(hi, u32(r.base) + r.size); }
   return { addr: lo, size: hi - lo };
 }
+// ctx is not the start of its heap block: the block begins with an EXE vtable at ctx-4 and ends with
+// Default.dll's EERMPIM function table after ctx+CTX_SIZE. Exit captures found the whole block
+// through other pointers, entry captures only ctx..ctx+CTX_SIZE, so the replay compared bytes it had
+// never restored (S00/A01-A04: 62 bytes). The rest of the block is now a root of its own.
+function containingBlock(a) {
+  for (let k = 0; k <= 0x40; k += 4) {
+    const s = live.get(a - k);
+    if (s !== undefined && a - k + s > a) return { addr: a - k, size: s };
+  }
+  return null;
+}
 function rootsFor(c, phase) {
   const roots = [{ kind: 'ctx', addr: c.args[0], size: CTX_SIZE, scan: true, restore: true }];
+  const cb = containingBlock(c.args[0]);
+  if (cb) {
+    const lo = c.args[0], hi = c.args[0] + CTX_SIZE, end = cb.addr + cb.size;
+    if (cb.addr < lo) roots.push({ kind: 'heap', addr: cb.addr, size: lo - cb.addr, scan: true, restore: true });
+    if (end > hi) roots.push({ kind: 'heap', addr: hi, size: end - hi, scan: true, restore: true });
+  }
   const dd = moduleData('Default.dll');
   if (dd) roots.push({ kind: 'module_data', module: 'Default.dll', addr: dd.addr, size: dd.size, scan: true, restore: true });
   if (c.export === 'EERMPIMSetRandomMapValues') roots.push({ kind: 'arg', addr: c.args[1], size: 16, scan: true, restore: true });
