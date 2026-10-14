@@ -862,18 +862,27 @@ function discover() {
   emit({ kind: 'discovered', found });
 }
 
+// Keyed by path@base: the engine's plugin scan loads and unloads ddraw.dll, and the display
+// plugin then maps it again (possibly at the same path but a new base) and must be hooked again.
 const seen = new Set();
+const modKey = (m) => m.path.toLowerCase() + '@' + m.base;
 function onModule(m) {
   const n = m.name.toLowerCase();
   if (GAME_MODS.indexOf(n) >= 0) refreshRanges();
-  if (seen.has(m.path.toLowerCase())) return;
+  if (seen.has(modKey(m))) return;
   try {
-    if (n === 'ddraw.dll') { seen.add(m.path.toLowerCase()); hookDDraw(m); }
-    else if (n === 'dinput.dll') { seen.add(m.path.toLowerCase()); hookDInput(m); }
+    if (n === 'ddraw.dll') { seen.add(modKey(m)); hookDDraw(m); }
+    else if (n === 'dinput.dll') { seen.add(modKey(m)); hookDInput(m); }
   } catch (e) { emit({ kind: 'hook-error', module: m.name, error: e.message }); }
 }
 Process.enumerateModules().forEach(onModule);
-Process.attachModuleObserver({ onAdded: onModule, onRemoved(m) { if (GAME_MODS.indexOf(m.name.toLowerCase()) >= 0) refreshRanges(); } });
+Process.attachModuleObserver({
+  onAdded: onModule,
+  onRemoved(m) {
+    seen.delete(modKey(m));
+    if (GAME_MODS.indexOf(m.name.toLowerCase()) >= 0) refreshRanges();
+  },
+});
 if (P.discover) discover();
 enabled.writeU8(1);
 const startedAt = Date.now();

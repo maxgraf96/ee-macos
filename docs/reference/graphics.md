@@ -1,6 +1,6 @@
 # Graphics, video and input: COM inventory (Phase 1)
 
-Status: static inventory done, 2026-10-14. Dynamic confirmation is pending (`windows/frida/com_census.js`, §11).
+Status: static inventory and a first dynamic census (`windows/frida/com_census.js` on `legion`, menu and in game) both done, 2026-10-14. §11.3 has the measurements and §11.4 the status of each static claim.
 Scope: the base game, GOG build, hashes as in PLAN.md §2.4.
 
 This is the reference for the Direct3D 7 / DirectDraw 7 shim (ADR-001 gap 8), the DirectInput shim and the Bink path.
@@ -60,11 +60,17 @@ This is the reference for the Direct3D 7 / DirectDraw 7 shim (ADR-001 gap 8), th
    - `IDirectDrawSurface7::GetDC` is called only from `DX7Surface::TextLock` (HR+0xed44), and the only plugin GDI is `ExtTextOutA` in `Draw(GEText)`.
    - Text normally goes through **bitmap-font atlases**: `GEFontBitmap` (LLE+0x2724e) renders glyphs into texture surfaces through that GDI path once, when the atlas is built. After that, text is drawn as textured quads.
    - The measured in-game GDI rate exactly matches `GEText::ComputeTextExtent` (LLE+0x446f4) measuring text on a *screen* DC. It is not drawing onto surfaces: `GetDC` / `ReleaseDC` / `GetTextExtentPoint32A` run 92/s each and `SelectObject` 185/s, with no `ExtTextOutA` among the hot calls.
-   - The frame loop does release a DC on the render target after `EndScene` (§2.4), so GDI-font text directly on the back buffer is possible. The census measures it (§11).
+   - The frame loop does release a DC on the render target after `EndScene` (§2.4), so GDI-font text directly on the back buffer is possible. **The census measured 0 surface `GetDC` calls per frame** at the menu and in game (§11.3).
 5. **Recommended design: extend the kit's D3D2/3 recorder and GPU renderer** (`dx/ddraw.cpp`, `dx/d3d.cpp`, `host/d3d_render.cpp`) with version-7 interfaces. Do not build on the D3D9 path. (§10.3)
    - The recorder path already keeps DirectDraw surfaces coherent across Lock, Blt, GetDC and Flip, and already renders untransformed vertices with fog, alpha and z.
    - The D3D9 path has no fixed-function generator at all.
    - **Effort:** about **4.5–6 focused weeks** for DD7 + D3D7 + the renderer extensions, including screenshot diffs against `legion` (§10.4). That fits inside ADR-001's 5–7 weeks. GDI text (gap 9) and DirectInput fixes add about 1–1.5 weeks.
+6. **Measured on `legion`** (§11.3–11.5):
+   - **Coverage:** no game call fell outside the static lists.
+   - **Frame cost:** about 850 COM calls and about 1,800 triangles per frame in game, at 79 fps. The menu issues **no draws at all**, only 3 cursor Blts per frame, so `Flip` must keep the back buffer's contents.
+   - **Lighting:** LIGHTING is on for one span per frame, with one directional light.
+   - **Textures:** A8R8G8B8 with full mip chains, plus a per-frame A4R4G4B4 64×64 texture.
+   - **GDI:** surface `GetDC` = 0 per frame.
 
 ---
 
@@ -247,7 +253,7 @@ All single inheritance.
 |---|---|
 | +0x00 | type |
 | +0x04 | format index |
-| +0x08 | dynamic hint |
+| +0x08 | static hint: 1 → `HINTSTATIC`, 0 → `HINTDYNAMIC` (corrected from "dynamic hint" by measurement) |
 | +0x0c | width |
 | +0x10 | height |
 | +0x14 | back-buffer count |
@@ -265,9 +271,9 @@ All single inheritance.
 | 2 flip chain | `CAPS\|BACKBUFFERCOUNT` | `PRIMARYSURFACE \| FLIP \| COMPLEX \| VIDEOMEMORY \| LOCALVIDMEM` (+`3DDEVICE`) | — | fullscreen. Back buffers come from `GetAttachedSurface(DDSCAPS_FLIP)`. |
 | 3 z-buffer | `CAPS\|HEIGHT\|WIDTH\|PIXELFORMAT` | `ZBUFFER \| VIDEOMEMORY \| LOCALVIDMEM` | — | Attached to the back buffer with `AddAttachedSurface`. Format 0xc means "try Z16, then Z24, then Z32"; 0xd tries the reverse. |
 | 4 system memory | `CAPS\|HEIGHT\|WIDTH\|PIXELFORMAT` | `OFFSCREENPLAIN \| SYSTEMMEMORY` (+`3DDEVICE`) | — | Bink frame buffer |
-| 5 texture | `CAPS\|HEIGHT\|WIDTH\|PIXELFORMAT` | `TEXTURE` | `TEXTUREMANAGE` (+`HINTDYNAMIC`) | textures, font atlases |
-| 5 + 3D flag | same | `TEXTURE \| 3DDEVICE \| VIDEOMEMORY \| LOCALVIDMEM` | `HINTDYNAMIC` / `HINTSTATIC` | render-target textures |
-| 6 mipmapped texture | `…\|MIPMAPCOUNT` | `TEXTURE \| MIPMAP \| COMPLEX` (+`3DDEVICE`) | `TEXTUREMANAGE` (+`HINTDYNAMIC`) | Sub-levels come from `GetAttachedSurface(DDSCAPS_MIPMAP)`. |
+| 5 texture | `CAPS\|HEIGHT\|WIDTH\|PIXELFORMAT` | `TEXTURE` | `TEXTUREMANAGE` + (`HINTSTATIC` or `HINTDYNAMIC`): 0x18 or 0x14 | textures, font atlases. Measured: 0x18. |
+| 5 + 3D flag | same | `TEXTURE \| 3DDEVICE \| VIDEOMEMORY \| LOCALVIDMEM` | `HINTSTATIC` (8) or `HINTDYNAMIC` (4) | render-target textures (not observed) |
+| 6 mipmapped texture | `…\|MIPMAPCOUNT` | `TEXTURE \| MIPMAP \| COMPLEX` (+`3DDEVICE`) | as type 5; measured 0x18 | Sub-levels come from `GetAttachedSurface(DDSCAPS_MIPMAP)`. Measured: full chains down to 1×1. |
 
 Notes on the table [static]:
 - `DDSD_CKSRCBLT` is added when the colour-keyed byte is set, with a key of 0 at creation.
@@ -469,7 +475,9 @@ The `DDRAW.dll` exports are `DirectDrawEnumerateA`, `DirectDrawEnumerateExA` and
   - it walks `tmFirstChar..tmLastChar`;
   - it draws each glyph into a texture surface through the rasterizer's `Draw(GEText, rect, surface)`;
   - it calls `TextUnlock` and then `CreateSurfaceAlpha` to derive alpha from the glyph pixels. [static]
-- **So GDI-on-surface happens mostly at font/atlas creation, on *texture* surfaces.** [inferred from static; the census counts `Surface GetDC` per second and target kind]
+- **So GDI-on-surface happens mostly at font/atlas creation, on *texture* surfaces.** [static]
+  - Confirmed for steady state [measured]: 0 surface `GetDC` calls at the menu and in game.
+  - The atlas build itself was not captured (§11.2).
 - **The exception: fonts without an atlas.** Text in such a font is drawn with GDI straight onto the render target during the frame. The DC is then held until `RTSGraphics::Render` calls `TextUnlock` after `EndScene` (§2.4).
 - **The measured in-game GDI rate** is `GetDC` / `ReleaseDC` / `GetTextExtentPoint32A` at 92/s each and `SelectObject` at 185/s, with no `ExtTextOutA` [measured]. That is exactly one `GEText::ComputeTextExtent` (LLE+0x446f4) per string: `GetDC(NULL)` through `GEDeviceContext::GetDeviceContext` (LLE+0x49db5), `SelectObject`, `GetTextExtentPoint32A`, `SelectObject` again, `ReleaseDC`. This is text measurement on a screen DC.
 - **Fonts** are created with `CreateFontA` in `GEFont::GEFont` (LLE+0x2711c), followed by `GetTextMetricsA`.
@@ -511,7 +519,7 @@ Source: the engine pseudocode. Details and tables are in `analysis/com-inventory
   | 11 | SetDataFormat | **embedded copies** of `c_dfDIKeyboard` (LLE+0x9679c) and `c_dfDIMouse` (LLE+0x96784). Both are byte-identical to dinput.lib with `DIDF_RELAXIS`; the mouse has 7 objects and the Z axis is optional. |
   | 13 | SetCooperativeLevel | keyboard `NONEXCLUSIVE \| FOREGROUND` (6); mouse `EXCLUSIVE \| FOREGROUND` (5), reset to 6 in `ISMouse::Suspend` |
   | 6 | SetProperty | `DIPROP_BUFFERSIZE` = 256 on both (`DIPROP_AXISMODE` is in dead code) |
-  | 5 | GetProperty | `DIPROP_GRANULARITY` for X/Y/Z by offset. It is used as an integer **divisor**, so 0 would raise #DE. |
+  | 5 | GetProperty | `DIPROP_GRANULARITY` by offset, for each axis that `GetObjectInfo` found. It is used as an integer **divisor**, so 0 would raise #DE. Measured on legion: X = 1, Y = 1; that mouse has no Z axis, so Z was not queried. |
   | 14 | GetObjectInfo | 7 calls, `dwSize = 0x13c`, `DIPH_BYOFFSET`. X, Y and Right are dereferenced without null checks. |
   | 7 / 8 | Acquire / Unacquire | from Resume/Suspend only. There is **no re-acquire on error.** |
   | 9 | GetDeviceState | mouse `cb = 0x10` (`DIMOUSESTATE`); keyboard `cb = 0x100` |
@@ -599,7 +607,7 @@ Source: the survey of `spikes/ee-recomp/kit/` at `eb32cc4`. File:line detail is 
 - [ ] `DirectDrawEnumerateA` and `DirectDrawEnumerateExA(…, 7)`: one device, the primary display (NULL GUID).
 - [ ] `DirectDrawCreateEx(NULL, &dd, IID_IDirectDraw7, NULL)`.
 
-**IDirectDraw7** (29-slot vtable, 12 implemented, the rest `DDERR_UNSUPPORTED`):
+**IDirectDraw7** (30-slot vtable, 0–29 including StartModeTest and EvaluateMode; 12 implemented, the rest `DDERR_UNSUPPORTED`):
 - [ ] QueryInterface (`IID_IDirect3D7`) and Release.
 - [ ] GetCaps (`DDCAPS_DX7`, 0x17c): set `DDCAPS_3D` (0x1).
 - [ ] EnumDisplayModes(0, NULL): 16-bit R5G6B5 and 32-bit X8R8G8B8 modes. Include **800×600×16**, the desktop size, and the registry's `Resolution` and bpp.
@@ -617,7 +625,8 @@ Source: the survey of `spikes/ee-recomp/kit/` at `eb32cc4`. File:line detail is 
 **IDirectDrawSurface7** (49-slot vtable, 12 implemented):
 - [ ] Release, AddAttachedSurface(z), DeleteAttachedSurface.
 - [ ] Blt: `COLORFILL` (0x400); copy or stretch with `DONOTWAIT` (0x8000000) and optional `KEYSRC` (0x8000); flags 0 for the windowed present to the primary.
-- [ ] Flip(NULL, 0x20 / 0x28).
+  - Measured: 3–4 per frame, all copies between video-memory surfaces (the cursor save/restore and a 64×64 texture). Do them **on the GPU**, without a CPU readback.
+- [ ] Flip(NULL, 0x20 / 0x28). **The back buffer must keep its contents across Flip** (copy-style present) [measured: the menu draws nothing per frame].
 - [ ] GetAttachedSurface.
 - [ ] GetDC / ReleaseDC: a DIB over the surface (32- and 16-bit).
 - [ ] Lock(NULL, desc, 0, NULL) / Unlock(NULL): return `lpSurface` and `lPitch`.
@@ -634,10 +643,13 @@ Source: the survey of `spikes/ee-recomp/kit/` at `eb32cc4`. File:line detail is 
 - [ ] Release.
 - [ ] GetCaps (`D3DDEVICEDESC7`: `dwDeviceRenderBitDepth` with `DDBD_16 | DDBD_32`, and the devcaps above).
 - [ ] EnumTextureFormats: A8R8G8B8, X8R8G8B8, A1R5G5B5, A4R4G4B4, R5G6B5, X1R5G5B5. **Must include A8R8G8B8** for 32-bit textures.
+  - Measured in use: A8R8G8B8 with full mip chains, and A4R4G4B4.
+  - Not seen: DXT1, R5G5B5A1, R5G5B5X1.
+  - Texture creation and locking run on the texture worker thread, so the shim must be thread-safe.
 - [ ] BeginScene, EndScene.
 - [ ] SetRenderTarget(surface, 0) to the back buffer *or a 3D texture*.
 - [ ] Clear(1, rect, TARGET or ZBUFFER, …).
-- [ ] SetTransform(1, 2, 3), SetViewport(`D3DVIEWPORT7`).
+- [ ] SetTransform(1, 2, 3), SetViewport(`D3DVIEWPORT7`). The viewport includes MinZ = MaxZ ranges (0..0, 1..1) [measured].
 - [ ] SetMaterial, SetLight / GetLight (8 slots, point and directional), LightEnable.
 - [ ] SetRenderState (32 states, §10.2), SetTexture(0/1), SetTextureStageState (§10.2).
 - [ ] DrawPrimitiveVB (point, line and triangle lists).
@@ -682,6 +694,8 @@ Source: the survey of `spikes/ee-recomp/kit/` at `eb32cc4`. File:line detail is 
 - [ ] Transform: P · V · W with D3D row-vector matrices.
 - [ ] D3D7 viewport mapping, **including D3D's pixel-centre convention**. The 2D orthographic UI has no half-pixel offset, so Metal needs a −0.5 px shift to match Windows sampling.
 - [ ] Lighting: per-vertex D3D7 fixed-function, ≤ 8 lights, point (range, attenuation 0/1/2) and directional, diffuse plus ambient, specular only if enabled.
+  - Measured: one directional light, LIGHTING on for one span per frame, material or vertex colour sources, AMBIENT.
+  - Point lights are static code only, so implement them second.
 - [ ] Linear vertex fog from view-space z.
 - [ ] Clipping by the GPU.
 
@@ -707,7 +721,7 @@ Source: the survey of `spikes/ee-recomp/kit/` at `eb32cc4`. File:line detail is 
 5. **Render-to-texture.** Allow a 3D-capable texture as a render target. Coherence uses the existing readback-before-CPU-access rule.
 6. **Presentation.** Present only on `Flip`, or on a `Blt` whose destination is the primary. **Turn the pump-based frame sealing off.**
 7. **GDI on surfaces** keeps the kit's DIB-over-guest-memory approach for textures (glyph atlases). Add the ANSI text calls (gap 9).
-   - **If the census shows per-frame GDI on the back buffer:** give `GetDC` on the *active render target* a transparent CPU overlay rather than a GPU readback, and composite it at `ReleaseDC` / before present. The game releases that DC after `EndScene` and expects the text on top.
+   - ~~Overlay for per-frame GDI on the back buffer~~: **not needed**. The census measured 0 surface `GetDC` calls per frame at the menu and in game (§11.3).
 
 **Why this route:**
 - EE mixes DirectDraw CPU access (colour-fill Blt, Lock for Bink, GetDC for glyph atlases, windowed-present Blt) with D3D rendering. Only the recorder path already keeps the two coherent.
@@ -743,49 +757,168 @@ Rough focused weeks, one developer with agents:
 - **Samplers.** It samples transforms (classified as identity, orthographic or perspective), materials, lights, viewports and surface locks.
 - **Caller filter.** A caller of `other` means the GOG wrapper's own internal calls. Read the rows with caller = `dx7hrdisplay.dll` / `low-level engine.dll`.
 
-### 11.2 How to run it (later, on `legion`)
-From the Mac:
+### 11.2 How it was run, and a known gap
+The captures were taken on 2026-10-14 with GOG's D3D9-based `ddraw.dll` and the "Direct3D" rasterizer (`DX7HRDisplay`), at `Texture Bit Depth = 32` and 1920×1080. They are on the Mac under `analysis/legion-captures/`.
 
-```sh
-scp windows/frida/com_census.js legion:C:/EEPort/frida/          # or windows/deploy.sh
-L() { ssh legion "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& C:\\EEPort\\scripts\\launch.ps1 $*\""; }
-# 1. Creation-time calls (enumeration, surfaces, device, DirectInput init): spawn in the user session.
-L "frida '--spawn --scripts com_census --seconds 150 --out C:\EEPort\captures\com-spawn'"
-# 2. Menu, attached, finding the live objects; start a random map during the run to catch the re-creation.
-L start
-ssh legion 'C:\EEPort\tools\venv\Scripts\python.exe C:\EEPort\frida\run.py --scripts com_census --seconds 120 --out C:\EEPort\captures\com-menu'
-# 3. In game (after Single Player -> Play Random Map -> Start Game), together with the import census.
-ssh legion 'C:\EEPort\tools\venv\Scripts\python.exe C:\EEPort\frida\run.py --scripts com_census,iat_census --seconds 60 --out C:\EEPort\captures\com-ingame'
-scp -r legion:C:/EEPort/captures/com-ingame /tmp/
-```
+| Capture | What |
+|---|---|
+| `com-spawn` | spawned, 150 s, intro skipped to the menu |
+| `com-menu` | attached, 120 s at the main menu |
+| `com-ingame` | attached, 60 s with `iat_census`; Small random map vs one AI, Copper Age |
 
-**Optional parameters:**
-- `--param all_callers=true` also decodes the wrapper's internal calls.
-- `--param discover=false` disables attach-time discovery.
-- `--param sample_limit=N` changes the sampler size (default 2000).
+Summarise them with `python3 -I tools/graphics/com_summary.py analysis/legion-captures/com-{spawn,menu,ingame}`. It prints Markdown, including the checklist diff against §4.7.
 
-`summarize.py` does not know `com_census.json` yet. The JSON is self-describing: `rows`, `aggregates`, `events`, `vtables` and `slots`.
+**Gap: the spawn capture missed every DirectDraw/D3D creation call.** This is a script bug.
+- The plugin scan loads and unloads `ddraw.dll`, then the plugin's import maps it again at a new base.
+- `onModule()` in `com_census.js` dedupes by path, so the second mapping's `DirectDrawCreateEx` was never hooked.
+- DirectInput, which is not unloaded, was captured fully.
+- **Fix:** key the `seen` set by `path + '@' + base`, or remove the entry in `onRemoved`.
+- **What is still unmeasured as a result:** enumeration (`EnumDisplayModes`, `EnumDevices`, `EnumTextureFormats`), `SetCooperativeLevel` / `SetDisplayMode`, start-up texture and atlas creation, and Bink. Re-run the spawn capture with the fix.
 
-### 11.3 What to check
-1. **No surprises in coverage.** The `rows` with a game caller should be a subset of §4.7, and the states of §10.2.
-2. **Runtime values:**
-   - `LIGHTING` and `FOGENABLE` values in game;
-   - the `SetLight` types;
-   - the projection classes.
-3. **`CreateSurface` aggregates:** the texture formats and sizes actually requested, whether DXT1 and 5551 are ever used, mip counts, and render-target textures.
-4. **`Surface GetDC` rate and target kinds.** This confirms or refutes "GDI onto surfaces mostly at atlas build" and sizes the back-buffer overlay case (§10.3, item 7). Compare with `ExtTextOutA` in the `iat_census` rows.
-5. **Frame cost:** draw calls and primitives per `EndScene` (rows `DrawIndexedPrimitiveVB` / `DrawPrimitiveVB`, `sum`), and SetRenderState / TSS calls per frame.
-6. **DirectInput:**
-   - `DI GetDeviceData` out-count buckets;
-   - `GetDeviceState` hr while focused and unfocused;
-   - the `GetProperty(GRANULARITY)` values the real dinput returns (expected 1, 1, 120).
+### 11.3 Results [measured]
+**Frame rate.**
+- Menu: 396.9 fps.
+- In game: 78.7 fps.
+- All D3D calls come from `dx7hrdisplay.dll` on the render thread, except texture creation and upload (below).
+- Per-frame counts are very regular: whole numbers per frame over 4,946 frames.
+
+**In-game calls per frame.** Game callers only:
+
+| Call | Per frame | Detail |
+|---|---|---|
+| SetRenderState | 226 | CLIPPING 128, AMBIENT 38, the rest 1–3 each |
+| SetTextureStageState | 172 | stage 1 COLOROP/ALPHAOP = DISABLE 67 + 67; stage 0 COLOROP/ALPHAOP MODULATE ↔ DISABLE 5 + 5 each; MIPMAPLODBIAS 6; MIPFILTER 4; ADDRESS 4; MIN/MAGFILTER 2 + 2 |
+| SetTexture | 139 | stage 0 non-null 67, stage 0 NULL 5, stage 1 NULL 67. This confirms the ≈64/frame inferred from `GETexture::Promote`. |
+| VB Lock / Unlock | 76 / 76 | `NOOVERWRITE\|WRITEONLY` 74.8, `DISCARDCONTENTS\|WRITEONLY` 1.2 |
+| DrawPrimitiveVB | 40 | TRIANGLELIST 36 (avg 31.6 vertices); LINELIST 4 (2 vertices) |
+| DrawIndexedPrimitiveVB | 36 | TRIANGLELIST, avg 118 indices |
+| SetTransform | 38 | WORLD 20, VIEW 9, PROJECTION 9 |
+| SetMaterial | 24 | |
+| SetViewport | 12 | |
+| Surface Blt | 4 | |
+| Device Clear | 2 | `D3DCLEAR_ZBUFFER` only |
+| Surface Lock / Unlock | 1 / 1 | |
+| BeginScene / EndScene / Flip | 1 each | Flip flags 0x20 |
+
+Geometry per frame is about 1,800 triangles: 1,420 indexed plus 380 non-indexed. That is trivial for Metal. The shim's cost is in call volume: about 850 COM calls per frame, of which about 540 are state changes (render state, TSS and SetTexture).
+
+**The menu draws nothing per frame.** In 120 s at the menu, every frame had:
+- BeginScene, `Clear(ZBUFFER)`, `SetViewport(0,0,1024,768)`;
+- the blend toggles: ALPHABLEND 0/1, SRC ONE/SRCALPHA, DEST ZERO/INVSRCALPHA;
+- **3 Blts**;
+- EndScene and Flip.
+
+There were **zero draw calls and zero texture changes.** The menu image is drawn once and kept in the back buffer. The 3 Blts are the software cursor, all through `CopyTo` (HR+0xe1d1), on a 32×32 rectangle at the cursor:
+1. restore the saved background to the back buffer;
+2. save the back buffer under the cursor to a temporary surface;
+3. draw the cursor with `KEYSRC|DONOTWAIT`.
+
+In game, a fourth Blt per frame copies a 64×64 surface into another 64×64 surface (below).
+
+**Textures.**
+- **Creation and upload run on the texture/asset worker thread,** concurrently with rendering. That thread did all 14 `CreateSurface` calls and the 182 mip-level Lock/Unlock pairs in the 60 s window.
+- **All 14 creations were A8R8G8B8** with caps2 `0x18` (`TEXTUREMANAGE|HINTSTATIC`):
+  - 6 × 128² with 8 mip levels;
+  - 3 × 256² with 9 levels;
+  - 3 × 64² with 7 levels;
+  - 2 × 64² without mips.
+  Mip chains go all the way down to 1×1, and every level is locked (flags 0) and filled.
+- **A 64×64 A4R4G4B4 surface is locked and rewritten every frame** on the render thread, then blitted into another 64×64 surface. It is probably the minimap or a fog texture [inferred].
+- **Not seen:** DXT1, R5G5B5A1, R5G5B5X1 and render-target textures. Start-up textures were created before the attach, so this is a lower bound.
+
+**Lighting and fog.**
+- **`LIGHTING` is on for one span every frame:** it is set TRUE once and FALSE once per frame.
+- **Light:** one light, index 0, **directional**, range 0, attenuation (1,0,0).
+  - It was re-set 5 times in 60 s, each time framed by `LightEnable(0, FALSE/TRUE)`.
+  - Each re-set was followed by `GetLight(0)`, the CPU terrain relight.
+  - No point light was seen.
+- **Materials:**
+  - white (1,1,1,1) and **blue (0,0,1,1)**, the player colour;
+  - power 0, specular 0, emissive 0;
+  - `COLORVERTEX` and the diffuse/ambient material sources switch 0 ↔ 1 twice per frame;
+  - `AMBIENT` takes 5 values, 38 changes per frame.
+- **Which draws are lit:** most likely the model pass (`DrawModelHierarchy`: `SetMaterial` + `DrawIndexedPrimitiveVB`) [inferred]. Proving it needs an ordered one-frame trace.
+- **Fog:** `FOGENABLE` toggles twice per frame. `FOGSTART` / `FOGEND` / `FOGCOLOR` did not change during the capture, because they are set once and cached.
+
+**Transforms and viewports.**
+- **WORLD:** affine or identity.
+- **VIEW:** affine or identity.
+- **PROJECTION:**
+  - perspective, with m22 = 1.100, m32 = −3.517, or m22 = 1.000, m32 = −3.196;
+  - orthographic, (2/W, −2/H, −1, +1) for W×H = 1920×945, 1920×1080 and 305×227.
+- **Viewports:**
+  - the game view `0,32,1920,945`, with z ranges **0..1, 0..0 and 1..1**;
+  - the full screen `0,0,1920,1080`;
+  - the minimap `1611,785,305,227`.
+- So the game also uses degenerate depth ranges (MinZ = MaxZ) to force depth to 0 or 1.
+
+**GDI.**
+- **There is no GDI onto surfaces:** `IDirectDrawSurface7::GetDC` was called 0 times at the menu and in game. The plugin's own GDI imports (`ExtTextOutA`, `SetTextColor`, …) were never called in game.
+- **The only GDI is the engine's text measuring:** `GetDC` / `ReleaseDC` / `GetTextExtentPoint32A` at 82/s each and `SelectObject` at 165/s, about once per frame.
+
+**Present.** Every frame is `Flip(NULL, DDFLIP_DONOTWAIT)`, without `NOVSYNC`; the GOG wrapper does not hold it to vsync (397 fps at the menu). No Blt ever targeted the primary, so the windowed present path did not run.
+
+**Display modes.** The menu ran at 1024×768 and the game at 1920×1080, which is the registry `Resolution`. The enumeration itself was not captured (§11.2).
+
+**DirectInput** (spawn + menu + game). Everything matches §8:
+- `DirectInputCreateA(…, 0x700)`.
+- Keyboard and then mouse are created.
+- **Cooperative levels:** keyboard 6, mouse 5, and the mouse goes back to 6 on suspend.
+- **Data formats:** `size = 24, objsize = 16, flags = DIDF_RELAXIS`; keyboard 256 bytes / 256 objects, mouse 16 bytes / 7 objects.
+- **`BUFFERSIZE`** = 256 on both.
+- **`GetObjectInfo`:** offsets 0, 4, 8, 0xc, 0xd, 0xe, 0xf with `BYOFFSET` and `dwSize = 0x13c`. On legion's mouse the Z axis and buttons 4 and 5 return `DIERR_OBJECTNOTFOUND`.
+- **`GetProperty(GRANULARITY)`:** X = 1, Y = 1.
+- **`GetDeviceData`:** about 548/s per device on the main thread, almost always 0 records; there is also the `(NULL, INFINITE)` flush.
+- **`GetDeviceState(16)`** on the mouse: once per frame on the render thread, plus about 37/s on the input thread. The keyboard's `GetDeviceState(256)` runs only on resume.
+- **Results:** all hr = 0.
+- **Not called by the game:** `IDirectInputDeviceA::Initialize`; it shows up only as dinput's own internal call.
+
+**Coverage.** Across all three captures, **no game call fell outside the static method list (§4.7) or the static render-state and TSS lists (§10.2).** The only calls outside it were `AddRef` and `Initialize` made by the wrapper and dinput themselves.
+
+### 11.4 Static claims against the measurements
+| Claim (section) | Status |
+|---|---|
+| Untransformed FVF 0x152 vertices through one VB; only DrawPrimitiveVB / DrawIndexedPrimitiveVB (§0, §4.1) | **confirmed**: only these draws, locks 0x1020 / 0x2020 |
+| SetTransform W/V/P; 2D as orthographic projection (§4.2) | **confirmed**: orthographic matrices match `Set2DMode`, sized from the viewport |
+| D3D lighting used (§4.3) | **confirmed**: LIGHTING on once per frame; materials; AMBIENT. Point lights are **unobserved**: one directional light only. |
+| 32 render states (§4.5) | **confirmed as a superset**: 16 changed in game; the other 16 are set once and cached, or never set during these windows. None outside the list. |
+| TSS: stage 0 only, stage 1 always DISABLE (§4.4) | **confirmed**. MODULATE and DISABLE observed; SELECTARG1/2 **unobserved**; the ARG states were never re-set (cached). |
+| Clear TARGET and ZBUFFER (§4.6) | ZBUFFER **confirmed**; TARGET **unobserved** |
+| Texture types and caps2 (§3.3) | **corrected**: managed caps2 is 0x14/0x18, not 0x10/0x14; desc+0x08 is the *static* hint. Mipmapped A8R8G8B8 with full chains **confirmed**; DXT1 / 5551 / render-target textures **unobserved** |
+| Blt flags DONOTWAIT, +KEYSRC; no BltFast (§3.4) | **confirmed**, 3–4 per frame (cursor and 64×64 copy). COLORFILL **unobserved**. |
+| Present by Flip(0x20 / 0x28); windowed Blt to primary (§3.2) | Flip 0x20 **confirmed**; windowed path **unobserved** |
+| GDI onto surfaces mostly at atlas build (§6) | **confirmed for steady state**: 0 surface `GetDC` at the menu and in game. Atlas build **unobserved** (spawn gap). |
+| Engine text measuring explains the GDI rate (§6) | **confirmed**: about 1 `GetTextExtentPoint32A` per frame |
+| Device creation, enumeration, cooperative-level flags (§3.1–3.2) | **unobserved this time** (spawn gap); the flags were measured earlier (`legion.md` §5.1) |
+| Bink path (§7) | **unobserved** (intro skipped, spawn gap) |
+| DirectInput (§8) | **confirmed** in every measured detail; Z granularity **unobserved** (no wheel) |
+| Threads (§1.2) | **confirmed** for render; **new**: textures are created and locked on the texture worker thread |
+| Rates (§2.4) | **confirmed**: SetTexture about 64/frame (measured 67) |
+
+### 11.5 Changes to the shim checklist (§10) from the measurements
+1. **Flip must keep the back buffer's contents.** Present by copy, or by a contents-preserving swap. The menu is drawn once and then only patched by the cursor Blts, so a discard-style present would show an empty menu. **[new requirement]**
+2. **Blt between video-memory surfaces should be a GPU copy, not a CPU readback.** That covers back buffer ↔ cursor-save surface, cursor → back buffer with `KEYSRC`, and the 64×64 per-frame copy. Three or four per frame. **[new]**
+3. **Viewport with MinZ = MaxZ** (0..0 and 1..1) must work. Metal accepts it. **[new]**
+4. **Thread safety.** `CreateSurface`, `GetAttachedSurface` and `Lock`/`Unlock` on textures run on the texture worker thread while the render thread draws. **[new]**
+5. **Lighting can start with directional lights plus ambient and material sources.** Keep point lights from the static code, but at lower priority.
+6. **Drop the "GDI overlay on the render target" contingency** (§10.3, item 7). Surface GDI is not used per frame.
+7. **`EnumTextureFormats`:** keep A8R8G8B8 and A4R4G4B4, both measured in use. Keep R5G6B5 / A1R5G5B5 / X1R5G5B5 for `Texture Bit Depth = 16` (unmeasured). Omit DXT1 and the 5551 / 5550 formats unless a capture shows them requested.
+8. **Effort is unchanged at about 4.5–6 weeks.** The overlay and point-light work shrink; Flip and Blt-on-GPU are small additions.
 
 ---
 
 ## 12. Open questions
-1. **Which texture formats and sizes does the engine request?** In particular DXT1 and R5G5B5A1/X1 (format indices 4, 6, 8) and how many mip levels. → census `CreateSurface`.
-2. **Is `LIGHTING` ever TRUE in game,** and for which draws (models only)? This sizes the lighting work. → census.
-3. **Does the windowed path (Blt to primary, no clipper) ever run in practice?** The GOG wrapper presents windowed but receives fullscreen calls (`0x513`) [measured]. The shim can treat the game as fullscreen-exclusive and present the back buffer itself.
+**Closed by the census:**
+- the texture formats and mips in steady state;
+- `LIGHTING` is used;
+- surface GDI per frame is 0;
+- the windowed present is unused (with GOG's wrapper);
+- per-frame call budgets.
+
+**Still open:**
+1. **Start-up textures, glyph atlases, enumeration, mode setting and Bink.** Re-run `com-spawn` after the `onModule` fix (§11.2), and play one movie instead of skipping it.
+2. **Which draws run with `LIGHTING` on.** This needs an ordered one-frame trace (a future `trace_frame` option in `com_census.js`).
+3. **16-bit textures.** Capture once with `Texture Bit Depth = 16`, the GOG default, to see the 16-bit formats requested.
 4. **What do `EnumDisplayModes` results drive?** The options screen's mode list comes from them. We need to decide which modes to report on a Mac: native Retina sizes vs classic 4:3 sizes.
 5. **Pixel-exactness target for UI text.** Glyph metrics from our TrueType renderer vs Windows GDI decide whether atlases and line breaks match.
 
