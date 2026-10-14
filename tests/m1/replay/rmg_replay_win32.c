@@ -34,14 +34,15 @@
 
 static char g_game_dir[MAX_PATH] = "C:\\EEPort\\game\\Empire Earth";
 static int g_verbose;
-static HANDLE g_heap;                     /* pass-through allocations (DllMains, outside the call) */
 
 /* ---- import shims ----------------------------------------------------------------------- */
 
 typedef void *(__cdecl *alloc1_t)(size_t);
 typedef void(__cdecl *free_t)(void *);
+static alloc1_t real_new, real_newa, real_malloc;
+static void *(__cdecl *real_calloc)(size_t, size_t);
+static void *(__cdecl *real_realloc)(void *, size_t);
 static free_t real_free, real_delete, real_deletea;
-static size_t(__cdecl *real_msize)(void *);
 static FILE *(__cdecl *real_fopen)(const char *, const char *);
 static char *(__cdecl *real_fgets)(char *, int, FILE *);
 static int(__cdecl *real_fclose)(FILE *);
@@ -50,35 +51,24 @@ static unsigned g_dbg_lines;
 #define G(p) ((uint32_t)(uintptr_t)(p))
 #define H(a) ((void *)(uintptr_t)(a))
 
-static void own_free(void *p, free_t real)
-{
-    if (!p) return;
-    if (HeapValidate(g_heap, 0, p)) HeapFree(g_heap, 0, p);
-    else if (real) real(p);               /* allocated by msvcrt before its importer was patched */
-}
-static void *__cdecl sh_new(size_t n) { return rr_active() ? H(rr_shim_alloc(RR_OP_NEW, (uint32_t)n, 0)) : HeapAlloc(g_heap, 0, n ? n : 1); }
-static void *__cdecl sh_newa(size_t n) { return rr_active() ? H(rr_shim_alloc(RR_OP_NEWA, (uint32_t)n, 0)) : HeapAlloc(g_heap, 0, n ? n : 1); }
-static void *__cdecl sh_malloc(size_t n) { return rr_active() ? H(rr_shim_alloc(RR_OP_MALLOC, (uint32_t)n, 0)) : HeapAlloc(g_heap, 0, n ? n : 1); }
+/* Outside the replayed call (DllMains, set-up) every shim forwards to the real msvcrt function.
+   A private heap does not work there: the DLLs' CRT start-up mallocs its atexit table through the
+   shim, and msvcrt's own __dllonexit later grows it with its internal _msize/realloc on msvcrt's
+   heap, which corrupted the heap or faulted in ntdll (Default.dll, most runs on legion). */
+static void *__cdecl sh_new(size_t n) { return rr_active() ? H(rr_shim_alloc(RR_OP_NEW, (uint32_t)n, 0)) : real_new(n); }
+static void *__cdecl sh_newa(size_t n) { return rr_active() ? H(rr_shim_alloc(RR_OP_NEWA, (uint32_t)n, 0)) : real_newa(n); }
+static void *__cdecl sh_malloc(size_t n) { return rr_active() ? H(rr_shim_alloc(RR_OP_MALLOC, (uint32_t)n, 0)) : real_malloc(n); }
 static void *__cdecl sh_calloc(size_t c, size_t n)
 {
-    return rr_active() ? H(rr_shim_alloc(RR_OP_CALLOC, (uint32_t)c, (uint32_t)n)) : HeapAlloc(g_heap, HEAP_ZERO_MEMORY, c * n ? c * n : 1);
+    return rr_active() ? H(rr_shim_alloc(RR_OP_CALLOC, (uint32_t)c, (uint32_t)n)) : real_calloc(c, n);
 }
 static void *__cdecl sh_realloc(void *p, size_t n)
 {
-    if (rr_active()) return H(rr_shim_alloc(RR_OP_REALLOC, G(p), (uint32_t)n));
-    if (!p) return HeapAlloc(g_heap, 0, n ? n : 1);
-    if (!n) { own_free(p, real_free); return NULL; }
-    if (HeapValidate(g_heap, 0, p)) return HeapReAlloc(g_heap, 0, p, n);
-    { /* a block from msvcrt (allocated before its importer was patched): move it into our heap */
-        size_t old = real_msize ? real_msize(p) : 0;
-        void *q = HeapAlloc(g_heap, 0, n);
-        if (q) { memcpy(q, p, old < n ? old : n); if (real_free) real_free(p); }
-        return q;
-    }
+    return rr_active() ? H(rr_shim_alloc(RR_OP_REALLOC, G(p), (uint32_t)n)) : real_realloc(p, n);
 }
-static void __cdecl sh_delete(void *p) { if (rr_active()) rr_shim_free(RR_OP_DELETE, G(p)); else own_free(p, real_delete); }
-static void __cdecl sh_deletea(void *p) { if (rr_active()) rr_shim_free(RR_OP_DELETEA, G(p)); else own_free(p, real_deletea); }
-static void __cdecl sh_free(void *p) { if (rr_active()) rr_shim_free(RR_OP_FREE, G(p)); else own_free(p, real_free); }
+static void __cdecl sh_delete(void *p) { if (rr_active()) rr_shim_free(RR_OP_DELETE, G(p)); else real_delete(p); }
+static void __cdecl sh_deletea(void *p) { if (rr_active()) rr_shim_free(RR_OP_DELETEA, G(p)); else real_deletea(p); }
+static void __cdecl sh_free(void *p) { if (rr_active()) rr_shim_free(RR_OP_FREE, G(p)); else real_free(p); }
 static FILE *__cdecl sh_fopen(const char *path, const char *mode)
 {
     return rr_active() ? (FILE *)H(rr_shim_fopen(G(path), G(mode))) : real_fopen(path, mode);
@@ -316,8 +306,12 @@ static int w_load_modules(void *u, const rr_module_rec *mods, uint32_t n)
     uint32_t i;
     (void)u;
     if (!crt) die(2, "ERROR: msvcrt.dll does not load");
+    real_new = (alloc1_t)GetProcAddress(crt, "??2@YAPAXI@Z");
+    real_newa = (alloc1_t)GetProcAddress(crt, "??_U@YAPAXI@Z");
+    real_malloc = (alloc1_t)GetProcAddress(crt, "malloc");
+    real_calloc = (void *(__cdecl *)(size_t, size_t))GetProcAddress(crt, "calloc");
+    real_realloc = (void *(__cdecl *)(void *, size_t))GetProcAddress(crt, "realloc");
     real_free = (free_t)GetProcAddress(crt, "free");
-    real_msize = (size_t(__cdecl *)(void *))GetProcAddress(crt, "_msize");
     real_delete = (free_t)GetProcAddress(crt, "??3@YAXPAX@Z");
     real_deletea = (free_t)GetProcAddress(crt, "??_V@YAXPAX@Z");
     real_fopen = (FILE * (__cdecl *)(const char *, const char *))GetProcAddress(crt, "fopen");
@@ -423,8 +417,34 @@ static const char *where(uint32_t a, char *buf, size_t n)
             snprintf(buf, n, "%s+%#x", g_mod[i].name, a - G(g_mod[i].img));
             return buf;
         }
+    {   /* a system module (ntdll, msvcrt, ...) or the driver itself */
+        HMODULE h;
+        char path[MAX_PATH], *base;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               (LPCSTR)H(a), &h) && GetModuleFileNameA(h, path, sizeof path)) {
+            base = strrchr(path, '\\');
+            snprintf(buf, n, "%s+%#x", base ? base + 1 : path, a - G(h));
+            return buf;
+        }
+    }
     snprintf(buf, n, "%#x", a);
     return buf;
+}
+
+/* Return-address candidates on the faulting stack: values that point into a known module. */
+static void print_stack(const CONTEXT *c)
+{
+    const uint32_t *sp = (const uint32_t *)H(c->Esp);
+    MEMORY_BASIC_INFORMATION mbi;
+    char w[96];
+    int i, found = 0;
+    if (!VirtualQuery(sp, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return;
+    for (i = 0; i < 1024 && found < 16 && (const uint8_t *)(sp + i + 1) <= (const uint8_t *)mbi.BaseAddress + mbi.RegionSize; i++) {
+        where(sp[i], w, sizeof w);
+        if (!sp[i] || (w[0] == '0' && w[1] == 'x')) continue;
+        printf("  [esp+%#x] %s\n", (unsigned)(i * 4), w);
+        found++;
+    }
 }
 
 static LONG CALLBACK on_exception(EXCEPTION_POINTERS *ep)
@@ -432,6 +452,7 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *ep)
     DWORD code = ep->ExceptionRecord->ExceptionCode;
     char w[96];
     if (code == 0x406D1388 /* thread naming */ || code == DBG_PRINTEXCEPTION_C) return EXCEPTION_CONTINUE_SEARCH;
+    if (g_verbose) print_stack(ep->ContextRecord);
     if (code == 0xE06D7363) die(2, "ERROR: C++ exception thrown at %s during the replay", where(G(ep->ExceptionRecord->ExceptionAddress), w, sizeof w));
     if (code == EXCEPTION_ACCESS_VIOLATION)
         die(2, "ERROR: access violation at %s (%s %#x)", where(ep->ContextRecord->Eip, w, sizeof w),
@@ -472,7 +493,6 @@ static int run_child(const char *pack_path, const char *diff_dir)
         for (i = 0; i < n; i++) if (commit(r[i].lo, r[i].hi - r[i].lo)) die(2, "ERROR: cannot commit %#x-%#x", r[i].lo, r[i].hi);
         free(r);
     }
-    g_heap = HeapCreate(0, 0, 0);
     memset(&opt, 0, sizeof opt);
     opt.verbose = g_verbose;
     opt.diff_dir = diff_dir;
