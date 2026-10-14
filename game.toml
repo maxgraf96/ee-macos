@@ -25,9 +25,12 @@ image_base = 0x00400000
 entry_point = 0x00683798          # WinMainCRTStartup (the DRM stub in .cms_t is never translated)
 guest_root = 'C:\Empire Earth'
 developer_exe = "original/gog/Empire Earth/Empire Earth.exe"
-# The arena reaches past the last reserved DLL slot (base map). Runtime-core
-# (gap 3) replaces this with a guarded 4 GB arena.
-guest_size = 0x11000000
+# The arena: the base map's last DLL ends at 0x10807000; above it the heap
+# grows to here (640 MB in all, guarded beyond). The executable is large-address
+# aware, and it maps its 156 MB data.ssa whole, twice (docs/reference/boot.md).
+# Kept below 0x2f000000, where the M1 replay self-test puts a heap "above
+# guest_size".
+guest_size = 0x28000000
 windows_version = "5.1"
 
 [translate]
