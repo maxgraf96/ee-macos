@@ -147,6 +147,12 @@ relative_mouse = true
 # Tahoma, Arial and the other faces the UI names, from the system's fonts.
 system_fonts = true
 
+[network]
+# Sierra's long-gone server, looked up when the Multiplayer screen opens
+# (netcode.md §7): gethostbyname fails at once instead of waiting on DNS
+# (kit runtime/winsock.cpp; P5-A).
+offline_hosts = ["empireearth.m1.sierra.com"]
+
 [mods]
 builtin = "none"
 
