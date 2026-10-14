@@ -29,7 +29,8 @@ Every merge goes through the main session, as in Phase 2. P3-A rebases often, be
 ## Status
 | ID | State | Result |
 |---|---|---|
-| P3-A exe-boot | running | |
+| P3-A exe-boot | **merged** (`ee` 44f9142, ee-macos 83ae390) | All 9 modules boot natively in strict mode to the main-menu loop (~5.5 s, 14 threads, render CW 007f, others 027f). Intro movies play. The main menu renders with `v2.00.2974` (the original data checksum). `tools/run.py` builds and opens `build/EmpireEarth.app` (Metal, SDL input). Headless `tools/test.py --boot`. GOG's `ddraw.dll` is never loaded. Remaining stand-ins: audio (Phase 4), `socket`/`closesocket` (Phase 5). |
 | P3-B d3d7-metal | **merged** (`ee` 3534522) | DD7/D3D7 shim behind a C seam (`dx/d3d7_host.h`). Metal renderer plus a software reference renderer (test oracle; headless via `RECOMP_D3D7_SOFTWARE=1`). All 50 COM methods and 3 exports; fixed-function T&L with 8 lights; fog; stage-0 combiner; render-to-texture; mips; Flip preserves the back buffer; GPU-side Blts. 3,694 headless checks; 21/22 GPU scenes within one level per channel, the 22nd off by one pixel; ~1.1 ms CPU per measured in-game frame. Opt-in: `[runtime] ddraw7 = true`. |
 | P3-C win32-ui | **merged** (`ee` d4bac5b) | user32 74/74, gdi32 36/36, dinput, imm32 7/7. Per-thread queues; sent and posted messages across threads; activation and focus modelled on EE's own WndProc (self-minimise + wait for a worker); DirectInput exclusive/foreground rules and the N−1 buffer; Windows-measured text on macOS fonts (Tahoma −11 → 13/11/2, Arial −12 → 15/12/3); a GDI surface-DC bridge for D3D7. 461 + 208 checks. Windows metric vectors pending (legion 0011). Config: `relative_mouse`, `system_fonts`. |
+| P3-E polish | running | scripted input (menu scenarios, first in-game frame), P3-A's open items for B/C |
 | P3-D references | legion 0010 (boot trace, screenshots) + 0011 (GDI metrics via the kit tool) queued | |
