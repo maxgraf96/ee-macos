@@ -23,7 +23,8 @@ namespace {
 void said(const char *what) {
     static std::set<std::string> seen;
     if (seen.insert(what).second)
-        fprintf(stderr, "[ee pending mss32] %s (temporary stand-in, app/pending_mss32.cpp)\n", what);
+        fprintf(stderr, "[ee pending mss32] %s (temporary stand-in, app/pending_mss32.cpp)\n",
+                what);
 }
 
 uint32_t g_empty_string = 0, g_redist = 0;
@@ -99,9 +100,8 @@ void mem_alloc_lock(X86 *c) {
 void file_size(X86 *c) {
     std::string path = win32_host_path_op(gm_str(arg(c, 0)), WIN32_FILE_READ);
     OsStat st{};
-    set_eax(c, !path.empty() && os_stat(path.c_str(), &st) == 0 && st.is_regular
-                   ? (uint32_t)st.size
-                   : 0xffffffffu);
+    set_eax(c, !path.empty() && os_stat(path.c_str(), &st) == 0 && st.is_regular ? (uint32_t)st.size
+                                                                                 : 0xffffffffu);
 }
 // AIL_sample_ms_position(sample, int *total, int *current).
 void sample_ms_position(X86 *c) {

@@ -180,7 +180,8 @@ void PeekMessageA(X86 *c) {
     }
     static const bool debug = getenv("EE_MSG_DEBUG") != nullptr;
     if (debug && c->r[R_EAX] && p && rd32(p + 4) != 0x0f)
-        fprintf(stderr, "[ee msg] thread %u took hwnd %08x msg %04x wp %08x lp %08x (filter %08x, %s)\n",
+        fprintf(stderr,
+                "[ee msg] thread %u took hwnd %08x msg %04x wp %08x lp %08x (filter %08x, %s)\n",
                 guest_current_thread_id(), rd32(p), rd32(p + 4), rd32(p + 8), rd32(p + 12), hwnd,
                 (flags & 1) ? "remove" : "peek");
 }

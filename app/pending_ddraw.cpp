@@ -34,8 +34,8 @@ const uint32_t DDERR_NOTFOUND = 0x887600ffu, DDERR_OUTOFMEMORY = 0x8007000eu;
 const uint32_t DDERR_UNSUPPORTED = 0x80004001u;
 
 // Display: the modes a desktop display of 2001 offers, at 16 and 32 bits.
-const uint32_t kModes[][2] = {{640, 480},   {800, 600},   {1024, 768}, {1152, 864},
-                              {1280, 960},  {1280, 1024}, {1600, 1200}, {1920, 1080}};
+const uint32_t kModes[][2] = {{640, 480},  {800, 600},   {1024, 768},  {1152, 864},
+                              {1280, 960}, {1280, 1024}, {1600, 1200}, {1920, 1080}};
 uint32_t g_mode_w = 1024, g_mode_h = 768, g_mode_bpp = 32;
 
 void note(const char *what) {
@@ -102,7 +102,7 @@ void ret(X86 *c, uint32_t hr) {
 
 // A method no handler below answers: DD_OK, said once by name.
 #define NOTE_OK(iface, name)                                                                       \
-    [](X86 *c) {                                                                                    \
+    [](X86 *c) {                                                                                   \
         note(iface "::" name " (null: DD_OK)");                                                    \
         ret(c, DD_OK);                                                                             \
     }
@@ -261,7 +261,8 @@ void S_GetAttachedSurface(X86 *c) {
     }
     uint32_t want = rd32(caps);
     if (getenv("EE_DDRAW_DEBUG"))
-        fprintf(stderr, "[ee pending ddraw] GetAttachedSurface(%08x, caps %08x %08x): %zu attached\n",
+        fprintf(stderr,
+                "[ee pending ddraw] GetAttachedSurface(%08x, caps %08x %08x): %zu attached\n",
                 arg(c, 0), want, rd32(caps + 4), s->attached.size());
     for (uint32_t a : s->attached) {
         Obj *t = get(a);
@@ -350,7 +351,7 @@ void S_GetDC(X86 *c) {
         uint32_t bmi = heap_alloc(40 + 12, true);
         wr32(bmi, 40);
         wr32(bmi + 4, s->w);
-        wr32(bmi + 8, (uint32_t) - (int32_t)s->h);
+        wr32(bmi + 8, (uint32_t)-(int32_t)s->h);
         wr16(bmi + 12, 1);
         wr16(bmi + 14, (uint16_t)s->bpp);
         uint32_t bits = heap_alloc(4, true);
@@ -434,7 +435,8 @@ const Method kSurface[] = {
     {"GetLOD", 2, S_GetPriority},
 };
 uint32_t surface_vtable() {
-    return vtable_for(K_SURFACE, "IDirectDrawSurface7", kSurface, sizeof kSurface / sizeof *kSurface);
+    return vtable_for(K_SURFACE, "IDirectDrawSurface7", kSurface,
+                      sizeof kSurface / sizeof *kSurface);
 }
 
 // --- IDirectDrawGammaControl, IDirectDrawClipper ------------------------------------
@@ -507,14 +509,24 @@ const Method kVB[] = {
 uint32_t fvf_size(uint32_t fvf) {
     uint32_t n = 0;
     switch (fvf & 0xe) {
-    case 0x2: n = 12; break; // XYZ
-    case 0x4: n = 16; break; // XYZRHW
-    default: n = 12 + 4 * (((fvf & 0xe) - 4) / 2); break;
+    case 0x2:
+        n = 12;
+        break; // XYZ
+    case 0x4:
+        n = 16;
+        break; // XYZRHW
+    default:
+        n = 12 + 4 * (((fvf & 0xe) - 4) / 2);
+        break;
     }
-    if (fvf & 0x10) n += 12; // NORMAL
-    if (fvf & 0x20) n += 4;  // RESERVED1
-    if (fvf & 0x40) n += 4;  // DIFFUSE
-    if (fvf & 0x80) n += 4;  // SPECULAR
+    if (fvf & 0x10)
+        n += 12; // NORMAL
+    if (fvf & 0x20)
+        n += 4; // RESERVED1
+    if (fvf & 0x40)
+        n += 4; // DIFFUSE
+    if (fvf & 0x80)
+        n += 4; // SPECULAR
     n += 8 * ((fvf >> 8) & 0xf);
     return n;
 }
@@ -535,7 +547,7 @@ void put_device_desc(uint32_t d, bool tnl) {
         wr32(prim + 48, 32);
         wr32(prim + 52, 32);
     }
-    wr32(d + 116, 0x400 | 0x100); // DDBD_16 | DDBD_32 render depths
+    wr32(d + 116, 0x400 | 0x100);         // DDBD_16 | DDBD_32 render depths
     wr32(d + 120, 0x400 | 0x200 | 0x100); // z depths 16/24/32
     wr32(d + 124, 1);
     wr32(d + 128, 1);
@@ -767,7 +779,8 @@ void D3_CreateVertexBuffer(X86 *c) {
         ret(c, DDERR_INVALIDPARAMS);
         return;
     }
-    uint32_t vb = make(K_VB, vtable_for(K_VB, "IDirect3DVertexBuffer7", kVB, sizeof kVB / sizeof *kVB));
+    uint32_t vb =
+        make(K_VB, vtable_for(K_VB, "IDirect3DVertexBuffer7", kVB, sizeof kVB / sizeof *kVB));
     Obj &v = g_objs[vb];
     v.vb_fvf = rd32(desc + 8);
     v.vb_count = rd32(desc + 12);
@@ -889,7 +902,8 @@ void DD_CreateSurface(X86 *c) {
     }
     uint32_t flags = rd32(d + 4), caps = rd32(d + 104);
     if (getenv("EE_DDRAW_DEBUG"))
-        fprintf(stderr, "[ee pending ddraw] CreateSurface flags %08x caps %08x %ux%u back %u mips %u\n",
+        fprintf(stderr,
+                "[ee pending ddraw] CreateSurface flags %08x caps %08x %ux%u back %u mips %u\n",
                 flags, caps, rd32(d + 12), rd32(d + 8), rd32(d + 20), rd32(d + 24));
     uint32_t w = (flags & 0x4) ? rd32(d + 12) : g_mode_w;
     uint32_t h = (flags & 0x2) ? rd32(d + 8) : g_mode_h;
@@ -922,7 +936,8 @@ void DD_CreateSurface(X86 *c) {
         uint32_t prev = s;
         for (uint32_t i = 0; i < rd32(d + 20); ++i) {
             // BACKBUFFER | FLIP | COMPLEX: found by either cap, as on Windows.
-            uint32_t b = new_surface(dd, w, h, bpp, 0x4 | 0x10 | 0x8 | 0x800 | 0x4000 | (caps & 0x2000));
+            uint32_t b =
+                new_surface(dd, w, h, bpp, 0x4 | 0x10 | 0x8 | 0x800 | 0x4000 | (caps & 0x2000));
             g_objs[prev].attached.push_back(b);
             prev = b;
         }

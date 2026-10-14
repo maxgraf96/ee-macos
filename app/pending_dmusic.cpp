@@ -122,7 +122,10 @@ void query_interface(X86 *c) {
     wr32(out, self);
     set_eax(c, S_OK_);
 }
-#define IUNKNOWN {"QueryInterface", 3, query_interface}, {"AddRef", 1, add_ref}, {"Release", 1, release}
+#define IUNKNOWN                                                                                   \
+    {"QueryInterface", 3, query_interface}, {"AddRef", 1, add_ref}, {                              \
+        "Release", 1, release                                                                      \
+    }
 
 // --- IKsControl --------------------------------------------------------------
 // KsProperty(property, length, data, data_length, bytes_returned): a GET of
@@ -134,7 +137,8 @@ void ks_property(X86 *c) {
         wr32(arg(c, 5), arg(c, 4));
     set_eax(c, S_OK_);
 }
-const Method kKs[] = {IUNKNOWN, {"KsProperty", 6, ks_property}, {"KsMethod", 6, ok}, {"KsEvent", 6, ok}};
+const Method kKs[] = {
+    IUNKNOWN, {"KsProperty", 6, ks_property}, {"KsMethod", 6, ok}, {"KsEvent", 6, ok}};
 uint32_t new_ks_control() {
     return object_of(VT("IKsControl", kKs));
 }

@@ -76,23 +76,23 @@ int g_movies_open = 0; // BinkOpen without its BinkClose yet
 // --- milestones ---------------------------------------------------------------
 // In the order a Windows boot reaches them (docs/reference/boot.md §2).
 enum Milestone {
-    kLoaded,      // every module mapped, imports bound
-    kCrtStarted,  // the executable's CRT asked for its command line
-    kRegistry,    // HKCU\Software\SSSI\Empire Earth opened
-    kPluginScan,  // the engine LoadLibrary'd a plugin from the game folder
-    kWindow,      // a window exists (the splash screen's, first)
-    kThreads,     // the game started a thread of its own
-    kDirectDraw,  // a display plugin created DirectDraw 7
-    kMovies,      // the first intro movie opened
-    kMenuMode,    // a display mode was set after the last movie closed (the menu's)
-    kMenuFrames,  // a thread other than the main one presented 60 frames since
-    kMenuLoop,    // ...and the main thread pumped 100 messages: the main menu's loop
+    kLoaded,     // every module mapped, imports bound
+    kCrtStarted, // the executable's CRT asked for its command line
+    kRegistry,   // HKCU\Software\SSSI\Empire Earth opened
+    kPluginScan, // the engine LoadLibrary'd a plugin from the game folder
+    kWindow,     // a window exists (the splash screen's, first)
+    kThreads,    // the game started a thread of its own
+    kDirectDraw, // a display plugin created DirectDraw 7
+    kMovies,     // the first intro movie opened
+    kMenuMode,   // a display mode was set after the last movie closed (the menu's)
+    kMenuFrames, // a thread other than the main one presented 60 frames since
+    kMenuLoop,   // ...and the main thread pumped 100 messages: the main menu's loop
     kMilestoneCount
 };
 const char *const kMilestoneNames[kMilestoneCount] = {
-    "modules loaded",  "CRT started",       "registry read",      "plugin scan",
-    "window created",  "threads started",   "DirectDraw created", "intro movies",
-    "menu video mode", "menu frames",       "main menu loop"};
+    "modules loaded",  "CRT started",     "registry read",      "plugin scan",
+    "window created",  "threads started", "DirectDraw created", "intro movies",
+    "menu video mode", "menu frames",     "main menu loop"};
 double g_reached[kMilestoneCount];
 int g_last = -1;
 
@@ -120,8 +120,8 @@ struct ThreadInfo {
     uint16_t first_cw = 0, last_cw = 0;
     bool seen = false;
 };
-std::map<uint32_t, ThreadInfo> g_thread_info;        // by guest thread id
-std::map<uint32_t, ThreadInfo> g_creating;           // creator tid -> the CreateThread in flight
+std::map<uint32_t, ThreadInfo> g_thread_info; // by guest thread id
+std::map<uint32_t, ThreadInfo> g_creating;    // creator tid -> the CreateThread in flight
 std::vector<std::string> g_libraries;
 uint32_t g_main_tid = 0xffffffffu; // the thread that ran the CRT start-up
 uint32_t g_render_tid = 0;
@@ -144,11 +144,11 @@ bool observe_call(const char *desc, const uint32_t *args, uint32_t argc, uint32_
         static const struct {
             const char *name;
             uint32_t arg;
-        } kStrings[] = {{"CreateFileA", 0},      {"GetFileAttributesA", 0}, {"FindFirstFileA", 0},
-                        {"LoadLibraryA", 0},     {"LoadLibraryExA", 0},     {"RegOpenKeyExA", 1},
-                        {"RegCreateKeyExA", 1},  {"RegQueryValueExA", 1},   {"RegSetValueExA", 1},
-                        {"CreateDirectoryA", 0}, {"DeleteFileA", 0},        {"GetProcAddress", 1},
-                        {"OutputDebugStringA", 0}, {"CreateMutexA", 2},     {"CreateEventA", 3}};
+        } kStrings[] = {{"CreateFileA", 0},        {"GetFileAttributesA", 0}, {"FindFirstFileA", 0},
+                        {"LoadLibraryA", 0},       {"LoadLibraryExA", 0},     {"RegOpenKeyExA", 1},
+                        {"RegCreateKeyExA", 1},    {"RegQueryValueExA", 1},   {"RegSetValueExA", 1},
+                        {"CreateDirectoryA", 0},   {"DeleteFileA", 0},        {"GetProcAddress", 1},
+                        {"OutputDebugStringA", 0}, {"CreateMutexA", 2},       {"CreateEventA", 3}};
         for (const auto &s : kStrings)
             if (!strcmp(name, s.name) && s.arg < argc && args[s.arg] > 0xffff &&
                 gm_valid(args[s.arg], 1))
@@ -333,13 +333,16 @@ void report(FILE *out, bool abnormal) {
     std::map<std::string, int> libraries;
     for (const std::string &l : g_libraries)
         ++libraries[l];
-    fprintf(out, "LoadLibrary calls: %zu, of %zu libraries\n", g_libraries.size(), libraries.size());
+    fprintf(out, "LoadLibrary calls: %zu, of %zu libraries\n", g_libraries.size(),
+            libraries.size());
     for (const auto &kv : libraries)
         fprintf(out, "  %2dx %s\n", kv.second, kv.first.c_str());
     fprintf(out, "guest threads (x87 control word at the first and the latest import call):\n");
     for (const auto &kv : g_thread_info) {
         const ThreadInfo &ti = kv.second;
-        std::string role = kv.first == g_main_tid ? "main" : kv.first == g_render_tid ? "render" : "";
+        std::string role = kv.first == g_main_tid     ? "main"
+                           : kv.first == g_render_tid ? "render"
+                                                      : "";
         fprintf(out, "  thread %-3u %-28s cw %04x -> %04x  %8u calls%s%s\n", kv.first,
                 ti.body ? where(ti.body).c_str() : "(process entry)", ti.first_cw, ti.last_cw,
                 ti.calls, role.empty() ? "" : "  ", role.c_str());
@@ -445,8 +448,8 @@ int main(int argc, char **argv) {
     printf("[ee] %s; user data %s; strict %s\n", loader_exe_path().c_str(), user.c_str(),
            getenv("RECOMP_STRICT"));
     for (uint32_t i = 0; const LoaderModule *m = loader_module(i); ++i)
-        printf("[ee]   %-30s %08x..%08x (prefers %08x, %u relocations)\n", m->name.c_str(),
-               m->base, m->base + m->size, m->preferred_base, m->relocations);
+        printf("[ee]   %-30s %08x..%08x (prefers %08x, %u relocations)\n", m->name.c_str(), m->base,
+               m->base + m->size, m->preferred_base, m->relocations);
     imports_set_call_observer(observe_call);
     imports_set_return_observer(observe_return);
 
