@@ -111,7 +111,7 @@ ld64.lld -arch arm64 -platform_version macos 13.0 13.0 -bundle -undefined dynami
 | `b_engine.bundle` | 28 | 21 | 20.3 MB |
 | `main.bundle` (EXE, self-registering image table) | 186 | 25 (incl. `recomp_libm_sin`/`cos`) | 133 MB |
 
-Time: the EXE's 186 objects compile and link in 95 s wall (1,031 CPU-s at 16 jobs; the spike's stand-in-header build took 85 s); the three DLLs take about 25 s together. Every bundle's host symbols are runtime entry points only: no `memcpy` or `setjmp` call survives in these four [measured].
+Time: the EXE's 186 objects compile and link in 95 s wall (1,031 CPU-s at 16 jobs; the spike's stand-in-header build took 85 s); the three DLLs take 21 s together (270 CPU-s), a rebuild with nothing changed 0.1 s, and a rebuilt bundle is byte-identical to the previous one. Every bundle's host symbols are runtime entry points only: no `memcpy` or `setjmp` call survives in these four [measured].
 
 The kit's `tools/recomp/tests/test_freestanding.py` keeps this true without game files: the translator's whole synthetic instruction vocabulary (the Unicorn suite's cases, x87 and SEH forms included) compiles with `-ffreestanding -nostdinc` and needs nothing foreign; a translated image links with lld into a bundle; and a stand-in host `dlopen`s it, sees the table register and calls a translated function.
 
