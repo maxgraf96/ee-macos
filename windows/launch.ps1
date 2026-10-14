@@ -14,10 +14,11 @@
   launch.ps1 session '<session.ps1 args>'    run session.ps1 in the user's session, print output
   launch.ps1 frida   '<run.py args>'         run frida/run.py in the user's session (hidden)
   launch.ps1 modules                         ListDLLs view of the running game
+  launch.ps1 record  '<seconds> <out.wav>'   WASAPI loopback recording (loopback_record.py) in the user's session
   launch.ps1 cleanup                         unregister \EEPort\ tasks (game must not be running)
 #>
 param(
-  [Parameter(Position = 0)][ValidateSet('status', 'start', 'stop', 'session', 'frida', 'cleanup', 'modules')]
+  [Parameter(Position = 0)][ValidateSet('status', 'start', 'stop', 'session', 'frida', 'cleanup', 'modules', 'record')]
   [string]$Action = 'status',
   [string]$Root = 'C:\EEPort',
   [int]$TimeoutSec = 60,
@@ -117,6 +118,12 @@ switch ($Action) {
     $body = "`$p = Start-Process -FilePath '$Root\tools\venv\Scripts\python.exe' -WindowStyle Hidden -PassThru " +
             "-ArgumentList '`"$Root\frida\run.py`" $ArgLine --log `"$log`"'; `$p.WaitForExit(); Get-Content '$log'"
     Invoke-InSession 'frida' $body ([Math]::Max($TimeoutSec, 600))
+  }
+  'record' {
+    # Loopback capture needs the user's audio session (session 1). Needs soundcard + numpy in the venv.
+    $body = "`$p = Start-Process -FilePath '$Root\tools\venv\Scripts\python.exe' -WindowStyle Hidden -PassThru " +
+            "-ArgumentList '`"$Root\scripts\loopback_record.py`" $ArgLine'; `$p.WaitForExit(); 'exit ' + `$p.ExitCode"
+    Invoke-InSession 'record' $body ([Math]::Max($TimeoutSec, 900))
   }
   'modules' {
     # ListDLLs (Sysinternals) view of the running game: path, base, size, version.

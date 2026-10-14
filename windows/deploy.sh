@@ -28,7 +28,7 @@ if [ $COPY_GAME = 1 ] || ! ssh "$HOST" 'if exist "C:\EEPort\game\Empire Earth\Em
 fi
 [ -f "$GOG_SCRIPT" ] && scp -q "$GOG_SCRIPT" "$HOST:C:/EEPort/game/goggame-1207658777.script"
 
-scp -q "$REPO"/windows/*.ps1 "$REPO"/windows/*.vbs "$HOST:C:/EEPort/scripts/"
+scp -q "$REPO"/windows/*.ps1 "$REPO"/windows/*.vbs "$REPO"/windows/*.py "$HOST:C:/EEPort/scripts/"
 scp -q "$REPO"/windows/frida/*.js "$REPO"/windows/frida/*.py "$HOST:C:/EEPort/frida/"
 
 ssh "$HOST" "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\EEPort\\scripts\\setup.ps1 $*"

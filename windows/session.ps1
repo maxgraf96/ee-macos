@@ -17,11 +17,12 @@
                                                   EE draws its own cursor from DirectInput deltas, so
                                                   absolute SetCursorPos does not move it
   session.ps1 -Action click      -Here [-Right]          click wherever the game cursor is
+  session.ps1 -Action idle                               ms since the last input in the session + foreground window
   session.ps1 -Action key        -Keys 'ESC,ENTER'       scan-code key presses (DirectInput sees them)
   session.ps1 -Action type       -Text 'hello'           unicode text into the focused window
 #>
 param(
-  [Parameter(Mandatory)][ValidateSet('windows', 'screenshot', 'grab', 'close', 'focus', 'click', 'move', 'key', 'type')]
+  [Parameter(Mandatory)][ValidateSet('windows', 'screenshot', 'grab', 'close', 'focus', 'click', 'move', 'key', 'type', 'idle')]
   [string]$Action,
   [string]$ProcessName = 'Empire Earth',
   [string]$Out,
@@ -58,6 +59,9 @@ public static class EEWin {
   [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
   [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int idx);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+  [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO li);
+  public static uint IdleMs() { var li = new LASTINPUTINFO(); li.cbSize = 8; GetLastInputInfo(ref li); return (uint)Environment.TickCount - li.dwTime; }
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int v, int size);
@@ -120,6 +124,19 @@ function Get-GameWindows {
 }
 function Main-Window { Get-GameWindows | Where-Object { $_.visible } | Sort-Object { - ($_.client[2] * $_.client[3]) } | Select-Object -First 1 }
 
+# Input actions only ever go to the game: bring it to the front (ALT tap lifts the foreground
+# lock) and refuse to send anything if another window (e.g. a VM console) keeps the focus.
+function Ensure-Foreground($mw) {
+  if (-not $mw) { throw 'no game window; not sending input' }
+  for ($i = 0; $i -lt 3; $i++) {
+    if ([EEWin]::GetForegroundWindow() -eq $mw.h) { return }
+    [EEWin]::Key(0x38, $false, $false); [EEWin]::Key(0x38, $false, $true)
+    if ([EEWin]::IsIconic($mw.h)) { [void][EEWin]::ShowWindow($mw.h, 9) }
+    [void][EEWin]::SetForegroundWindow($mw.h); Start-Sleep -Milliseconds 300
+  }
+  if ([EEWin]::GetForegroundWindow() -ne $mw.h) { throw 'game window is not in the foreground; not sending input' }
+}
+
 $ScanCodes = @{
   ESC = 0x01; ENTER = 0x1C; SPACE = 0x39; TAB = 0x0F; BACK = 0x0E
   F1 = 0x3B; F2 = 0x3C; F3 = 0x3D; F4 = 0x3E; F5 = 0x3F; F6 = 0x40; F7 = 0x41; F8 = 0x42; F9 = 0x43; F10 = 0x44
@@ -176,7 +193,7 @@ switch ($Action) {
   }
   'click' {
     $mw = Main-Window
-    if ($mw) { [void][EEWin]::SetForegroundWindow($mw.h) }
+    Ensure-Foreground $mw
     $sx = $X; $sy = $Y
     if (-not $Here) {
       if ($Relative -and $mw) { $sx = $mw.client[0] + $X; $sy = $mw.client[1] + $Y }
@@ -188,8 +205,8 @@ switch ($Action) {
   }
   'move' {
     $mw = Main-Window
+    Ensure-Foreground $mw
     if ($mw) {
-      [void][EEWin]::SetForegroundWindow($mw.h)
       # Re-centre the system cursor first: legacy DirectInput derives deltas from the (clipped)
       # system cursor, so moves that hit a screen edge get lost. SetCursorPos itself is not seen.
       [void][EEWin]::SetCursorPos([int](($mw.rect[0] + $mw.rect[2]) / 2), [int](($mw.rect[1] + $mw.rect[3]) / 2))
@@ -204,9 +221,14 @@ switch ($Action) {
     }
     "moved ($X,$Y) in $n steps"
   }
+  'idle' {
+    $fg = [EEWin]::GetForegroundWindow(); $fpid = 0; [void][EEWin]::GetWindowThreadProcessId($fg, [ref]$fpid)
+    $pn = (Get-Process -Id $fpid -ErrorAction SilentlyContinue).ProcessName
+    "idle_ms=$([EEWin]::IdleMs()) foreground=$pn '$([EEWin]::Text($fg))'"
+  }
   'key' {
     $mw = Main-Window
-    if ($mw) { [void][EEWin]::SetForegroundWindow($mw.h) }
+    Ensure-Foreground $mw
     foreach ($k in ($Keys -split ',')) {
       $k = $k.Trim().ToUpper()
       if ($ScanCodes.ContainsKey($k)) { $sc = $ScanCodes[$k] } else { throw "unknown key $k" }
@@ -217,6 +239,7 @@ switch ($Action) {
     "keys $Keys"
   }
   'type' {
+    Ensure-Foreground (Main-Window)
     foreach ($ch in $Text.ToCharArray()) { [EEWin]::Unicode($ch, $false); [EEWin]::Unicode($ch, $true); Start-Sleep -Milliseconds 30 }
     "typed $($Text.Length) chars"
   }

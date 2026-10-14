@@ -372,3 +372,33 @@ The plan above changed in two ways. The Mac's Wine build can't be a peer, and th
   - a legion-hosted match, with legion's own Frida world stream, now that VMnet1/8 are off;
   - isolate the host crash (adapter count vs explicit *Choose Network Adapter*) and decompile `TCP Protocol.dll` +0x1bee–0x1cd8 / +0x484c from the dump;
   - a longer match for the oracle.
+
+### Phase 1 confirmation runs (2026-10-14, 17:43–18:25)
+Outputs are on legion under `C:\EEPort\captures\` and copied to `analysis/legion-captures/` (git-ignored).
+
+| Capture | Status |
+|---|---|
+| `com-spawn` | `com_census`, spawned, 150 s, intro skipped to the menu |
+| `com-menu` | 120 s at the menu |
+| `com-ingame` | `com_census` + `iat_census`, 60 s, after 60 s of a random map (Small, 1 AI) |
+| `music-trace` | `music_hooks`, 240 s in-game, plus `music-trace-loopback.wav` (250 s WASAPI loopback) |
+| `music-sched` | intensity schedule, 200 s, plus `music-sched-loopback.wav` |
+| `census` | `code_census`, **main menu only** (600 s, never reached a game) |
+
+Caveats and gaps:
+- **Loopback audio may be contaminated.** It records the whole default output device, so any other sound on legion is mixed in. The VMware VM `EE-VM` was running, and Nahimic effects are active.
+- **The code census misses gameplay.**
+  - Results: check_census reports 0 blocks outside DB functions and 0 DRM blocks. Functions run: 61 (EXE), 117 (engine), 36 (DX7HRDisplay), 1 (Miles mixer).
+  - The run would not finish on its own. After the final snapshot, `stop()` (Stalker unfollow) never returned, so I killed the client and the game survived.
+  - A second, in-game attempt could not start: `script.load()` timed out while Stalker followed all ~50 threads.
+  - Navigation was paused anyway, because the user was using legion: VS Code was in the foreground, and an idle check showed recent input.
+  - **Still to do:** an in-game `code_census` run.
+    - Attach at the menu with a longer load timeout, or follow only the game's own threads.
+    - Run it while nobody is using legion.
+- **Input safety.**
+  - `session.ps1` now refuses to send input unless the game window is in the foreground (`Ensure-Foreground`), so a focused VM console or editor never gets keystrokes.
+  - `-Action idle` reports time since the last input.
+  - `launch.ps1 record '<s> <wav>'` runs `loopback_record.py` in the user session; soundcard and numpy are in the venv.
+- **Known crash (from the LAN session, not these runs).** With the VMware host adapters (VMnet1/VMnet8) present and **Wi-Fi explicitly chosen in Network Adapter Options**, the game crashed at match start as LAN host: an access violation in the ntdll heap via `TCP Protocol.dll` +0x1cd8/+0x484c/+0x7370.
+  - The VMnet adapters are now disabled. Don't change Network Adapter Options on legion.
+  - Dumps: `C:\EEPort\captures\dumps\`, where WER LocalDumps is enabled for `Empire Earth.exe`.

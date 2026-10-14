@@ -1,0 +1,41 @@
+# Phase 2: translation core → M1 (native random-map generator)
+
+Started 2026-10-14. Context: [PLAN.md](PLAN.md) §5.1–§5.2 and §7 Phase 2, [ADR-001](decisions/001-base-translation-kit.md) gaps 1–7, [ADR-002](decisions/002-exact-x87.md), [function-db.md](reference/function-db.md).
+
+## M1 definition of done
+- `Default.dll` + `Low-Level Engine.dll` + `sxlrt233.dll` translated from the canonical GOG modules, using the function DB as the authoritative input.
+- They are loaded by the fork's multi-module loader at their **runtime bases**, run their `DllMain`s, and execute the random-map pipeline.
+- Results are **byte-identical** to the real DLLs on Windows across a matrix of ≥ 50 cases (scripts × sizes × seeds × player counts), measured with the capture/replay oracle below.
+- **Build:** freestanding generated C, linked into bundles by `ld64.lld` (PLAN §5.8). The build passes on a machine without the Xcode Command Line Tools.
+- **x87:** ADR-002 is implemented; the hardware corpus (criterion 1, 1.09 M vectors) passes against translated x87 code.
+- **CI:** the kit's own tests and our suites are green.
+
+## The M1 oracle: capture and replay
+We don't hand-build the map-generator context. Instead:
+1. **Windows (legion operator, mailbox):** Frida hooks each `EERMPIM*` call that `Default.dll` receives during real random-map starts. It records the arguments, every input memory region reachable from them (the context struct and pointed-to buffers) and all file reads (`.rmv` scripts). It records outputs after each call. Seeds and settings vary across the matrix.
+2. **Self-check:** a native 32-bit Windows driver (MSVC x86 on legion) replays the captures against the real DLLs and must reproduce the recorded outputs. This proves a capture is complete.
+3. **Mac:** the same replay driver logic runs against the translated DLLs. Outputs must be byte-identical.
+
+The capture format is specified by the `m1-re` workstream in `docs/reference/rmg.md`. Captures are derived from game data and stay out of git (`analysis/m1-captures/`).
+
+## Workstreams
+| ID | Name | Scope | Where |
+|---|---|---|---|
+| A | game-repo | Make `ee-macos` the kit's game repo: `game.toml` (hashes, modules, DB-driven translate inputs via `tools/ghidra/kit_export.py`), `globals.toml`, build/test wrappers, game-file setup. Port the spike harness to `tests/m1/`. **Gap 2:** DB-authoritative translation (function-db.md §7.4). **Gap 7:** freestanding bundle mode plus the `ld64.lld` step. | `kit` branch `feat/game-repo` + `ee-macos` |
+| B | runtime-core | **Gap 1:** multi-module loader (relocation, cross-module import binding, dependency-ordered `DllMain`, TLS). **Gap 3:** strict traps, stdcall argc for every import, 4 GB guarded arena, larger heap, CW `0x027f`. | `kit` branch `feat/runtime-core` |
+| C | x87 | ADR-002: mode word, guard, SoftFloat-80 side path (vendored, freestanding), PC24 rounding, `_controlfp` HLE, `-ffp-contract=off` + FMA check, corpus conformance. | `kit` branch `feat/x87` |
+| D | crt | **Gap 4:** msvcrt/msvcp60 HLE in priority order (M1 modules' imports first, then the EXE's), using `db/win32-imports.json` as the checklist. | `kit` branch `feat/crt` |
+| E | eh | **Gap 5:** MSVC SEH + C++ EH (`_except_handler3`, `__CxxFrameHandler`, `_CxxThrowException`, `_setjmp3`/`longjmp`). Wave 2. | `kit` branch `feat/eh` |
+| F | m1-oracle | Capture hooks, the native replay driver on legion, the capture matrix. | legion operator via mailbox, branch `legion/work` |
+| G | m1-re | Reverse-engineer the EXE's random-map pipeline: call sequence, context layout, inputs and outputs, seeds. Specify the capture format and the replay driver (`docs/reference/rmg.md`). | `ee-macos` docs + `analysis/` |
+
+## Branches, worktrees and merging
+- **Kit fork:** `codeberg.org/maxgraf/recomp-kit`. `main` is an upstream mirror at `eb32cc4`; `ee` is our integration branch. `ee-macos/kit` is a submodule tracking `ee`.
+- **Worktrees:** each kit workstream works in its own worktree under `/Users/max/Code/ee-kit-wt/<name>`, on branch `feat/<name>` from `ee`. Never edit `ee-macos/kit` directly.
+- **Before reporting:** rebase onto the latest `ee` and push the feature branch to the fork (`git push fork feat/<name>`).
+- **Merging:** the main session merges into `ee` one branch at a time, runs the full test suite, bumps the submodule in `ee-macos`, and announces new `ee` heads to running workstreams.
+- **Every change** must keep `kit/tools/test.py` green, add tests for new behaviour, and follow the kit's rules (`check_repo.py`; no game literals in kit code; `check_game_literals.py`). EE-specific code goes in `ee-macos`, not the kit.
+- **Shared files** (`translate.py`, `x86.h`, `loader.cpp`): keep diffs localised, don't reformat, and mention touched areas in the report so merges stay cheap.
+
+## Legal hygiene (unchanged)
+No game bytes, generated C, captures or Ghidra databases in either repo. The kit stays game-neutral.

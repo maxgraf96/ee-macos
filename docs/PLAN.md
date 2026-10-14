@@ -466,10 +466,10 @@ Rough focused-engineering weeks for one developer with AI agents; Phases 0–1 r
 | Community RE ([community-re.md](research/community-re.md), `db/community-symbols.json`) | 240 verified symbols, struct maps, determinism checkpoints |
 
 **Pending runs on `legion`** (scripts ready):
-- `code_census.js`: executed code vs DB, expecting 0 blocks outside it;
-- `com_census.js`: D3D7/DInput calls in-game;
+- `code_census.js`: executed code vs DB. **Menu run done: 0 blocks outside the DB, 0 in DRM.** The in-game run is pending (legion operator, while the user is away);
+- ~~`com_census.js`: D3D7/DInput calls in-game~~ **captured 2026-10-14** (spawn/menu/in-game; analysis pending);
 - ~~`x87_runner.py` + `ummath_vectors.js`: hardware vectors that gate ADR-002~~ **done 2026-10-14, passed**;
-- `music_hooks.js` + loopback recording;
+- ~~`music_hooks.js` + loopback recording~~ **captured 2026-10-14** (trace + intensity schedule + WAVs; analysis pending);
 - ~~`netcode_hooks.js` + `pktmon`: LAN session with a second Windows client~~ **done 2026-10-14** (legion ↔ VMware VM; 817/817 ticks agree).
 
 Thread roles come from these censuses, not the static DB.
