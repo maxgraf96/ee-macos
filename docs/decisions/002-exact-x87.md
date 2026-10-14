@@ -293,6 +293,9 @@ Run with the procedure in "Running on legion" below. Results are in `build/x87/*
 - **The kit's double model vs hardware** differs only where the game never goes: 64-bit-precision inputs, range escapes, specials, PC64, and non-nearest rounding. Game-shaped arithmetic at `0x027F`/`0x007F` has 0 differences.
 - **Game maths called inside the real game** (Frida, 52,608 vectors, 0 errors): at the simulation's `0x027F`, `UMArcTan2`, `UMArcCos`, `UMArcTan`, `UMCos`, `UMTan`, `UMFastMath::Sqrt`, `UMQuadraticEquation` and msvcrt `sqrt` equal the double model with **0 differences** in about 24,000 calls.
   - The msvcrt `pow`/`atan2`/`sin`/… suites and the PC24 call rows aren't modelled by `um_model.py` yet. They are off the simulation path; they move to Phase 2 with the msvcrt HLE.
+- **Full-size corpus (2026-10-14, run by the legion operator agent, mailbox 0002):** 1,085,508 vectors (seed 2, 38 tags, 58 ops) over control words `0x027F`, `0x007F`, `0x037F`, `0x067F`, `0x0A7F` and `0x0E7F`. It ran in 7 s on legion with 0 skips, and a second run was byte-identical.
+  - Exact model vs hardware: **966,532 non-transcendental vectors, 0 differences.** Of the 104,416 transcendental vectors, 37,546 differ (informational).
+  - The corpus, `insn-2-legion.jsonl.gz` (sha256 `752d4214…cd7bad`), is the Phase 2 reference for criterion 1. It is kept on legion (`C:\EEPort\x87\`) and in the git-ignored `build/x87/big/`, and is regenerable from seed 2.
 - **Conclusion:** the design holds. The reference model is right about real hardware, and the double fast path is exact for everything the simulation does. Criteria 1–2 are scaled to the full vector counts when the translated code exists (Phase 2).
 
 ### Acceptance criteria
