@@ -1,6 +1,6 @@
 # Audio and video: DirectMusic, Miles, sound data, Bink
 
-Status: Phase 1 inventory, 2026-10-14 (agent `audio`).
+Status: Phase 1 inventory, 2026-10-14 (agent `audio`). Updated the same day with the `legion` music captures (§11); claims checked there are marked **✓ confirmed**, **✗ corrected** or **? unobserved**.
 Inputs:
 - GOG modules (PLAN §2.4);
 - spike Ghidra exports of the engine and EXE;
@@ -10,7 +10,7 @@ Inputs:
 
 Scratch work (builds, renders, scripts) is in `analysis/audio/` (git-ignored). §10 lists how to reproduce it.
 
-Labels: **[static]** = read from code or data. **[measured]** = run on this Mac (or on `legion`, where stated). **[inferred]** = reasoning, to be confirmed.
+Labels: **[static]** = read from code or data. **[measured]** = run on this Mac. **[legion]** = measured on the Windows reference (§11). **[inferred]** = reasoning, to be confirmed.
 
 ---
 
@@ -19,6 +19,7 @@ Labels: **[static]** = read from code or data. **[measured]** = run on this Mac 
 **Architecture** [static]:
 - Music is DirectMusic, driven entirely by the engine's `SEConductor`/`SEScore`, using the DX6/7 API (`IDirectMusicPerformance`, not `…8`).
 - The EXE's `EEMusicManager` thread maps game state to an **intensity of 0–3**. This becomes DirectMusic's **master groove level**, followed by an `AutoTransition` at the next measure.
+- **✗ corrected [static + legion]:** in the GOG build the combat ratio's numerator is never computed, so **the game always requests intensity 1 (groove 2)**. The trace shows 247 calls, all `SetIntensity(1, false)`. Intensity 2, 3 and 0 are only reachable by forcing them (§11). Master-groove support is still required: without it, dmusic plays groove 1, the long intro patterns.
 - Sound effects run through `SESoundManager` → `SEMixer` → the Miles plugin (`SPIM*`) → 34 `AIL_*` calls, all 2D.
 - Bink runs in `DX7HRDisplay`.
 - One `IDirectSound*` (Miles') is shared by Miles, `IDirectMusicPerformance::Init` and `BinkSetSoundSystem`.
@@ -33,6 +34,13 @@ Labels: **[static]** = read from code or data. **[measured]** = run on this Mac 
 - Upstream needs two classes of fix before EE sounds right:
   1. **Bank-select bug.** dmusic maps DirectMusic patches to TinySoundFont banks wrongly (it ignores the bank MSB and the drum flag). As a result, **89 of 103 patched band channels across the 8 tracks play the wrong instrument**, mostly the DLS's first preset. A 5-line fix resolves 102 of 103.
   2. **Missing API.** There is no master-groove level (EE's whole intensity mechanism) and no `SetRepeats`. A 30-line patch adds both. With it, intensity 1–3 switches pattern families exactly as the styles' groove ranges (1–4) intend.
+- **Against Windows [legion, §11]:**
+  - tempo matches (Pawns 100 BPM, Honor 104 BPM 3/4);
+  - harmony matches (chroma cosine 0.985);
+  - forced groove switches land on the next bar on a continuous bar grid, as in dmusic;
+  - dmusic is about 3 dB louder at the same Music Volume.
+
+  Timbre, reverb and the synth sample rate need a clean recording (§12).
 
 **Big content dependency** [static + measured]:
 - 4 of 8 tracks need instruments from **Windows' system GM/GS bank** (`gm.dls`, Roland), which the game doesn't ship:
@@ -58,7 +66,7 @@ Labels: **[static]** = read from code or data. **[measured]** = run on this Mac 
 
 | Item | Estimate | ADR-001 |
 |---|---|---|
-| DirectMusic | **3–4 weeks** total, of which 1.5–2 weeks reach "plays right" | gap 11: 3–4 weeks, confirmed |
+| DirectMusic | **2.5–3.5 weeks** total, of which 1.5–2 weeks reach "plays right" (revised down after §11) | gap 11: 3–4 weeks |
 | Miles | 0.5–1 week | gap 10, confirmed |
 | Bink | ≤ 0.5 week, verification only | |
 
@@ -157,14 +165,14 @@ Teardown (`UninitializeConductor`, also triggered by **Music Enabled** off → `
 **Unloading.** The `SEScore` destructor calls `seg->SetParam(GUID_Unload, …, perf)`, then `Release`.
 
 ### 2.4 Port and synth configuration [static]
-- **Port.** The default port, which on real Windows is the Microsoft Software Synthesizer (DLS1), with 8 channel groups. No `dwVoices` or `dwSampleRate` is set, so the defaults apply: **32 voices and 22,050 Hz** [inferred from DX7 defaults; verify on `legion`]. The DirectSound primary that Miles opens is also 22,050 Hz, 16-bit stereo.
+- **Port.** The default port, which on real Windows is the Microsoft Software Synthesizer (DLS1), with 8 channel groups. No `dwVoices` or `dwSampleRate` is set, so the defaults apply: **32 voices and 22,050 Hz** [inferred from DX7 defaults]. **? unobserved:** the hooks ran after init. The loopback spectrum is ambiguous: no cliff at 11.025 kHz, but 8–16 kHz is about 8 dB darker than dmusic at 48 kHz. `tools/audio/dm_setup_hooks.js` reads the values back from `CreatePort` at spawn (§12). The DirectSound primary that Miles opens is also 22,050 Hz, 16-bit stereo.
 - **Volume (`SetVolume(float v)`).**
   - The value written is `mB = v ≤ 0.01 ? −20000 : round(1000·ln v)`, in hundredths of a dB.
   - It is applied via `port->QueryInterface(IID_IKsControl)->KsProperty({GUID_DMUS_PROP_Volume, 0, KSPROPERTY_TYPE_SET}, &mB, 4)`.
-  - The law is slightly steeper than amplitude: the linear gain is `v^1.151`. Registry **Music Volume** = 62 % → −478 mB (−4.8 dB).
+  - The law is slightly steeper than amplitude: the linear gain is `v^1.151`. Registry **Music Volume** = 62 % → −478 mB (−4.8 dB). **✓ confirmed:** the trace shows `SetVolume(0.62)` as the target of every fade [legion].
 - **Reverb on/off (`SetReverb(1|0)`).** `KsProperty GET` then `SET` of `GUID_DMUS_PROP_Effects`, toggling `DMUS_EFFECT_REVERB`. This is the registry option **Reverb Enabled** (1 by default).
 - **Reverb parameters (`SetReverbStyle(a,b,c,d)`).**
-  - `KsProperty SET GUID_DMUS_PROP_WavesReverb` with `DMUS_WAVES_REVERB_PARAMS{fInGain=a, fReverbMix=c, fReverbTime=d, fHighFreqRTRatio=b}`. **Note the argument order.**
+  - `KsProperty SET GUID_DMUS_PROP_WavesReverb` with `DMUS_WAVES_REVERB_PARAMS{fInGain=a, fReverbMix=c, fReverbTime=d, fHighFreqRTRatio=b}`. **Note the argument order.** **✓ confirmed:** the trace shows `SetReverbStyle(0, 0.25, −9, 2100)` for Pawns, matching its `dbmusic.dat` record [legion].
   - The values come per track from `db\dbmusic.dat`. All tracks use: in-gain 0 dB, mix −7…−9 dB, time 1.6–2.8 s, HF ratio 0.15–0.45.
 
 ### 2.5 What each `SEConductor` call does [static]
@@ -195,7 +203,7 @@ Teardown (`UninitializeConductor`, also triggered by **Music Enabled** off → `
   - **Start (event 3)** fires at *"Game initialized"* / *"Game loaded"* (`FUN_0052e7c8`, which also requests intensity 1), and when Music Enabled is switched back on.
   - **Stop (event 4)** fires at game end.
   - **Pause (event 1)** fires elsewhere.
-  - In-game DirectMusic only; the main menu does not use it [inferred]. The menu and other UI forms play **`EEIntro.mp3` / `Arthurian.mp3` through Miles** (`db\dbuiforms.dat`).
+  - In-game DirectMusic only; the main menu does not use it [inferred; **? unobserved**: the trace attached in game]. The menu and other UI forms play **`EEIntro.mp3` / `Arthurian.mp3` through Miles** (`db\dbuiforms.dat`).
 - **Track selection.**
   - `db\dbmusic.dat` (in `data.ssa`) has 9 records of 196 bytes: a null record plus Pawns, Shadow2, Balance, Fallen, Enmity, Time, Honor, Rivers.
   - Each record holds the segment base name at `+0x6c`, 4 reverb floats at `+0xa0`, and 14 per-epoch enable bytes at `+0xb5`. **All 8 tracks are enabled for all 14 epochs.**
@@ -203,13 +211,22 @@ Teardown (`UninitializeConductor`, also triggered by **Music Enabled** off → `
   - A moddable override is `Data\Music\New Music.txt`: one segment name + 4 reverb floats, enabled for all epochs.
 - **Playing a track.**
   - `LoadScore(name)`, `SetVolume(0)`, `GetScore(id)->SetRepeatCount(100000)`, `SetIntensity(current, false)`, `SetReverbStyle(4 floats)`, `Play(id)`, then a fade in to the Music Volume setting (+0.1·k per `Sleep(n)`; *k* and *n* are runtime globals).
+  - **✓ confirmed, with values [legion]:** fades step by **0.0333 every 100 ms** (≈1.9 s from 0.62). A track change runs:
+    1. `LoadScore(next)` (15 ms);
+    2. fade out;
+    3. `Stop`;
+    4. `UnloadScore(old)`, retried 62 times over 92 ms while it returns 5 ("still playing");
+    5. `GetScore`, `SetRepeatCount(100000)`, `SetIntensity`, `SetReverbStyle`, `Play`;
+    6. fade in.
   - Track duration = `300000 + URandom()·120001` ms, i.e. **5–7 min**, using the manager's own `URandom` at `this+4`. Then fade out, `Stop`, unload, and the next track.
   - **Music RNGs are separate instances, so music cannot touch simulation state** [static; matters for lockstep].
 - **Intensity.**
   - The world-update function `FUN_00503b83` computes a ratio and maps it to **1, 2 or 3** against thresholds 0.5 / 0.65 (the pair depends on a mode field). It does this at most every 250 ms, and only if Music Enabled.
+  - **✗ corrected [static + legion]:** the ratio's numerator (`[ebp-0x34]`) is set to 0.0 and never written again; its address is never taken, and the only other use is the `FDIV`. So the ratio is always 0 and the request is **always 1**. The denominator adds 1.0 per object in the visible-object (render-list) loop, so it is probably a count of on-screen units [inferred].
+  - The trace confirms this: `SetIntensity(1, false)` arrives every **≈256 ms** from the music thread (each signal re-applies it). The calls stopped at trace 62.8 s and stayed off through the sched run, consistent with the game being paused while music kept playing [inferred].
   - `FUN_0052723c` applies **increases immediately and decreases after a ≈5 s hold**.
   - On an applied change while playing: `SetIntensity(level, false)` + `TransitionTo(current, 0, 0)`. The current segment restarts on the next measure, with a 1-bar groove transition.
-  - So **in-game intensity is 1–3 (groove 2–4)**. Groove 1, the long through-composed "intro" patterns, is reached only at intensity 0, which the game sets only before playback starts [inferred].
+  - ~~So in-game intensity is 1–3 (groove 2–4).~~ **In practice the in-game intensity is always 1 (groove 2).** Groove 1 (the long intro patterns) and grooves 3–4 (the denser patterns) are never selected in normal play.
 - **Other volume calls.** Movies and pause save the music volume, set it to 0 and restore it later (`FUN_00540bed`/`cab`). The options screen re-applies volume, reverb and enable.
 - **Registry** (`HKCU\Software\SSSI\Empire Earth`): `Music Enabled`, `Music Volume` (percent), `Reverb Enabled`, `Sound Volume`, `Max Number Of Sounds (percent)`, `Ambient Sounds`.
 
@@ -372,7 +389,7 @@ Two ways to integrate:
 | # | Gap | Effect on EE | Fix | Status |
 |---|---|---|---|---|
 | 1 | **Bank select.** `DmSynth_assignInstrumentChannels` passes TSF bank `= LSB` and ignores the MSB and the drum flag. The hydra stores bank `(MSB<<8)|LSB`, with drums in 128. | **89 of 103** patched band channels resolve to no preset and keep preset 0. GM drums map to the GM piano. | Bank `= drum ? 128 : (MSB<<8)|LSB` (5 lines). | fixed locally; upstream PR |
-| 2 | No master groove level | No intensity at all | `setMasterGroove` (patch) | fixed locally; upstream PR |
+| 2 | No master groove level | No intensity. Worse, since EE always runs at master groove 1, upstream dmusic plays **groove 1 (the long intro patterns) instead of groove 2** | `setMasterGroove` (patch) | fixed locally; upstream PR |
 | 3 | No `SetRepeats` | Segments stop after one pass (`segh` repeats = 0); EE sets 100000 | setter (patch) | fixed locally; upstream PR |
 | 4 | System GM/GS bank (`gm.dls`) is not shipped | 4 tracks lose drums or melody; Pawns fails | Resolve to macOS `gs_instruments.dls`, or add an SF2 GM fallback (kit's GeneralUser GS). Also add GS variation fallback (MSB *n* → 0). | resolver works; SF2 path still to do |
 | 5 | `Band.c` instrument check ignores bank MSB and drum flag; downloads fail hard when a referenced DLS is missing | Wrong log only after #1; hard failure (Pawns) | match the full bank; warn instead of failing | to do |
@@ -380,7 +397,7 @@ Two ways to integrate:
 | 7 | Gain staging | Clips at full volume | headroom + limiter; calibrate against `legion` | to do |
 | 8 | Variation choice ignores chord function (`variation_choices` = first *N* non-zero entries); `RANDOM_START`/`NO_REPEAT` approximated | Different but plausible variations | implement the DX7 rules | optional |
 | 9 | Pattern choice is uniform random (DX7 also weighs pattern length and rhythm against the chord track) | Different sequencing, same style | optional | optional |
-| 10 | Synth differences: unlimited voices vs 32; TSF envelopes vs the Microsoft DLS1 synth; 22.05 kHz on Windows | Timbre and level differences | A/B against `legion`; optionally render at 22.05 kHz | verify |
+| 10 | Synth differences: unlimited voices vs 32; TSF envelopes vs the Microsoft DLS1 synth; possibly 22.05 kHz on Windows | Timbre and level differences. Measured: dmusic is ≈3 dB louder (§11). | A/B against `legion`; optionally render at 22.05 kHz | needs clean recording (§12) |
 | 11 | `fmt ` `cbSize` strictness; `tims` not parsed; channel pressure ignored | Log noise only | small | upstream |
 
 ### 3.4 Gap to good playback, and fallbacks
@@ -509,14 +526,14 @@ The engine's `FS*` classes read it (`FSMemoryFile` → `SPIMLoadWaveData`), so t
 
 ## 7. Recommendations and effort
 
-1. **DirectMusic: 3–4 focused weeks** (ADR-001 gap 11 confirmed).
+1. **DirectMusic: 2.5–3.5 focused weeks** (ADR-001 gap 11 said 3–4). The cut is in A/B tuning: §11 shows constant intensity (only groove-2 patterns matter) and confirms tempo, harmony, bar-quantised transitions and the call sequence.
 
    | Work | Estimate |
    |---|---|
    | COM HLE for §2.9 (kit `dx/dmusic.cpp`, about 40 methods) + host-mixer source (as `midi_synth.cpp`, but pulling `DmPerformance_renderPcm`) | 1–1.5 wk |
    | Upstream dmusic fixes #1–#5 + GM bank (macOS DLS, SF2 fallback) | 0.5–1 wk |
    | Reverb + gain staging | 0.5 wk |
-   | A/B against `legion` recordings, tuning (#8–#10 as needed) | 1 wk |
+   | A/B against `legion` recordings, tuning (#8–#10 as needed) | 0.5–1 wk |
 
    - **Pin a fork of dmusic** (MIT) with our patches, and send #1–#3, #5 and #11 upstream.
    - At first run, resolve `gm.dls`/`gs.dls` to `/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls`. That is the user's own system file and is never shipped; check that it exists, and fall back to the SF2.
@@ -526,7 +543,7 @@ The engine's `FS*` classes read it (`FSMemoryFile` → `SPIMLoadWaveData`), so t
 
 ---
 
-## 8. `legion` follow-ups (not run; `ssh legion` was reserved)
+## 8. `legion` follow-ups: first round done (results in §11, next request in §12)
 
 Scripts, not tracked (proposed for `windows/`):
 - `windows/frida/music_hooks.js`, a Frida script with three parts:
@@ -561,10 +578,13 @@ Steps:
 ---
 
 ## 9. Open questions
-- What exactly feeds the intensity ratio in `FUN_00503b83`? (Military or combat share is suspected.) What is the mode field at `[0x919788]+0x48`?
-- Does the menu play DirectMusic at all, or only `EEIntro.mp3`? Settle with the `legion` trace.
-- On Windows, which of `fill`/`break`/`intro`/`end` patterns ever sound? None are requested by the EXE; DirectMusic might still choose an INTRO at segment start.
-- Windows synth output level, voice limit and sample rate. These set our gain staging and the decision to render at 22.05 kHz.
+Status after §11:
+- **Intensity ratio:** *answered* [static]. The numerator is dead code in the GOG build, so the request is always 1. The denominator counts visible units. The mode field at `[0x919788]+0x48` only selects the threshold pair and is therefore irrelevant.
+- **Menu music:** *open*. The traces attached in game. `dm_setup_hooks` at spawn settles it (§12).
+- **Fill/break/intro/end patterns:** *answered for EE's requests* [static]. Command tracks hold only GROOVE, and the EXE only requests GROOVE transitions. DirectMusic's internal choices can't be observed through API hooks. In normal play the transition is GROOVE → groove 2.
+- **Windows synth level, voices, sample rate:**
+  - *partly answered*: dmusic is ≈3 dB louder [legion, rough].
+  - Voices and sample rate are *open*. `dm_setup_hooks` reads them back (§12).
 - Steam/retail builds: same music DB? (Out of scope per D8.)
 
 ---
@@ -596,3 +616,139 @@ Other scripts:
 - `scripts/riffdump.py`: DirectMusic RIFF tree;
 - `scripts/dm_channels.py`: band channels vs notes;
 - `scripts/exports.py`, `xref_iat.py`, `dis.py`, `guids.py`: PE export/IAT, cross-references, disassembly, GUID decoding.
+- `tools/audio/compare_loopback.py`: tempo, level, spectral shape and >11 kHz energy of a `legion` loopback vs dmusic renders (§11).
+- `tools/audio/dm_setup_hooks.js`: spawn-time DirectMusic and Miles setup census for `legion` (§12).
+
+---
+
+## 11. Windows reference captures (`legion`, 2026-10-14)
+
+### 11.1 Inputs
+Files are in `analysis/legion-captures/`, which is git-ignored.
+
+| Capture | Hooks | Recording |
+|---|---|---|
+| `music-trace` | `music_hooks`, 240 s, attached in game (calm random map) | 250 s WASAPI loopback, 48 kHz, starting 3.64 s before the hooks |
+| `music-sched` | `music_hooks` with the forced schedule `[[0,1],[30,2],[60,3],[90,2],[120,0],[150,1]]` | 210 s loopback, offset 3.61 s |
+
+- **Alignment.** Recordings are aligned to the trace by epoch timestamps. The check: the music fade-out to `SetVolume(0)` at trace 167.36 s shows as a 10 dB level dip at the matching recording time (±0.1 s).
+- **Caveats.** The loopback is the whole device. It includes game SFX (`wind-8`, `clock-8`, `sfarm`, animals …), a VMware VM and Nahimic processing. A strictly periodic non-music component (0.426 s, "140.8 BPM", probably the looping `clock-8.wav` ambient) persists through the music fade. Music sits ≈10 dB above this background.
+
+**The schedule did apply.** All 6 forced changes logged `SetIntensity(level, 1) → 0` and `TransitionTo(1, 0, 0) → 0` on score 1. `music_hooks.json` is small because the game itself made no conductor calls during those 200 s (it was idle or paused), so no game call needed rewriting.
+
+### 11.2 Track identity
+- **Trace.** The game switched tracks at trace 165.4 s: `LoadScore("Pawns.sgt")` … `Play(1)`. So score 1 = **Pawns**, which was also playing during the sched run.
+- **Earlier track (score 0).** Identified as **Honor** by tempo. Its band-limited onset autocorrelation peaks at 1.73 s and 3.46 s, i.e. one and two bars of 3/4 at 104 BPM. The dmusic Honor render shows the same peaks, and no other track has that bar length.
+
+### 11.3 Checks of the static model
+
+| Claim | Result |
+|---|---|
+| Call sequence on a track change (§2.7) | ✓ exact. Fade step 0.0333 / 100 ms; `UnloadScore` retry loop; `SetRepeatCount(100000)` |
+| `SetReverbStyle` argument order and the per-track values from `dbmusic.dat` | ✓ |
+| Music Volume 62 % → `SetVolume(0.62)` | ✓ |
+| In-game intensity 1–3 | ✗ always 1 (§2.7). Static cause found. |
+| Notifications unused; only `TransitionTo(current, 0, 0)` | ✓ no other calls in 440 s |
+| Miles: 2D, 8-bit 22.05 kHz WAVs from `data.ssa` via `mem_alloc_lock`; `sample_granularity` = 1; `sample_playback_rate` = 22050 | ✓ |
+| Miles call rates | ✓ ≤ 3/s per function. Pitch via `set_sample_playback_rate` is ±5 % (21129–23239 Hz). `set_sample_position` gives random start offsets for loops. Loop counts are 0 or 1. Volumes are 0–21 (127 for UI). `SPIMSetLatency` 500/96/200 → pref 42 = 62/12/25, so the DS fragment is 8 ms. |
+| Menu music source, port voices and rate, DirectSound caps (16 channels) | ? unobserved (§12) |
+
+### 11.4 A/B: Windows vs dmusic (Pawns, same forced schedule)
+dmusic setup: fixed build with the GS bank, 48 kHz, gain 0.577 (= Music Volume 62 %), no reverb. Script: `tools/audio/compare_loopback.py`.
+
+| Measure | Windows | dmusic | Verdict |
+|---|---|---|---|
+| Tempo, from envelope autocorrelation (40–2000 Hz) | beat 0.60 s, bar 2.40 s (100 BPM 4/4) | 0.60 s / 2.40 s | ✓ |
+| Harmony: 12-bin chroma, whole run | best match is dmusic Pawns (cosine 0.985); other tracks score 0.90–0.98 | – | ✓ notes and chord mapping are right |
+| Groove-switch delay after a forced change (spectral novelty) | +1.7, +0.5, +1.6 s for i2→i3, i3→i2 and i2→i0; the other two are not detectable over the background | +1.1 … +3.5 s | ✓ next-bar (2.4 s) quantisation |
+| Bar grid | The three detected switches are 12.00 and 12.96 bars apart, so they sit on one continuous bar grid | same model | ✓ `AutoTransition` keeps the measure grid |
+| Level by phase (RMS dBFS; Windows includes ≈ −31 dB of background) | i1 −23.0, i2 −22.0, **i3 −19.1**, i2 −22.5, i0 −24.0, i1 −23.3 | −20.3, −18.1, −17.7, −17.8, −20.6, −21.4 | **dmusic ≈ +2.8 dB** (range +1.4 … +4.7). Both are loudest at i3 and quiet at i0. |
+| Spectral shape (third octaves 63 Hz–10 kHz, normalised) | log-spectral distance 6–10 dB. Windows is 4–14 dB darker above 2 kHz on Pawns but 2–8 dB brighter on Honor. | – | inconclusive: background, Nahimic, Apple's 8-bit GS bank and the missing reverb all confound it |
+| Energy above 11 kHz | −36 to −43 dB re total; smooth roll-off, no cliff at 11.025 kHz | 48 kHz render −25 to −28 dB; 22.05 kHz render −45 to −50 dB | ? sample rate undecided |
+| Bank-fix A/B (no-bank-fix build vs fixed) | – | Pawns differs by only 0–0.3 dB (only 3 of its channels are affected) | not testable on Pawns; needs a Balance, Enmity, Rivers or Time recording |
+
+**Conclusions.**
+- Structure is right: tempo, harmony, pattern families, bar-quantised transitions and the game-side call sequence.
+- Gain staging: start at **−3 dB** relative to the raw dmusic output.
+- Instrument identity, reverb and the synth sample rate need the clean capture in §12.
+
+## 12. Request for the `legion` operator: clean music reference
+
+**Goal.**
+- DirectMusic setup values (synth sample rate, voices, Waves reverb on/off, DirectSound caps);
+- whether the main menu uses DirectMusic;
+- clean loopback recordings for A/B on several tracks.
+
+**Setup** (record the original values and restore them afterwards):
+1. **Close other audio sources.**
+   - Shut down the VMware VM. If VMware Workstation is running, quit it.
+   - Close browsers and other audio apps.
+   - Windows *Settings → System → Sound → More sound settings → Sounds*: scheme "No Sounds".
+2. **Disable processing on the output device ("Speakers (Realtek(R) Audio)").**
+   - *Settings → System → Sound → Speakers*: **Audio enhancements = Off**, Spatial sound = Off.
+   - In the Nahimic app, switch all effects off.
+   - Note the device's default format (*Advanced → Format*); 48000 Hz 16-bit is expected.
+   - If Nahimic cannot be turned off, stop its service for the session (A-Volute "Nahimic service"), and restart it afterwards.
+3. **Game options**, in `HKCU\Software\SSSI\Empire Earth`:
+   - `Sound Volume` = 0, so effects are silent;
+   - `Ambient Sounds` = 0;
+   - `Music Volume` = 100 (0x64);
+   - `Music Enabled` = 1;
+   - `Reverb Enabled` = 1 for run A and 0 for run B.
+
+   Restore afterwards: Music Volume 0x3e, Sound Volume 0x64, Ambient Sounds 1, Reverb Enabled 1.
+4. Copy the new script:
+   ```sh
+   scp tools/audio/dm_setup_hooks.js legion:C:/EEPort/frida/
+   ```
+
+**Captures:**
+1. **Noise floor.** With the game not running, record silence:
+   ```sh
+   L "record '10 C:\EEPort\captures\music-clean\silence.wav'"
+   ```
+   Expect below −80 dBFS. If not, find and remove the source before going on.
+2. **Spawn setup and the menu, with reverb on.**
+   - Start the hooks:
+     ```sh
+     L "frida '--spawn --scripts dm_setup_hooks --seconds 300 --out C:\EEPort\captures\music-setup'"
+     ```
+   - Press ESC through the movies.
+   - **Stay on the main menu for 90 s** while recording (start the recorder when the menu appears):
+     ```sh
+     L "record '90 C:\EEPort\captures\music-setup\menu.wav'"
+     ```
+   - Then start a random map and stay in game until the 300 s are over.
+   - The snapshot then contains:
+     - the `DM.CreatePort` write-back (voices, sample rate);
+     - `Port.GetCaps` and `Port.Activate` (wave format);
+     - the `KsProperty` volume, effects and reverb values;
+     - `Perf.SetGlobalParam`;
+     - `AIL_open_digital_driver` and `IDirectSound.GetCaps`;
+     - SPIM channel counts at 90 s;
+     - every `SEConductor` call, including any at the menu.
+3. **Long natural session, run A (reverb on).**
+   - In a random map, **pause the game** (no SFX, music continues).
+   - Record 25 minutes; that covers 3–5 tracks at the real intensity 1. Run these two together:
+     ```sh
+     L "frida '--scripts music_hooks --seconds 1500 --out C:\EEPort\captures\music-clean-A'"
+     L "record '1510 C:\EEPort\captures\music-clean-A\loop.wav'"
+     ```
+4. **Forced schedule on the current track, run A.**
+   ```sh
+   L "frida '--scripts music_hooks --seconds 200 --param schedule=[[0,1],[30,2],[60,3],[90,2],[120,0],[150,1]] --out C:\EEPort\captures\music-clean-A-sched'"
+   L "record '210 C:\EEPort\captures\music-clean-A-sched\loop.wav'"
+   ```
+5. **Run B (reverb off).** Restart the game with `Reverb Enabled` = 0. Repeat step 4, plus 10 minutes of step 3, into `music-clean-B*`.
+6. **Return everything to the Mac** under `analysis/legion-captures/`:
+   - the `music-setup*`, `music-clean-*` and `silence.wav` folders;
+   - a note of the device format and of what was disabled.
+
+**What this settles.**
+
+| Question | Answered by |
+|---|---|
+| Synth rate and voices; the menu question; 16 Miles channels | capture 2 |
+| Timbre and instrument identity on 3–5 tracks (ideally one of Balance, Enmity, Rivers or Time, which test the bank fix) | capture 3 |
+| Reverb amount (A vs B) | captures 4–5 |
+| Level calibration without background | captures 3–5 |
