@@ -1,6 +1,5 @@
 # The M1 harness (m1_harness.cpp), included from mods/CMakeLists.txt, which
-# the kit adds to its build. POP_ROOT is the kit; paths here are relative to
-# this file, so a derived game directory can include it as well.
+# the kit adds to its build. POP_ROOT is the kit; paths are relative to this file.
 #
 #   ee_m1_harness         dlopen()s the M1 modules' freestanding bundles (ee_m1_bundles)
 #   ee_m1_harness_static  links their generated archives instead
@@ -10,8 +9,8 @@
 # runtime's dispatch serves the registered modules.
 set(EE_M1_KEYS a_sxlrt233 b_engine c_default)
 set(EE_M1_SOURCES ${CMAKE_CURRENT_LIST_DIR}/m1_harness.cpp
-    # TEMPORARY until the kit's msvcrt lands (feat/crt).
-    ${CMAKE_CURRENT_LIST_DIR}/crt_stopgap.cpp)
+    # The msvcrt functions the kit does not implement yet (control word, EH).
+    ${CMAKE_CURRENT_LIST_DIR}/crt_pending.cpp)
 set(EE_M1_LIBS recomp_platform recomp_runtime recomp_dx_null)
 
 function(ee_m1_target target)

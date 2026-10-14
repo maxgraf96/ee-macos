@@ -12,7 +12,7 @@ analysis/
 
 # Build outputs, including generated C translated from game code: the kit
 # writes the translation, objects, bundles, apps and logs under build/
-# (tools/build.py); tools/prerebase.py stages there too (build/prerebased/)
+# (tools/build.py)
 build/
 gen/
 *.bundle

@@ -2,7 +2,7 @@
 """Test Empire Earth on recomp-kit.
 
     .venv/bin/python tools/test.py                 # this repository's checks, then the kit's portable suites
-    .venv/bin/python tools/test.py --m1 [--prerebased] [--regenerate]   # the M1 harness (tests/m1/)
+    .venv/bin/python tools/test.py --m1 [--regenerate]   # the M1 harness (tests/m1/)
     .venv/bin/python tools/test.py --native ...    # any other option: kit/tools/test.py's, for this game
 
 --kit DIR (or RECOMP_KIT_DIR) tests against another kit checkout than kit/.

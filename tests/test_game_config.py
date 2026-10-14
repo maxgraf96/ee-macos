@@ -73,8 +73,8 @@ def test_the_base_map(cfg):
 
 
 def test_modules_are_mapped_in_dependency_order(cfg):
-    """The kit maps auxiliary modules in key order and binds each one's
-    imports as it maps it: a module must come after every module it imports."""
+    """Keys sort in dependency order: a module comes after every module it
+    imports (the generated aux-<key> directories follow it)."""
     order = [m["name"].lower() for m in cfg["aux_modules"]]
     for i, m in enumerate(cfg["aux_modules"]):
         imported = {imp["dll"].lower() for imp in db(m["name"])["imports"]}
@@ -99,6 +99,7 @@ GLOBAL_EXPORTS = {
     "UMSetFloatingPointRoundingMode": ("Low-Level Engine.dll", "?UMSetFloatingPointRoundingMode@@YAXK@Z"),
     "GEInitialize": ("Low-Level Engine.dll", "?GEInitialize@@YAJAAVFSFileSpec@@QAUHINSTANCE__@@@Z"),
     "PIMModule_GetModule": ("Low-Level Engine.dll", "?GetModule@PIMModule@@CAJ_NAAPAV1@@Z"),
+    "EERM_ReadScript": ("Default.dll", 0xde77),       # not exported: a DB function start
 }
 
 
@@ -111,6 +112,9 @@ def test_curated_entries_are_the_db_addresses_at_the_load_bases(cfg):
         doc = db(module)
         if export is None:
             rva = int(doc["module"]["entry_rva"], 16)
+        elif isinstance(export, int):
+            rva = export
+            assert any(int(f["rva"], 16) == rva for f in doc["functions"]), name
         else:
             rva = int(({e["name"]: e["rva"] for e in doc["exports"]} if module != "Default.dll" else default)[export], 16)
         assert addr == bases[module] + rva, name
