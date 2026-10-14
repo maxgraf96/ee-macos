@@ -69,6 +69,16 @@ def classify(vec, win, mac):
     """Returns (strict_equal, informational_note) for one vector."""
     op = vec[1]
     w, m = win[2:], mac[2:]
+    # Documented divergences (README "Known divergences"): Windows behaviour that
+    # is undefined or a property of its heap, compared loosely.
+    if op == "ctype" and not -128 <= int(vec[3]) <= 255:
+        strict = w[5:] == m[5:]  # tolower/toupper are defined: the low byte, mapped
+        return strict, ("undefined: classes read past msvcrt's table" if w[:5] != m[:5] else None)
+    if op == "msize":
+        return w[:1] == m[:1], ("heap address alignment differs" if w[1:] != m[1:] else None)
+    if op == "textfile" and vec[3] == "" and len(w) > 10:
+        strict = w[:9] == m[:9] and w[10:] == m[10:]
+        return strict, ("ftell after ungetc past an empty file's end" if w[9] != m[9] else None)
     if op == "ctype":
         if len(w) != len(m):
             return False, None
@@ -94,7 +104,8 @@ def classify(vec, win, mac):
             return True, ("value differs" if w[:1] != m[:1] else None) or \
                 ("80-bit differs" if w[1:2] != m[1:2] else None)
         return w[:1] == m[:1], ("80-bit differs" if w[1:2] != m[1:2] else None)
-    if op == "setlocale" and vec[3] in ("", "2e313235322e", "2e414350", "2e4f4350"):
+    if op == "setlocale" and bytes.fromhex(vec[3]).decode("latin-1") in ("", ".1252", ".ACP", ".OCP"):
+        # The user's default locale: a property of the machine, not of msvcrt.
         return True, ("user-default locale differs" if w != m else None)
     if op == "strftime" and "%Z" in bytes.fromhex(vec[3]).decode("latin-1"):
         return True, ("time zone name differs" if w != m else None)

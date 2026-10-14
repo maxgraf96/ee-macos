@@ -12,6 +12,7 @@ Without --game-numbers the file contains no game data and may be shared freely; 
 it carries the numeric tokens of the user's own copy and stays under build/ (git-ignored).
 """
 import argparse
+import os
 import math
 import random
 import struct
@@ -362,9 +363,84 @@ class Gen:
                 self.add("textfile", hx(mode), hx(c))
 
 
+def wide_suite(g):
+    """Every BMP code point through towupper/towlower/iswctype in both locales:
+    the measurement the HLE's wide tables are generated from (wide_table.py)."""
+    for loc in ["C", "English"]:
+        for w in range(0x10000):
+            g.add("wctype", loc, w)
+
+
+VARIANTS = {
+    "measured": {},
+    "whole": dict(stepwise=False),
+    "cap20": dict(max_digits=20),
+    "cap21": dict(max_digits=21),
+    "cap25": dict(max_digits=25),
+    "no_stage1": dict(stage1=False),
+    "scale64": dict(scale_bits=64),
+    "scale80": dict(scale_bits=80),
+}
+
+
+def decimal_suite(g, count=400):
+    """Inputs on which the variants of decimal_model.py disagree (fit_decimal.py)."""
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import decimal_model as dm
+    rng = g.rng
+    kept = []
+
+    def outcomes(text, P, emin, emax):
+        return {name: dm.to_bits(*dm.convert(text, P, emin, emax, **v), P=P)
+                for name, v in VARIANTS.items()}
+
+    def consider(text):
+        for P, emin, emax in ((53, -1022, 1023), (24, -126, 127)):
+            o = outcomes(text, P, emin, emax)
+            if len(set(o.values())) > 1:
+                kept.append(text)
+                return True
+        return False
+
+    tries = 0
+    while len(kept) < count and tries < 40 * count:
+        tries += 1
+        kind = rng.random()
+        if kind < 0.45:  # near a double midpoint: long expansions cut at 18..30 digits
+            x = from_bits(rng.getrandbits(64) & 0x7FEFFFFFFFFFFFFF)
+            if not math.isfinite(x) or x == 0:
+                continue
+            mid = Decimal(x) + (Decimal(next_up(x)) - Decimal(x)) / 2
+            digits = rng.randint(18, 30)
+            text = format(mid, f".{digits}e")
+            if rng.random() < 0.5:
+                text = format(mid + (Decimal(next_up(x)) - Decimal(x)) * Decimal(rng.choice([1, -1])) / 10 ** rng.randint(5, 14), f".{digits}e")
+        elif kind < 0.7:  # near a float midpoint, any exponent including denormals
+            fb = rng.randint(1, 0x7F7FFFFF)
+            lo, hi = fbits_to_double(fb), fbits_to_double(fb + 1)
+            mid = (Decimal(lo) + Decimal(hi)) / 2
+            text = format(mid, f".{rng.randint(17, 26)}e")
+        elif kind < 0.85:  # double denormals near unit boundaries
+            n = rng.randint(1, 1 << 52)
+            q = (Decimal(n) + Decimal(rng.choice([0.5, 0.25, 0.75, 0.4999999, 0.5000001]))) * Decimal(2) ** -1074
+            text = format(q, f".{rng.randint(17, 24)}e")
+        else:  # 19-digit integers times large powers of ten: the scaling precision
+            text = "%d" % rng.randint(10 ** 18, 10 ** 19) + "e" + str(rng.randint(-330, 290))
+        consider(text)
+    for text in kept:
+        g.add("strtod", "C", hx(text))
+        g.add("sscanf_f", "C", hx(text))
+        g.add("sscanf_lf", "C", hx(text))
+    print(f"decimal suite: {len(kept)} discriminating inputs from {tries} tries")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--suite", choices=["all", "wide", "decimal"], default="all",
+                    help="wide: only the full-BMP wctype measurement (131,072 vectors); "
+                    "decimal: inputs that decide between decimal_model.py's variants")
     ap.add_argument("--game-numbers", help="TSV from extract_game_numbers.py")
     ap.add_argument("-o", "--output", required=True)
     args = ap.parse_args()
@@ -373,6 +449,12 @@ def main():
         with open(args.game_numbers) as f:
             game = [line.split("\t", 1)[0] for line in f if line.strip()]
     g = Gen(args.seed, game)
+    if args.suite == "wide":
+        wide_suite(g)
+        return write(g, args.output)
+    if args.suite == "decimal":
+        decimal_suite(g)
+        return write(g, args.output)
     g.rand()
     g.parsing()
     g.formatting()
@@ -381,12 +463,16 @@ def main():
     g.locales()
     g.times()
     g.misc()
+    write(g, args.output)
+
+
+def write(g, path):
     import os
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    with open(args.output, "w", newline="\n") as out:
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", newline="\n") as out:
         for i, (op, fields) in enumerate(g.lines):
             out.write("\t".join([str(i), op] + fields) + "\n")
-    print(f"{len(g.lines)} vectors -> {args.output}")
+    print(f"{len(g.lines)} vectors -> {path}")
 
 
 if __name__ == "__main__":
