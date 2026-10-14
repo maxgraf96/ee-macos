@@ -41,6 +41,9 @@ EERMPIMGeneratePlayerPositions = 0x103070cd
 EERMPIMGenerateResources = 0x103070d8
 EERMPIMGenerateShallows = 0x103070e3
 EERMPIMSetRandomMapValues = 0x103070ee
+# Not exported: the .rmv reader EERMPIMSetRandomMapValues calls (cdecl ctx,
+# const UString &script), driven by the M1 harness [static, spike].
+EERM_ReadScript = 0x1030de77
 # Low-Level Engine.dll (base 0x10000000).
 Engine_DllMain = 0x100818dd
 UString_ctor_cstr = 0x1007fcd5                # ??0UString@@QAE@PBD@Z
