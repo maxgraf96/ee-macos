@@ -49,7 +49,7 @@ No game bytes, generated C, captures or Ghidra databases in either repo. The kit
 | D crt | **merged** (`ee` 381fa1a) | msvcrt 160/167, msvcp60 17/17; 42k unit checks. The Windows reference run is pending (legion 0008). |
 | E eh | **merged** (`ee` 690fec0) | MSVC SEH (`_except_handler3`) + C++ EH (`__CxxFrameHandler`, `_CxxThrowException`, `_setjmp3`/`longjmp`), resuming at continuations via frame checkpoints; all 47 EXE catch blocks and continuations are translated entries; 817 `eh_tests` checks; WON `ReadBufferException` caught on real EXE code; arena faults delivered as guest access violations. |
 | F m1-oracle | legion 0006 + 0007 queued | replay driver build; capture environment with DLLs rebased to the `game.toml` map; S00 smoke |
-| H m1-replay | running | Mac replay backend, round-trip self-test, matrix tooling |
+| H m1-replay | **merged** (`ee` 9388162, ee-macos 25d6de1) | Mac replay backend (bundles + linked), Mac-side recorder, round-trip test (7,396 allocations, 88 file calls, 457 output regions; corruptions caught), `tools/m1/run_matrix.py`, [m1-replay.md](reference/m1-replay.md) |
 | G m1-re | **merged** (ee-macos 1401ee9) | [rmg.md](reference/rmg.md): pipeline, context, capture/replay spec, 60-case matrix |
 
-Next: H (Mac replay), then run the legion S00 capture → Windows replay → Mac replay, then the 60-case matrix (M1).
+**Mac side complete.** M1 now waits only on legion: 0007 (rebased capture copy) → 0006 (S00 capture + Windows replay) → the 60-case matrix → `tools/m1/run_matrix.py` on the Mac.
