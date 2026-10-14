@@ -49,8 +49,11 @@ def test_every_module_is_a_canonical_gog_module(cfg):
     assert db(cfg["game"]["executable"])["module"]["sha256"] == cfg["game"]["sha256"]
 
 
-def test_m1_modules_are_configured(cfg):
-    assert [m["name"] for m in cfg["aux_modules"]] == ["sxlrt233.dll", "Low-Level Engine.dll", "Default.dll"]
+def test_every_dll_is_configured(cfg):
+    """All eight DLLs (PLAN.md §2.4), in dependency order (M1's three first)."""
+    assert [m["name"] for m in cfg["aux_modules"]] == [
+        "sxlrt233.dll", "Low-Level Engine.dll", "Default.dll", "Language.dll", "DX7HRDisplay.dll",
+        "DX7HRTnLDisplay.dll", "TCP Protocol.dll", "Miles Sound System Mixer.dll"]
 
 
 def test_the_base_map(cfg):
@@ -69,7 +72,10 @@ def test_the_base_map(cfg):
     for (_, end, a), (start, _, b) in zip(spans, spans[1:]):
         assert end <= start, "%s overlaps %s" % (a, b)
     bases = {m["name"]: m["base"] for m in cfg["aux_modules"]}
-    assert bases == {"sxlrt233.dll": 0x10200000, "Low-Level Engine.dll": 0x10000000, "Default.dll": 0x10300000}
+    assert bases == {"sxlrt233.dll": 0x10200000, "Low-Level Engine.dll": 0x10000000, "Default.dll": 0x10300000,
+                     "Language.dll": 0x10400000, "DX7HRDisplay.dll": 0x10500000,
+                     "DX7HRTnLDisplay.dll": 0x10600000, "TCP Protocol.dll": 0x10700000,
+                     "Miles Sound System Mixer.dll": 0x10800000}
 
 
 def test_modules_are_mapped_in_dependency_order(cfg):

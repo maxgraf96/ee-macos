@@ -25,9 +25,12 @@ image_base = 0x00400000
 entry_point = 0x00683798          # WinMainCRTStartup (the DRM stub in .cms_t is never translated)
 guest_root = 'C:\Empire Earth'
 developer_exe = "original/gog/Empire Earth/Empire Earth.exe"
-# The arena reaches past the last reserved DLL slot (base map). Runtime-core
-# (gap 3) replaces this with a guarded 4 GB arena.
-guest_size = 0x11000000
+# The arena: the base map's last DLL ends at 0x10807000; above it the heap
+# grows to here (640 MB in all, guarded beyond). The executable is large-address
+# aware, and it maps its 156 MB data.ssa whole, twice (docs/reference/boot.md).
+# Kept below 0x2f000000, where the M1 replay self-test puts a heap "above
+# guest_size".
+guest_size = 0x28000000
 windows_version = "5.1"
 
 [translate]
@@ -40,13 +43,12 @@ volatile_reads = []
 entry_points = []
 
 # ---------------------------------------------------------------- base map --
-# Keys sort in dependency order (sxlrt233 <- engine <- Default), which keeps
-# the generated directories in that order; the loader maps every module before
-# binding imports and runs DllMains in dependency order itself. `size` is the
-# PE's SizeOfImage. Reserved slots for the other DLLs:
-#   Language.dll 0x10400000, DX7HRDisplay.dll 0x10500000,
-#   DX7HRTnLDisplay.dll 0x10600000, TCP Protocol.dll 0x10700000,
-#   Miles Sound System Mixer.dll 0x10800000.
+# All eight DLLs (docs/reference/build.md §3). Keys sort in dependency order
+# (sxlrt233 <- engine <- the plugins), which keeps the generated directories in
+# that order; the loader maps every module before binding imports and runs
+# DllMains in dependency order itself. `size` is the PE's SizeOfImage. Only
+# sxlrt233 and the engine are static imports of the executable; the others are
+# LoadLibrary'd by the engine's plugin scan (docs/reference/boot.md).
 
 [modules.aux.a_sxlrt233]
 name = "sxlrt233.dll"
@@ -75,6 +77,51 @@ size = 0x0001d000
 listings = "analysis/kit/default"
 function_db = "analysis/kit/default/funcdb.json"
 
+[modules.aux.d_language]
+name = "Language.dll"
+path = "original/gog/Empire Earth/Language.dll"
+sha256 = "2539f8b76ee3a6c6b6e03e5ce76d43e891c8b41533d058e249feea5ca8ca3456"
+base = 0x10400000                 # preferred 0x10000000; resources only, no imports
+size = 0x00031000
+listings = "analysis/kit/language"
+function_db = "analysis/kit/language/funcdb.json"
+
+[modules.aux.e_dx7hr]
+name = "DX7HRDisplay.dll"
+path = "original/gog/Empire Earth/DX7HRDisplay.dll"
+sha256 = "46a69ac011e9a934b1edd484a3f91f3482a5c85a3d47a44eddd1e4545746ff53"
+base = 0x10500000                 # preferred 0x10000000
+size = 0x00018000
+listings = "analysis/kit/dx7hr"
+function_db = "analysis/kit/dx7hr/funcdb.json"
+
+[modules.aux.f_dx7hrtnl]
+name = "DX7HRTnLDisplay.dll"
+path = "original/gog/Empire Earth/DX7HRTnLDisplay.dll"
+sha256 = "f0c5b16a7db0409e7915af7ff6ded3ac61eb29835f557aad5c5a68b37085b154"
+base = 0x10600000                 # preferred 0x10000000
+size = 0x0001a000
+listings = "analysis/kit/dx7hrtnl"
+function_db = "analysis/kit/dx7hrtnl/funcdb.json"
+
+[modules.aux.g_tcp]
+name = "TCP Protocol.dll"
+path = "original/gog/Empire Earth/TCP Protocol.dll"
+sha256 = "b695886b01f63b7f699d204e89f38fcd03fb374a543866ed898381a194c170f0"
+base = 0x10700000                 # preferred 0x10000000
+size = 0x00009000
+listings = "analysis/kit/tcp"
+function_db = "analysis/kit/tcp/funcdb.json"
+
+[modules.aux.h_milesmix]
+name = "Miles Sound System Mixer.dll"
+path = "original/gog/Empire Earth/Miles Sound System Mixer.dll"
+sha256 = "6e1a5145d31dfe325d2c7c5b62daaa49af233bb24fede22c56bc66ac11265e09"
+base = 0x10800000                 # preferred 0x10000000; imports mss32 (kit HLE)
+size = 0x00007000
+listings = "analysis/kit/milesmix"
+function_db = "analysis/kit/milesmix/funcdb.json"
+
 [hooks]
 # The kit's Populous-shaped hooks do not apply to EE: sentinels in the
 # unmapped arena between the EXE and the heap, which never match.
@@ -89,6 +136,16 @@ mouse_device_ptr = 0x00f00234
 mouse_device_right = 0x00f00238
 camera = 0x00f00240
 sprites = []
+
+[runtime]
+# DirectDrawCreateEx serves IID_IDirectDraw7 (kit dx/ddraw7.cpp, P3-B): both
+# display plugins are DirectX 7 (graphics.md).
+ddraw7 = true
+# The game draws its own cursor from DirectInput mouse deltas (legion.md §5.6):
+# an exclusive DirectInput mouse gets relative motion (P3-C).
+relative_mouse = true
+# Tahoma, Arial and the other faces the UI names, from the system's fonts.
+system_fonts = true
 
 [mods]
 builtin = "none"
