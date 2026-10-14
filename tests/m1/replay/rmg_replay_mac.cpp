@@ -239,6 +239,19 @@ void sh_printf(X86 *c) {
         close(saved);
 }
 
+// __dllonexit during the call (A03 GenerateResources: a function-local static constructed on
+// first use registers its destructor through Default.dll's static CRT). The atexit table is a
+// restored heap block the kit's heap does not own, so the kit's own __dllonexit (mem_size,
+// mem_realloc) cannot grow it; the core appends in place while the captured block has room,
+// as the Windows replay does (rr_shim_dllonexit in rmg_replay_core.c).
+void (*o_dllonexit)(X86 *);
+void sh_dllonexit(X86 *c) {
+    if (rr_active())
+        set_eax(c, rr_shim_dllonexit(arg(c, 0), arg(c, 1), arg(c, 2)));
+    else
+        rmg_pass(c, o_dllonexit);
+}
+
 // msvcp60's _Getctype copies the classification table into a block it gets
 // from msvcrt's malloc (256 shorts), which the capture records (msvcp60.dll
 // is among the callers it follows). The kit's msvcp60 allocates the table
@@ -298,6 +311,7 @@ void install_replay_overrides() {
         {"msvcrt.dll", "fgets", sh_fgets, &o_fgets},
         {"msvcrt.dll", "fclose", sh_fclose, &o_fclose},
         {"msvcrt.dll", "printf", sh_printf, &o_printf},
+        {"msvcrt.dll", "__dllonexit", sh_dllonexit, &o_dllonexit},
         {"kernel32.dll", "OutputDebugStringA", sh_ods, &o_ods},
         {"msvcp60.dll", "_Getctype", sh_getctype, &o_getctype},
     };

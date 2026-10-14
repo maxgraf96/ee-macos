@@ -493,6 +493,16 @@ Each case is one generation of 8–11 calls per attempt, so about 600+ replayed 
 - every pack of every case passes on Windows (completeness), and
 - the same packs pass on the Mac against the translated DLLs (M1).
 
+### 8.3 Compare masks [measured on legion, 2026-10-15]
+`rmg_replay_core.c` (`k_masks`) does not compare a few bytes that `SetRandomMapValues` copies from **uninitialised stack slots** into two heap vectors. A difference in them is counted and printed ("N masked bytes differ"; with `-v` per region), never dropped silently. A mask names a region label, an element stride and the byte offsets in each element; nothing else is masked.
+
+| Region | Element | Masked bytes | Evidence |
+|---|---|---|---|
+| `heap<-ctx+0x164`: the placement-rule vector at ctx+0x160 (§4.3), 28 elements in every case so far | 24 B | **16–19, 23** | On Windows +0x10 holds a stale stack address below the call's ESP (`0x263deff0`) and +0x17 holds `0x76` (the high byte of a system-DLL address); the replay leaves other stack values or 0. The values are identical in all Windows captures (S00b, A01–A06), so they come from the same deeper stack frames (msvcrt's `fgets`/`sscanf` while parsing the script), not from the generator. `SetRandomMapValues` reads only +0x04/+0x08/+0x0c/+0x15/+0x16 of these elements (§4.3). **[open]** confirm in Ghidra that the EXE's placement code never reads +0x10–0x13 or +0x17. |
+| `heap<-ctx+0x204`: the vector at ctx+0x200 | 8 B | **6–7** | The high halves of the dwords at +4/+0xc/+0x14 of the region differ (`e0af0101` vs `10000101`), the low halves match: a 6-byte record padded to 8 (struct padding). |
+
+Why restoring the stack cannot fix this: the garbage is produced *inside* the call by whatever runs deeper on the stack (Windows' msvcrt, the replay's shims, the Mac's native C runtime), so it differs by construction. Add a mask only after the same analysis: where the bytes come from, and why nothing reads them.
+
 ## 9. Runbook (legion)
 
 Run by the main session or the legion operator. All commands are from the Mac in the ee-macos checkout; `L` is the helper from `windows/README.md`.

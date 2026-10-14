@@ -148,6 +148,7 @@ int rr_needed_ranges(const rr_pack *pk, rr_range **out, uint32_t *n)
 static const rr_platform *g_pf;
 static const rr_pack *g_pk;
 static int g_active;
+static int g_trace;                       /* opt->verbose > 2: print every allocator event */
 static uint32_t g_ai, g_fi;
 /* sizes of blocks known to the replay (captured heap regions, blocks allocated so far) */
 static struct blk { uint32_t addr, size; } *g_blk;
@@ -203,6 +204,53 @@ static const char *op_name(uint32_t op)
 
 int rr_active(void) { return g_active; }
 
+/* Compare masks (docs/reference/rmg.md 8.4). SetRandomMapValues copies uninitialised stack slots into
+   two heap vectors; those bytes depend on what ran deeper on the stack during the call (Windows'
+   msvcrt, a replay's shims, the Mac's native C runtime), not on the generator. They are not
+   compared; a difference in them is counted and reported as "masked", never dropped silently.
+   Matched by region label; bit k of `bytes` = byte k of each `stride`-byte element. Add an entry
+   only after the same analysis (where the bytes come from, why nothing reads them). */
+static const struct { const char *label; uint32_t stride, bytes; } k_masks[] = {
+    { "heap<-ctx+0x164", 24, 0xfu << 16 | 1u << 23 },   /* 24-byte elements: bytes 16-19 (stale stack pointer), 23 */
+    { "heap<-ctx+0x204", 8, 1u << 6 | 1u << 7 },        /* 8-byte elements: bytes 6-7 (struct padding) */
+};
+
+static const char *masked_note(uint32_t n)
+{
+    static char buf[48];
+    if (!n) return "";
+    snprintf(buf, sizeof buf, ", %u masked bytes differ", n);
+    return buf;
+}
+
+static uint32_t mask_for(const char *label, uint32_t *stride)
+{
+    size_t i;
+    for (i = 0; i < sizeof k_masks / sizeof k_masks[0]; i++)
+        if (!strcmp(label, k_masks[i].label)) { *stride = k_masks[i].stride; return k_masks[i].bytes; }
+    return 0;
+}
+
+/* A DLL registering an atexit handler during the call (a function-local static constructed on
+   first use): the DLL's static CRT calls msvcrt's __dllonexit(func, &begin, &end), which grows the
+   table with msvcrt-internal _msize/realloc that the capture cannot see. In the replay the table is
+   a restored heap block, so the real __dllonexit corrupts the heap. Do what it does while the
+   block has room; stop if it would have to grow (that realloc is not in the capture). */
+uint32_t rr_shim_dllonexit(uint32_t func, uint32_t pbegin, uint32_t pend)
+{
+    uint32_t b, e, cap;
+    g_pf->read(g_pf->user, pbegin, &b, 4);
+    g_pf->read(g_pf->user, pend, &e, 4);
+    if (g_trace) logf_("  [atexit] func %#x table %#x end %#x", func, b, e);
+    if (!blk_size(b, &cap)) fatalf(2, "__dllonexit: atexit table %#x is not a captured heap block", b);
+    if (e < b || e + 4 > b + cap)
+        fatalf(2, "__dllonexit: atexit table %#x is full (%#x of %#x bytes); msvcrt would grow it", b, e - b, cap);
+    g_pf->write(g_pf->user, e, &func, 4);
+    e += 4;
+    g_pf->write(g_pf->user, pend, &e, 4);
+    return func;
+}
+
 uint32_t rr_shim_alloc(int op, uint32_t a, uint32_t b)
 {
     const rr_alloc_rec *r;
@@ -214,6 +262,7 @@ uint32_t rr_shim_alloc(int op, uint32_t a, uint32_t b)
         fatalf(1, "allocation %u differs: recorded %s(%#x, %#x), replay %s(%#x, %#x)", g_ai, op_name(r->op), r->a, r->b,
                op_name((uint32_t)op), a, b);
     size = alloc_size(r);
+    if (g_trace) logf_("  [alloc %u] %s(%#x, %#x) -> %#x", g_ai, op_name((uint32_t)op), a, b, r->ret);
     if (r->ret) {
         if (r->init_len) {
             g_pf->write(g_pf->user, r->ret, g_pk->allocs[g_ai].data, r->init_len);
@@ -246,6 +295,7 @@ void rr_shim_free(int op, uint32_t p)
     r = (const rr_alloc_rec *)g_pk->allocs[g_ai].rec;
     if (r->op != (uint32_t)op || r->a != p)
         fatalf(1, "allocator call %u differs: recorded %s(%#x), replay %s(%#x)", g_ai, op_name(r->op), r->a, op_name((uint32_t)op), p);
+    if (g_trace) logf_("  [alloc %u] %s(%#x)", g_ai, op_name((uint32_t)op), p);
     g_ai++;
 }
 
@@ -320,12 +370,12 @@ int rr_replay(const rr_platform *pf, const rr_pack *pk, const rr_options *opt)
 {
     const rr_file_header *h = pk->hdr;
     rr_range *rg = NULL;
-    uint32_t nrg = 0, i, fn, eax = 0, bad = 0, badbytes = 0, total = 0;
+    uint32_t nrg = 0, i, fn, eax = 0, bad = 0, badbytes = 0, total = 0, masked = 0;
     uint16_t cw_out = 0;
     int status = 0, max_report = opt->max_report > 0 ? opt->max_report : 20;
     char name[49];
 
-    g_pf = pf; g_pk = pk; g_active = 0; g_ai = g_fi = 0; g_nblk = 0;
+    g_pf = pf; g_pk = pk; g_active = 0; g_ai = g_fi = 0; g_nblk = 0; g_trace = opt->verbose > 2;
     memcpy(name, h->export_name, 48); name[48] = 0;
 
     if (pf->load_modules(pf->user, pk->mods, pk->nmods)) { logf_("ERROR seq=%u: module load failed", h->seq); return 2; }
@@ -359,15 +409,25 @@ int rr_replay(const rr_platform *pf, const rr_pack *pk, const rr_options *opt)
     for (i = 0; i < pk->nout; i++) {
         const rr_region_rec *g = pk->out[i].rec;
         uint8_t *act = (uint8_t *)malloc(g->size ? g->size : 1);
-        uint32_t j, first = 0, ndiff = 0;
+        uint32_t j, first = 0, ndiff = 0, mask, stride = 1, nmasked = 0;
         char label[33];
         if (!act) { logf_("ERROR: out of memory"); return 2; }
         pf->read(pf->user, g->addr, act, g->size);
         total += g->size;
+        memcpy(label, g->label, 32); label[32] = 0;
+        mask = mask_for(label, &stride);
         for (j = 0; j < g->size; j++)
-            if (act[j] != pk->out[i].bytes[j]) { if (!ndiff) first = j; ndiff++; }
+            if (act[j] != pk->out[i].bytes[j]) {
+                if (mask && (mask >> (j % stride) & 1)) { nmasked++; continue; }
+                if (!ndiff) first = j;
+                ndiff++;
+            }
+        if (nmasked) {
+            masked += nmasked;
+            if (opt->verbose) logf_("  masked seq=%u %s: region %u %s %#x+%#x: %u bytes differ in masked fields",
+                                    h->seq, name, i, label, g->addr, g->size, nmasked);
+        }
         if (ndiff) {
-            memcpy(label, g->label, 32); label[32] = 0;
             if ((int)bad < max_report) {
                 uint32_t a = first & ~3u, w_exp = 0, w_act = 0;
                 memcpy(&w_exp, pk->out[i].bytes + a, a + 4 <= g->size ? 4 : g->size - a);
@@ -382,10 +442,10 @@ int rr_replay(const rr_platform *pf, const rr_pack *pk, const rr_options *opt)
         free(act);
     }
     if (status == 0)
-        logf_("PASS seq=%u gen=%u attempt=%u %s: %u regions (%u bytes), %u allocator calls, %u file calls, EAX %#x",
-              h->seq, h->gen, h->attempt, name, pk->nout, total, pk->nallocs, pk->nfiles, eax);
+        logf_("PASS seq=%u gen=%u attempt=%u %s: %u regions (%u bytes), %u allocator calls, %u file calls, EAX %#x%s",
+              h->seq, h->gen, h->attempt, name, pk->nout, total, pk->nallocs, pk->nfiles, eax, masked_note(masked));
     else
-        logf_("FAIL seq=%u gen=%u attempt=%u %s: %u of %u regions differ (%u bytes)", h->seq, h->gen, h->attempt, name,
-              bad, pk->nout, badbytes);
+        logf_("FAIL seq=%u gen=%u attempt=%u %s: %u of %u regions differ (%u bytes)%s", h->seq, h->gen, h->attempt, name,
+              bad, pk->nout, badbytes, masked_note(masked));
     return status;
 }

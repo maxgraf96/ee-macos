@@ -46,6 +46,7 @@ static free_t real_free, real_delete, real_deletea;
 static FILE *(__cdecl *real_fopen)(const char *, const char *);
 static char *(__cdecl *real_fgets)(char *, int, FILE *);
 static int(__cdecl *real_fclose)(FILE *);
+static void *(__cdecl *real_dllonexit)(void *, void *, void *);
 static unsigned g_dbg_lines;
 
 #define G(p) ((uint32_t)(uintptr_t)(p))
@@ -78,6 +79,10 @@ static char *__cdecl sh_fgets(char *b, int n, FILE *f)
     return rr_active() ? (char *)H(rr_shim_fgets(G(b), n, G(f))) : real_fgets(b, n, f);
 }
 static int __cdecl sh_fclose(FILE *f) { return rr_active() ? rr_shim_fclose(G(f)) : real_fclose(f); }
+static void *__cdecl sh_dllonexit(void *fn, void *pb, void *pe)
+{
+    return rr_active() ? H(rr_shim_dllonexit(G(fn), G(pb), G(pe))) : real_dllonexit(fn, pb, pe);
+}
 /* ESDebugOut ends in OutputDebugStringA, which raises an exception internally; keep that off the
    captured stack (no SEH frames there are valid for the OS). */
 static void WINAPI sh_ods(LPCSTR s)
@@ -92,7 +97,7 @@ static const struct { const char *dll, *name; void *fn; } k_shims[] = {
     { "msvcrt.dll", "realloc", (void *)sh_realloc }, { "msvcrt.dll", "??3@YAXPAX@Z", (void *)sh_delete },
     { "msvcrt.dll", "??_V@YAXPAX@Z", (void *)sh_deletea }, { "msvcrt.dll", "free", (void *)sh_free },
     { "msvcrt.dll", "fopen", (void *)sh_fopen }, { "msvcrt.dll", "fgets", (void *)sh_fgets },
-    { "msvcrt.dll", "fclose", (void *)sh_fclose }, { "kernel32.dll", "OutputDebugStringA", (void *)sh_ods },
+    { "msvcrt.dll", "fclose", (void *)sh_fclose }, { "msvcrt.dll", "__dllonexit", (void *)sh_dllonexit }, { "kernel32.dll", "OutputDebugStringA", (void *)sh_ods },
 };
 
 static void *shim_for(const char *dll, const char *name)
@@ -317,6 +322,7 @@ static int w_load_modules(void *u, const rr_module_rec *mods, uint32_t n)
     real_fopen = (FILE * (__cdecl *)(const char *, const char *))GetProcAddress(crt, "fopen");
     real_fgets = (char *(__cdecl *)(char *, int, FILE *))GetProcAddress(crt, "fgets");
     real_fclose = (int(__cdecl *)(FILE *))GetProcAddress(crt, "fclose");
+    real_dllonexit = (void *(__cdecl *)(void *, void *, void *))GetProcAddress(crt, "__dllonexit");
     g_nmod = (int)n;
     for (i = 0; i < n; i++) map_module(&g_mod[i], &mods[i]);
     for (i = 0; i < n; i++) bind_imports(&g_mod[i]);
@@ -571,8 +577,9 @@ int main(int argc, char **argv)
     if (diff_dir) CreateDirectoryA(diff_dir, NULL);   /* may already exist */
     if (child) return run_child(argv[i], diff_dir);
     GetModuleFileNameA(NULL, self, sizeof self);
-    snprintf(child_args, sizeof child_args, "--game \"%s\"%s%s%s%s%s", g_game_dir, diff_dir ? " --diff-dir \"" : "",
-             diff_dir ? diff_dir : "", diff_dir ? "\"" : "", g_verbose ? " -v" : "", g_verbose > 1 ? " -v" : "");
+    snprintf(child_args, sizeof child_args, "--game \"%s\"%s%s%s%s%s%s", g_game_dir, diff_dir ? " --diff-dir \"" : "",
+             diff_dir ? diff_dir : "", diff_dir ? "\"" : "", g_verbose ? " -v" : "", g_verbose > 1 ? " -v" : "",
+             g_verbose > 2 ? " -v" : "");
     for (; i < argc; i++) {
         int rc = run_parent(self, argv[i], child_args);
         npacks++;
