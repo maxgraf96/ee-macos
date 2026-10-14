@@ -2,10 +2,10 @@
 
 The kit implements the measured model (kit/runtime/msvcrt_format.cpp, "Decimal -> binary"),
 which reproduces every strtod, atof and sscanf("%f"/"%lf") result measured on legion
-(14,000 inputs, among them 1,200 chosen to tell models apart):
+(about 14,000 inputs, among them 1,500 chosen to tell models apart):
 
-  1. The significand's digits, without leading or trailing zeros, form an integer that is
-     truncated to its 64 most significant bits.
+  1. Only the first 24 significant digits count. Those digits, without trailing zeros, form
+     an integer that is truncated to its 64 most significant bits.
   2. That integer times 10^E is truncated to 80 significant bits (one rounding of the exact
      product stands for the extended-precision arithmetic msvcrt does).
   3. A normal result is rounded half-down from those 80 bits: up only past half, so an
@@ -14,10 +14,11 @@ which reproduces every strtod, atof and sscanf("%f"/"%lf") result measured on le
      then truncated.
 
 `gen_vectors.py --suite decimal2` writes inputs on which the variants below disagree;
-`fit_decimal.py` scores them against a run.
+`fit_decimal.py` scores them against a run (legion, 2026-10-15: only the 24-digit limit
+fits all 300).
 
   stepwise      truncate after every digit instead of once
-  max_digits    ignore digits after this many (None: all)
+  max_digits    ignore digits after this many (24; None: all)
   strip_zeros   drop trailing zeros before accumulating
   product_bits  significant bits the scaled product keeps (None: exact)
   product_mode  "trunc" or "nearest" for that step
@@ -27,7 +28,7 @@ from fractions import Fraction
 import re
 
 NUM = re.compile(r'^[ \t\n\r\v\f]*([+-]?)(\d*)(?:\.(\d*))?(?:[eEdD]([+-]?\d+))?')
-DEFAULT = dict(stepwise=False, max_digits=None, strip_zeros=True, product_bits=80,
+DEFAULT = dict(stepwise=False, max_digits=24, strip_zeros=True, product_bits=80,
                product_mode="trunc", stage1=False)
 
 

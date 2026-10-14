@@ -147,16 +147,17 @@ The first run (65,232 vectors, no crash) showed 1,054 strict differences; the HL
 divergences below aside. Every one of the 13,275
 vectors built from the game's own numbers matched before and after.
 
-- **Decimal input is not correctly rounded.** The significand's digits, without leading or
-  trailing zeros, form an integer truncated to its 64 most significant bits; that integer
+- **Decimal input is not correctly rounded.** Only the first 24 significant digits count;
+  those, without trailing zeros, form an integer truncated to its 64 most significant bits; that integer
   times the power of ten keeps 80 bits, truncated; a normal result rounds up from those 80
   bits only past half (an exact tie goes down, for floats too: `"645605600"` is
   0x4e19eca3); a denormal is rounded from the same 80 bits half down at half its unit, and
   that bit is truncated (`"1.28392112e-43"` as a float is 91 units, not 92). This
   reproduces all ~14,000 strtod/atof/sscanf results, including the 1,200 inputs of
   `--suite decimal` chosen to separate models (2026-10-15). `decimal_model.py` is the
-  reference; `--suite decimal2` (300 vectors) separates the variants still tied with it
-  (a digit limit above 32, 79 bits or rounding to nearest for the product). `atof` sets no
+  reference; `--suite decimal2` (300 vectors, run 2026-10-15) settled the digit limit at
+  24, the only one that fits every set. Still tied: 79 bits or rounding to nearest for the
+  product. `atof` sets no
   errno; strtod's ERANGE is for zero and infinity only.
 - printf: `%#g` of zero prints P digits after the point. Nothing else differed in 14,224.
 - `tolower`/`toupper` outside 0..255 (EOF included) map the low byte through code page 1252
