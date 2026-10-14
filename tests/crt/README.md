@@ -13,6 +13,9 @@ sides. These files measure that on a real Windows machine (legion) and compare i
 | `run.cmd` | Builds `crtvec.exe` and runs it, resuming past any vector that kills the process. |
 | `compare.py` | Diffs the Windows results with the HLE's and writes a Markdown report. |
 | `build_wine.sh` | Builds `crtvec.exe` on the Mac with LLVM for a dry run under Wine (no SDK needed). |
+| `decimal_model.py` | Python reference of msvcrt's decimal-to-binary conversion, with the variants the data has not yet ruled out. |
+| `fit_decimal.py` | Scores those variants against a run of `gen_vectors.py --suite decimal`. |
+| `wide_table.py` | Turns measured `wctype` results into the input of the kit's `tools/gen_msvcrt_unicode.py --measured`. |
 
 The HLE side runs the same file with the kit's test binary:
 `kit/build/recomp/crt_tests --vectors vectors.tsv results-mac.tsv`.
@@ -136,6 +139,51 @@ run confirms or corrects it ([inferred] until measured).
   in both locales, `_splitpath` with over-long parts, `type_info::name` formatting of
   templates and back-references, text-mode `fgets`/`fread`/`ftell` with CR, CR LF and
   Ctrl-Z, `ungetc` and `ftell`.
+
+## Measured on legion (msvcrt.dll 7.0.26100.9444, 2026-10-14)
+
+The first run (65,232 vectors, no crash) showed 1,054 strict differences; the HLE now has
+**0** on both vector sets, the documented divergences below aside. Every one of the 13,275
+vectors built from the game's own numbers matched before and after.
+
+- **Decimal input is not correctly rounded.** msvcrt accumulates the digits into an integer
+  truncated to 64 significant bits, scales it exactly by the power of ten, and rounds up only
+  past half (an exact tie goes down, for floats too: `"645605600"` is 0x4e19eca3). A denormal
+  is rounded again, half down, at half its unit, and that bit is truncated
+  (`"1.28392112e-43"` as a float is 91 units, not 92). This reproduces all 8,575 strtod and
+  sscanf results; `decimal_model.py` is the reference, `--suite decimal` (1,200 vectors)
+  separates the variants still open. `atof` sets no errno; strtod's ERANGE is for zero and
+  infinity only.
+- printf: `%#g` of zero prints P digits after the point. Nothing else differed in 14,224.
+- `tolower`/`toupper` outside 0..255 (EOF included) map the low byte through code page 1252
+  in any locale; `_mbsupr`/`_mbslwr` use code page 1252 in the "C" locale too;
+  `_stricmp`-like functions give -1/0/1 under "C" and the difference under a real locale.
+- Wide characters follow Windows' own (older, Unicode 5-era) data, which no single Unicode
+  version reproduces: the kit generates its tables from measurements (`wide_table.py`), with
+  Unicode 3.2 rules for code points not yet measured. `--suite wide` (131,072 vectors)
+  measures the whole BMP.
+- `_atoi64` saturates; `fabs` of a NaN keeps its sign and sets EDOM; `ldexp` reports no
+  underflow; `gmtime(-1)` is second −1 of 1970-01-01; `_splitpath` empties every part when
+  one is too long; `"british"` is not a locale; `localeconv`'s sign positions per locale;
+  type names print `int const ,int`; `ftell` after an `ungetc` of a character read from CR LF
+  steps back two bytes; `malloc` returns addresses 8 mod 16.
+
+## Known divergences
+
+`compare.py` compares these loosely and reports them as informational:
+
+- **ctype functions on values outside −128..255.** msvcrt indexes its table with them and
+  answers from whatever memory lies beyond it (`isalpha(0x1234)` was 0x101 on legion). This
+  is undefined behaviour in C; the HLE answers 0. `tolower`/`toupper` of such values are
+  defined by msvcrt (the low byte, mapped through code page 1252) and are compared strictly.
+- **The address `malloc` returns, modulo 16.** Windows' heap gives 8 for most sizes and 0
+  for some (15, 16, 31, 4096 and 100,000 bytes on legion), depending on its buckets; the HLE
+  always gives 8.
+- **`ftell` after `ungetc` past the end of an empty file.** Windows reports −509 there,
+  an artefact of its buffer arithmetic; the HLE reports the position before the character.
+- **`setlocale("")`, `".ACP"`, `".OCP"`** name the Windows user's own locale (en-GB on
+  legion); the HLE's user default is English (United States), and OEM code pages are not
+  modelled.
 
 ## A dry run under Wine
 
