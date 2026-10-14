@@ -42,16 +42,17 @@ Every EE DLL prefers 0x10000000, so each is translated for, and loaded at, its o
 | Low-Level Engine.dll | 0x10000000 | **0x10000000** | 0x130000 | 0x10130000 | `b_engine` |
 | sxlrt233.dll | 0x10000000 | **0x10200000** | 0xe4000 | 0x102e4000 | `a_sxlrt233` |
 | Default.dll | 0x10000000 | **0x10300000** | 0x1d000 | 0x1031d000 | `c_default` |
-| Language.dll | 0x10000000 | 0x10400000 (reserved) | 0x31000 | | |
-| DX7HRDisplay.dll | 0x10000000 | 0x10500000 (reserved) | 0x18000 | | |
-| DX7HRTnLDisplay.dll | 0x10000000 | 0x10600000 (reserved) | 0x1a000 | | |
-| TCP Protocol.dll | 0x10000000 | 0x10700000 (reserved) | 0x9000 | | |
-| Miles Sound System Mixer.dll | 0x10000000 | 0x10800000 (reserved) | 0x7000 | | |
+| Language.dll | 0x10000000 | **0x10400000** (resources only, no code) | 0x31000 | 0x10431000 | `d_language` |
+| DX7HRDisplay.dll | 0x10000000 | **0x10500000** | 0x18000 | 0x10518000 | `e_dx7hr` |
+| DX7HRTnLDisplay.dll | 0x10000000 | **0x10600000** | 0x1a000 | 0x1061a000 | `f_dx7hrtnl` |
+| TCP Protocol.dll | 0x10000000 | **0x10700000** | 0x9000 | 0x10709000 | `g_tcp` |
+| Miles Sound System Mixer.dll | 0x10000000 | **0x10800000** | 0x7000 | 0x10807000 | `h_milesmix` |
 
 - The engine keeps its preferred base, so the DB's, Ghidra's and the community symbols' engine addresses are run-time addresses. For sxlrt233 and Default.dll, run-time = DB VA + 0x200000 / + 0x300000.
 - On Windows the loader picks bases per process (legion's code census: sxlrt233 at 0x10000000, the engine relocated to 0x012d0000) [measured, `analysis/legion-captures/census`]. **For the M1 oracle** (`docs/reference/rmg.md`), Windows captures are taken with DLL copies rebased to **this same map** on legion, so captured addresses match the translated modules.
 - Keys sort in dependency order (sxlrt233 ← engine ← Default.dll, from the DB's imports), which keeps the generated `aux-<key>/` directories in that order. The loader maps every module before it binds any imports, and runs DllMains in dependency order by itself. `tests/test_game_config.py` checks the order, the alignment, the sizes and that nothing overlaps.
-- `[game] guest_size = 0x11000000` covers the reserved slots. The kit reserves the whole 4 GB guest space and reports any access past `guest_size` with its guest address.
+- `[game] guest_size = 0x28000000` (640 MB): above the last DLL the heap grows to there. The executable maps its 156 MB `data.ssa` whole, twice (boot.md §3), and is large-address aware; 0x11000000 left 8 MB of growth. It stays below 0x2f000000, where the M1 replay self-test opens a heap above `guest_size`. The kit reserves the whole 4 GB guest space and reports any access past `guest_size` with its guest address.
+- All nine modules are configured (Phase 3, P3-A). `Language.dll` has an empty relocation table and no code: the kit's translator and loader move it with nothing to fix.
 
 ## 4. Build
 
@@ -65,7 +66,7 @@ Every EE DLL prefers 0x10000000, so each is translated for, and loaded at, its o
 
 ### Translation [measured]
 
-Function-DB inputs, no allowance flags (`--allow-table-gaps`/`--allow-unmodelled`), kit `feat/game-repo`:
+Function-DB inputs, no allowance flags (`--allow-table-gaps`/`--allow-unmodelled`), kit `feat/game-repo` (the last five rows: kit `feat/boot`, Phase 3):
 
 | Module | Translated | Entry points (alternate) | Failures | Table gaps / undecoded | Unmodelled | Scan entries (data pointers / immediates) | Not in the DB | Time |
 |---|---|---|---|---|---|---|---|---|
@@ -73,6 +74,11 @@ Function-DB inputs, no allowance flags (`--allow-table-gaps`/`--allow-unmodelled
 | sxlrt233.dll @0x10200000 | 3,351 / 3,351 | 3,372 (+21) | 0 | 0 / 0 | 0 | 0 / 0 | 1 | 4.9 s |
 | Low-Level Engine.dll @0x10000000 | 5,221 / 5,221 | 5,292 (+71) | 0 | 0 / 0 | 0 | 0 / 0 | 3 | 4.5 s |
 | Empire Earth.exe | 36,888 / 36,888 | 40,598 (+3,710) | 0 | 0 / 0 | 0 | 0 / 0 | 1 | 26.8 s, 2.0 GB RSS |
+| Language.dll @0x10400000 | 0 / 0 (resources only) | 0 | 0 | 0 / 0 | 0 | 0 / 0 | 0 | 0.0 s |
+| DX7HRDisplay.dll @0x10500000 | 677 / 677 | 722 (+45) | 0 | 0 / 0 | 0 | 0 / 0 | 4 | 0.6 s |
+| DX7HRTnLDisplay.dll @0x10600000 | 720 / 720 | 765 (+45) | 0 | 0 / 0 | 0 | 0 / 0 | 5 | 0.6 s |
+| TCP Protocol.dll @0x10700000 | 180 / 180 | 180 | 0 | 0 / 0 | 0 | 0 / 0 | 0 | 0.1 s |
+| Miles Sound System Mixer.dll @0x10800000 | 124 / 124 | 124 | 0 | 0 / 0 | 0 | 0 / 0 | 1 | 0.1 s |
 
 Generated C: EXE 262 MB in `gen/` with the three DLLs at 28 + 29 + 4.4 MB.
 
@@ -123,6 +129,7 @@ What remains for "builds without the CLT" (M1 DoD): the runtime and hosts are st
 .venv/bin/python tools/test.py                    # tests/test_*.py, then the kit's portable suites
 .venv/bin/python tools/test.py --m1 [--regenerate]   # the M1 harness
 .venv/bin/python tools/test.py --m1-replay [PACKS...]   # the Mac M1 replay: self-tests, or replay packs
+.venv/bin/python tools/test.py --boot [--regenerate]  # the whole game, booted headless to the main menu
 .venv/bin/python tools/test.py --native           # any other option: the kit's test.py for this game
 ```
 
@@ -149,6 +156,8 @@ What remains for "builds without the CLT" (M1 DoD): the runtime and hosts are st
 - **The EH harness** (`tests/eh/run_eh.py`, `tools/test.py --eh`): Empire Earth's own C++ exceptions through the kit's MSVC exception handling (`runtime/msvc_eh.cpp`), on the executable's translation. `ee_eh_harness` dlopens the bundles of sxlrt233, the engine and the EXE (`ee_eh_bundles`), attaches the static imports, and runs WON's message unpacking [static]: `ReadBuffer::ReadBytes` (EXE+0x29ef50) throws `WONAPI::ReadBufferException` when the buffer runs short, from its own destructor-only C++ frame two calls below EXE+0x3944b0, whose `catch (ReadBufferException &)` returns false.
   **[measured]** A 3-byte buffer unpacks with no exception; a 1-byte buffer throws, the catch returns 0, EBP/EBX/ESI/EDI and FS:[0] come back, and the 2 CRT allocations made on the way (the thrower's temporary and the exception's message) are both freed - by the thrower's unwind action and the exception's destructor; 2000 throws in a row leave the CRT heap as it was. With nothing to catch it (`--unhandled`) the process ends in `terminate()` with exit code 3, the log naming the type and its message ("Attempt to read past end of buffer.").
   Translation [measured]: the EXE has 2,395 C++ frames (45 with try blocks) and 6 `_except_handler3` frames (4 with `__except`), so 49 checkpoints; its 47 catch blocks, their 47 continuations, 8,884 unwind-map actions, 4 filters, 4 `__except` and 2 `__finally` blocks are all translated entries (the report's `msvc_eh.missing` is empty); 130 `_CxxThrowException` call sites in 82 functions (the DB's 131/83 counts the import thunk) and 5 `_setjmp3` call sites, taken in place. sxlrt233: 374 C++ frames (none with a try block), 2 SEH frames (1 with `__except`), 1,166 unwind actions, nothing missing. The engine and Default.dll have no EH frames.
+
+- **The boot test** (`tests/boot/run_boot.py`, `tools/test.py --boot`): the whole game, the executable and all eight DLLs translated and linked (`ee_boot`, `app/`), booted headless in strict mode with a fresh user directory to the main menu's message loop and closed with `WM_CLOSE`. [boot.md](boot.md) has the sequence, the threads and their control words, and the temporary stand-ins.
 
 ### Temporary pieces
 - `tests/m1/harness/crt_pending.cpp`: stand-ins only for the msvcrt functions the kit does not have yet: the x87 control word (`_controlfp`, `_control87`, `__control87_2`; workstream C). They are registered before the kit's tables, so each one the kit gains replaces ours. MSVC exception handling is the kit's (`runtime/msvc_eh.cpp`, workstream E), and its stand-ins are gone.
