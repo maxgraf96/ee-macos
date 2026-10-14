@@ -752,3 +752,49 @@ dmusic setup: fixed build with the GS bank, 48 kHz, gain 0.577 (= Music Volume 6
 | Timbre and instrument identity on 3–5 tracks (ideally one of Balance, Enmity, Rivers or Time, which test the bank fix) | capture 3 |
 | Reverb amount (A vs B) | captures 4–5 |
 | Level calibration without background | captures 3–5 |
+
+## 13. The DirectMusic HLE (P4-A, kit `feat/dmusic`)
+
+Status: 2026-10-15. Kit `dx/dmusic.cpp` puts the DirectX 6.1/7 DirectMusic interfaces in front of GothicKit/dmusic, vendored at `b73b270` with ten patches (`kit/third_party/dmusic/README.md`). `game.toml [runtime] dmusic = true` turns it on; `app/pending_dmusic.cpp` is gone.
+
+**Coverage of §2.9** [static + kit tests]: every listed method is implemented, the rest of each vtable is in place in DirectX order (slot names checked by `dmusic_tests`):
+- Loader: `GetObject` (file name, full path, memory), `SetSearchDirectory` (a missing folder is `DMUS_E_LOADER_BADPATH`, which EE's fallback relies on), `EnableCache` and the cache. Names resolve case-insensitively through the kit's file resolver.
+- Performance: `Init` (holds the `IDirectSound` Miles passes, or the shared one), `PlaySegment`, `Stop`, `GetSegmentState`/`GetSegment` (the loader's own pointer, as `GetCurrentlyPlayingScore` compares), `GetTime`, ports, `AssignPChannelBlock`, notifications accepted and never signalled (`GetNotificationPMsg` → `S_FALSE`), `SetGlobalParam` auto-download and **master groove level**, `CloseDown`.
+- `IDirectMusic`, port, `IKsControl`: one software synthesizer port (output class, DLS, 1000 groups); `GUID_DMUS_PROP_Volume` (EE's fades), `_Effects` (Reverb Enabled) and `_WavesReverb` (`SetReverbStyle`).
+- Segment (`SetRepeats`, `GUID_Download`/`GUID_Unload`, the style), segment state, style (`EnumMotif` → `S_FALSE`), composer `AutoTransition`.
+- `UnloadScore`'s retry loop: `Stop` ends the primary segment for the state queries at once, so the loop that took 62 tries on Windows takes one.
+
+**The dmusic patches** (all upstreamable): the bank-select fix (§3.3 #1), master groove (#2), `SetRepeats` (#3), a segment that ends after its last repeat, a missing DLS as a partial download (#5, Pawns without a GM bank), the 16-byte `fmt ` chunk (#11), a SoundFont in place of a DLS collection (the GM fallback, #4), unnamed DLS waves, locking against the render thread, and **a sample-exact clock**: upstream rounded each render call to whole ticks, so the tempo depended on the caller's block size — 2.5 % fast at 100 BPM in 512-frame blocks at 48 kHz [measured on synthetic files; `ee_dmrender`'s 100 ms blocks hid it, 0.3 %].
+
+**Sound** [static]: the synthesizer renders in the kit's mixer (`host_synth_attach`) at the output rate; then the KS volume (`v^1.151`, §2.4), ramped over ~5 ms, a −3 dB trim (§11.4), and an approximation of the Waves reverb (Freeverb-shaped, decay times as asked; its level per mix dB is uncalibrated until §12's A/B). GM instruments: macOS `gs_instruments.dls`, else the kit's GeneralUser GS SoundFont (`RECOMP_DMUSIC_GM` overrides).
+
+**EE's tracks** [measured, `tools/audio/check_dmusic.py`, `dmusic_render` over the GOG `Data/Music`]: all 8 load and play at 540–1160× realtime.
+
+| Track | RMS dBFS, intensity 1, 150 s, raw | §3.2 less 3 dB | Silent windows |
+|---|---|---|---|
+| Balance | −13.84 | −13.9 | 0 % |
+| Enmity | −16.99 | −17.0 | 0 % |
+| Fallen | −16.44 | −16.5 | 0 % |
+| Honor | −14.53 | −14.6 | 0 % |
+| Pawns | −17.10 | −17.1 | 2.7 % |
+| Rivers | −16.88 | −16.9 | 0 % |
+| Shadow2 | −14.59 | −14.7 | 0 % |
+| Time | −14.65 | −14.7 | 0 % |
+
+Pawns with §11.4's forced schedule at Music Volume 62 % and its reverb, against the Windows loopback (which includes ≈ −31 dB of other sound):
+
+| Phase | i1 | i2 | i3 | i2 | i0 | i1 |
+|---|---|---|---|---|---|---|
+| HLE (dB) | −22.65 | −20.58 | −19.80 | −20.26 | −22.54 | −23.62 |
+| Windows (dB) | −23.0 | −22.0 | −19.1 | −22.5 | −24.0 | −23.3 |
+| Difference | +0.35 | +1.42 | −0.70 | +2.24 | +1.46 | −0.32 |
+
+Mean +0.75 dB, range −0.70 … +2.24 (before the trim: +2.8 on average).
+
+**Open** (P4-A):
+- Calibrate the reverb level and the synthesizer's timbre and rate against §12's clean recordings.
+- Peaks above full scale on four tracks at 100 % Music Volume (Balance 1.62, Time 1.52, Shadow2 1.31, Honor 1.18; none at the default 62 %): the host's clipper saturates them. A limiter if §12 shows Windows does not clip.
+- A band's first notes convert its DLS collections into synthesizer presets on the audio thread, once per collection per run. Measured: the worst 512-frame block, the first, takes 1.7–2.6 ms with the GS bank (Balance, Honor, Pawns, Shadow2), against the block's 10.7 ms at 48 kHz [measured], so this stays where it is unless a slower machine says otherwise.
+- The in-game start (`Game initialized`) still needs a scripted session (P3-E) or a player to be observed natively; the track-change sequence of §2.7 is covered by the kit's `dmusic_tests` on synthetic files.
+
+**In the boot** [measured, `tests/boot/run_boot.py --kit <feat/dmusic>`, strict, headless]: the boot test passes with the kit's DirectMusic and no stand-in. The import trace shows §2.2 exactly, every call `S_OK`: 3 × `CoCreateInstance`, `Init` (with Miles' `IDirectSound`), `GetDefaultPort`, `CreatePort`, `GetCaps`, `SetNumChannelGroups(8)`, `Activate`, `AddPort`, 8 × `AssignPChannelBlock`, `IDirectMusic::Activate`, `SetNotificationHandle`, 2 × `AddNotificationType`, `SetGlobalParam(AutoDownload)`, `EnableCache`, the volume and reverb `KsProperty` calls, master groove, `SetSearchDirectory("…\Data\Music\")`; at exit `SetNotificationHandle(0)`, `Stop`, `CloseDown` and the five `Release`s. **The main menu does not play DirectMusic** (no `PlaySegment` in 12 s at the menu; the music thread only calls `Stop`), which settles §9's menu question for the native build. `ee_boot` has no audio output, so its synthesizer renders nothing; `EmpireEarth.app` mixes it into the kit's SDL output.
