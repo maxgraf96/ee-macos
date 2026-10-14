@@ -275,17 +275,25 @@ let seq = 0, gen = -1, attempt = -1, genRec = null, generationsDone = 0;
 const generations = [], calls = [], loads = [];
 
 const OP = { new: 1, 'new[]': 2, malloc: 3, calloc: 4, realloc: 5, delete: 6, 'delete[]': 7, free: 8 };
+// In Windows' msvcrt.dll, delete[] jumps to delete, delete jumps to free and new[] jumps to new, so
+// one call from game code passes several hooked entry points with the game's return address. Only
+// the outermost allocator hook on a thread records (S00 had every delete recorded three times).
+const allocDepth = {};                     // thread id -> nesting depth of allocator hooks
+function enterAlloc(ctx) { const d = allocDepth[ctx.threadId] || 0; allocDepth[ctx.threadId] = d + 1; return d === 0; }
+function leaveAlloc(ctx) { allocDepth[ctx.threadId]--; }
 function hookAllocator(name, op) {
   const a = crt.findExportByName(name);
   if (!a) return;
   Interceptor.attach(a, {
     onEnter(args) {
-      if (!tracking) { this.skip = true; return; }
+      this.outer = enterAlloc(this);
+      if (!tracking || !this.outer) { this.skip = true; return; }
       this.a = u32(args[0]);
       this.b = (op === 'calloc' || op === 'realloc') ? u32(args[1]) : 0;
       this.rec = cur !== null && this.threadId === cur.tid ? callerOf(this.returnAddress) : null;
     },
     onLeave(ret) {
+      leaveAlloc(this);
       if (this.skip) return;
       const r = u32(ret);
       let size = this.a;
@@ -307,7 +315,7 @@ function hookFree(name, op) {
   if (!a) return;
   Interceptor.attach(a, {
     onEnter(args) {
-      if (!tracking) return;
+      if (!enterAlloc(this) || !tracking) return;
       const p = u32(args[0]);
       live.delete(p);
       if (cur !== null && this.threadId === cur.tid) {
@@ -315,6 +323,7 @@ function hookFree(name, op) {
         if (c) cur.allocs.push({ op, a: hex(p), caller: c });
       }
     },
+    onLeave() { leaveAlloc(this); },
   });
 }
 hookAllocator('??2@YAPAXI@Z', 'new'); hookAllocator('??_U@YAPAXI@Z', 'new[]');
