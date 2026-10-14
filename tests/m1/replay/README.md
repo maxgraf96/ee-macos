@@ -22,6 +22,9 @@ Captures and packs hold game-derived bytes. Keep them out of git: `analysis/m1-c
 | `build_win32.bat` | MSVC build |
 | `rmg_pack.py` | capture directory → packs (`list`, `pack`) |
 | `selftest/` | host-only test of packer + core with a mock platform: `sh selftest/run.sh` |
+| `rmg_replay_mac.cpp`, `rmg_mac_common.cpp`, `rmg_mac.h` | Mac platform over the kit: `ee_m1_replay` (bundles) and `ee_m1_replay_static` (linked); [m1-replay.md](../../../docs/reference/m1-replay.md) |
+| `rmg_record_mac.cpp` | Mac-side recorder (`ee_m1_replay --record`): a capture in `rmg_capture.js`'s format of a call through the translated modules |
+| `run_replay.py`, `CMakeLists.txt` | `tools/test.py --m1-replay`: the Mac self-tests (core self-test, round trip, corruptions), or replay of given packs with both builds |
 
 ## How a replay works
 
@@ -82,6 +85,8 @@ C:\EEPort\tools\rmg_replay.exe --game "C:\EEPort\game\Empire Earth" --diff-dir C
 **Why a child process per pack.** The parent starts the child suspended and checks with `VirtualQueryEx` that every needed range is free. Then it reserves the ranges before the child's loader runs, so the child's heap and the DLLs it loads later land elsewhere. If the child's initial stack, its image or ntdll occupy a needed range, the parent retries with a fresh child (ASLR moves them), up to 10 times.
 
 ## Mac platform: what the kit harness must provide
+
+Implemented by `rmg_replay_mac.cpp` (workstream H): how to run it, the report format and the limitations are in [docs/reference/m1-replay.md](../../../docs/reference/m1-replay.md). Exact-address memory comes from the kit's `mem_open` and `heap_exclude` (kit `feat/m1-replay`); the import overrides wrap the kit's own shims, which serve everything outside the call.
 
 The core is host-independent. The Mac build links `rmg_replay_core.c` into a kit harness (workstream A's `tests/m1/harness/`, on B's loader) that implements `rr_platform` (`rmg_replay.h`):
 
