@@ -9,7 +9,7 @@
 # runtime's dispatch serves the registered modules.
 set(EE_M1_KEYS a_sxlrt233 b_engine c_default)
 set(EE_M1_SOURCES ${CMAKE_CURRENT_LIST_DIR}/m1_harness.cpp
-    # The msvcrt functions the kit does not implement yet (control word, EH).
+    # The msvcrt functions the kit does not implement yet (the control word).
     ${CMAKE_CURRENT_LIST_DIR}/crt_pending.cpp)
 set(EE_M1_LIBS recomp_platform recomp_runtime recomp_dx_null)
 
