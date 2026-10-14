@@ -36,8 +36,12 @@ After changing scripts in your clone, redeploy them by copying into `C:\EEPort\f
 3. On pickup, set `status: working` in the request.
 4. When finished, write the reply `to-mac\NNNN-short-slug.reply.md` with `status: done` or `blocked`. Then move the request to `done\`.
 5. A reply contains: what you did, results with numbers, output paths, and anything odd or surprising. Keep it to **≤ 400 words**; put bulk data in files and reference their paths.
-6. To ask the Mac session for something, write `to-mac\NNNN-slug.md` with `status: open`. New messages take the next free 4-digit number across all mailbox folders.
-7. The Mac session reads `to-mac\` over SSH. **It cannot see your chat**, so everything it needs must be in the files.
+6. **Never let one request block the queue.**
+   - If a step needs the user (input takeover, approvals) and they haven't answered, write a partial reply covering what's done, mark the pending step `status: blocked (waiting for user: …)`, and continue with the next request.
+   - Come back to blocked steps when the user answers or says they're away.
+   - Requests that say "priority" or "run now" go before older requests that need input.
+7. To ask the Mac session for something, write `to-mac\NNNN-slug.md` with `status: open`. New messages take the next free 4-digit number across all mailbox folders.
+8. The Mac session reads `to-mac\` over SSH. **It cannot see your chat**, so everything it needs must be in the files.
 
 ## You may
 - Launch and stop Empire Earth on this desktop and drive its UI. You run in the interactive session, so mouse and keyboard automation and screenshots work directly.
