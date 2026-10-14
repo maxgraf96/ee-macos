@@ -475,6 +475,8 @@ Rough focused-engineering weeks for one developer with AI agents; Phases 0–1 r
 Thread roles come from these censuses, not the static DB.
 
 ### Phase 2: Translation core → **M1: native random-map generator** (≈7–12 wk, per ADR-001 gaps 1–7)
+**Status 2026-10-14:** all kit workstreams are merged (loader, DB translation, freestanding bundles, CRT, exact x87, EH) and the Mac replay is ready. M1 waits on the legion captures. Details in [phase2.md](phase2.md).
+
 - **Gate passed:** [ADR-002](decisions/002-exact-x87.md) is accepted, with the design validated on legion hardware. Implement it within ~3.5–4.5 weeks; if the fork's x87 layer can't meet §5.2 within ~6 weeks, replace that layer only.
 - **Gap 2 (EXE hygiene)** is reduced to ~2–3 days of kit changes: make the DB authoritative in `game_config.py`, take code ranges from the DB, disable the data-pointer scan, feed `data_in_code` into the jump-table ranges, exclude DRM (function-db.md §7.4).
 - Close the fork's gaps:
@@ -488,6 +490,8 @@ Thread roles come from these censuses, not the static DB.
 - **M1:** maps byte-identical to Windows across a matrix of scripts, sizes and seeds.
 
 ### Phase 3: Platform → **M2: main menu, natively** (≈6–10 wk)
+**Status 2026-10-14:** started in parallel ([phase3.md](phase3.md)): P3-A boot integration, P3-B D3D7 on Metal, P3-C user32/gdi32/dinput; P3-D references requested from legion (0010).
+
 - kernel32/msvcrt/advapi32/version/shell32; case-insensitive file mapping (user data in `~/Library/Application Support/EmpireEarth/`); threads; timers.
 - user32/gdi32 on SDL3 (macOS ships Arial, Tahoma, Times New Roman and Verdana, so text metrics can match).
 - **DirectDraw7/D3D7 → Metal** for `DX7HRDisplay.dll`; DirectInput.
