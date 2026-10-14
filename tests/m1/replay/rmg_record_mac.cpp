@@ -327,6 +327,26 @@ void rec_printf(X86 *c) {
     rmg_pass(c, o_printf);
 }
 
+// msvcp60's _Getctype gets its table from msvcrt's malloc, which a Windows
+// capture records; the kit's msvcp60 allocates it itself. As in the replay
+// (rmg_replay_mac.cpp), the table moves into a block from the recorded malloc.
+void (*o_getctype)(X86 *);
+void rec_getctype(X86 *c) {
+    rmg_pass(c, o_getctype);
+    const uint32_t out = c->r[R_EAX], kit_table = rd32(out + 8), esp = c->r[R_ESP];
+    c->r[R_ESP] = esp - 8; // a cdecl frame for malloc(512): return slot, argument
+    wr32(esp - 8, 0);
+    wr32(esp - 4, 512);
+    rec_malloc(c);
+    const uint32_t table = c->r[R_EAX];
+    c->r[R_ESP] = esp;
+    if (table && kit_table)
+        memcpy(g_mem + table, g_mem + kit_table, 512);
+    wr32(out + 8, table);
+    wr32(out + 12, table ? 1 : 0);
+    set_eax(c, out);
+}
+
 void install_record_overrides() {
     // new[] and delete[] are imported by none of the three modules.
     const RmgOverride v[] = {
@@ -341,6 +361,7 @@ void install_record_overrides() {
         {"msvcrt.dll", "fclose", rec_fclose, &o_fclose},
         {"msvcrt.dll", "printf", rec_printf, &o_printf},
         {"kernel32.dll", "OutputDebugStringA", rec_ods, &o_ods},
+        {"msvcp60.dll", "_Getctype", rec_getctype, &o_getctype},
     };
     rmg_install_overrides(v, sizeof v / sizeof v[0]);
 }

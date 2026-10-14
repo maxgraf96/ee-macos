@@ -239,6 +239,24 @@ void sh_printf(X86 *c) {
         close(saved);
 }
 
+// msvcp60's _Getctype copies the classification table into a block it gets
+// from msvcrt's malloc (256 shorts), which the capture records (msvcp60.dll
+// is among the callers it follows). The kit's msvcp60 allocates the table
+// itself, so during the call the table moves into the block the shim hands
+// out, in the recorded order.
+void (*o_getctype)(X86 *);
+void sh_getctype(X86 *c) {
+    rmg_pass(c, o_getctype);
+    if (!rr_active())
+        return;
+    const uint32_t out = c->r[R_EAX], kit_table = rd32(out + 8);
+    const uint32_t table = rr_shim_alloc(RR_OP_MALLOC, 512, 0);
+    if (table && kit_table)
+        memcpy(g_mem + table, g_mem + kit_table, 512);
+    wr32(out + 8, table);
+    wr32(out + 12, table ? 1 : 0);
+}
+
 // Stream functions the capture does not record (it flags them as warnings):
 // the replay cannot reproduce them, so reaching one during the call is an
 // error rather than a call into the kit with a FILE* that was never opened.
@@ -281,6 +299,7 @@ void install_replay_overrides() {
         {"msvcrt.dll", "fclose", sh_fclose, &o_fclose},
         {"msvcrt.dll", "printf", sh_printf, &o_printf},
         {"kernel32.dll", "OutputDebugStringA", sh_ods, &o_ods},
+        {"msvcp60.dll", "_Getctype", sh_getctype, &o_getctype},
     };
     StreamTable<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23>::add(v);

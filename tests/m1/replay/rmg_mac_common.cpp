@@ -107,7 +107,7 @@ void rmg_install_overrides(const RmgOverride *o, size_t n) {
         table.push_back(ImportShim{o[i].dll, o[i].name, ARGC_CDECL, o[i].fn});
     }
     // OutputDebugStringA is stdcall (one argument); everything else here is
-    // msvcrt's, which is cdecl.
+    // msvcrt's or msvcp60's, which is cdecl.
     for (ImportShim &s : table)
         if (!strcasecmp(s.dll, "kernel32.dll"))
             s.argc_stdcall = imports_infer_argc(s.dll, s.name);

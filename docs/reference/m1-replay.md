@@ -94,7 +94,8 @@ Exit 0 only when every pack passed on every build. With no captures it exits 1, 
    - msvcrt `operator new`/`new[]`/`malloc`/`calloc`/`realloc` and `operator delete`/`delete[]`/`free`;
    - `fopen`/`fgets`/`fclose`;
    - `printf`, whose text is kept out of the report;
-   - kernel32 `OutputDebugStringA`, counted during the call.
+   - kernel32 `OutputDebugStringA`, counted during the call;
+   - msvcp60 `_Getctype`. Windows' msvcp60 copies the classification table into a block from msvcrt's `malloc`, which the capture records with msvcp60 as the caller. The kit's msvcp60 allocates the table itself, so during the call the table moves into the block the shim hands out, at the recorded point in the sequence [static: msvcp60.cpp; inferred for msvcp60.dll]. The recorder does the same.
 
    During the call, msvcrt's other stream functions (`fread`, `fscanf`, `fseek`, `fwrite`, …, 24 in all) are errors: captures record only `fopen`/`fgets`/`fclose` and flag the others as warnings.
 6. **DllMains.** They run in Windows' order: sxlrt233 and the engine (the executable's static imports), then Default.dll (`LoadLibrary`).
