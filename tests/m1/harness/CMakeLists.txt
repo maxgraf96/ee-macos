@@ -9,6 +9,8 @@
 # runtime's dispatch serves the registered modules.
 set(EE_M1_KEYS a_sxlrt233 b_engine c_default)
 set(EE_M1_SOURCES ${CMAKE_CURRENT_LIST_DIR}/m1_harness.cpp
+    # --um: ADR-002 criterion 2, the engine's maths against the recorded calls.
+    ${CMAKE_CURRENT_LIST_DIR}/um_vectors.cpp
     # The msvcrt functions the kit does not implement yet (control word, EH).
     ${CMAKE_CURRENT_LIST_DIR}/crt_pending.cpp)
 set(EE_M1_LIBS recomp_platform recomp_runtime recomp_dx_null)
@@ -41,6 +43,13 @@ if(APPLE AND POP_HAVE_GEN AND NOT POP_TRANSLATE STREQUAL "STUB")
     foreach(key ${EE_M1_KEYS})
       target_link_libraries(ee_m1_harness_static PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,recomp_gen_${key}>")
     endforeach()
+
+    # ee_um_harness: the static harness with the executable's translation
+    # linked too, so --um also reaches the executable's own maths helpers
+    # (ADR-002 criterion 2). Built only on request: it compiles the EXE.
+    ee_m1_target(ee_um_harness)
+    target_compile_definitions(ee_um_harness PRIVATE EE_UM_EXE=1)
+    pop_link_gen(ee_um_harness)
   else()
     message(STATUS "M1 harness: the translation lacks ${EE_M1_KEYS}; regenerate")
   endif()
