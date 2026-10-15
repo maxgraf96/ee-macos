@@ -59,6 +59,11 @@
  *   RECOMP_EE_SIMPARITY_NO_CIV_TIMER=1 no civilization timer (EXE 0x54778a):
  *                                      no EEMCivTimerExpired, so no "Choose
  *                                      Civilization" screen and no pause
+ *   RECOMP_EE_SIMPARITY_AUTOSAVE=1     "# autosave" lines: the host's autosave
+ *                                      counter (EEPhysics+0xcc) after each PT;
+ *                                      a line when it passes the interval
+ *                                      while a blocking flag is set, and when
+ *                                      it restarts (the save was posted)
  *
  * Rows (CSV, one per line; '#' lines are comments):
  *   G,seed_orig,seed,humans                  a game starts (EEMStartLoading)
@@ -336,6 +341,35 @@ static void before_memfn(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocatio
     }
 }
 
+/* The autosave's trigger (0x546ee4, end of every PT on the host): the counter
+ * EEPhysics+0xcc grows by the ms per PT (+0x54); once past AutoSave In
+ * Milliseconds ([0x91943c]) it restarts and 0x547676 posts the simulation
+ * thread 0x50a, unless [0x918ea0] or [[0x918e24]+0x237] is set. */
+#define VA_AUTOSAVE_MS 0x0091943cu
+#define VA_AUTOSAVE_BLOCK1 0x00918ea0u
+#define VA_AUTOSAVE_BLOCK2_OBJ 0x00918e24u
+#define W_AUTOSAVE_COUNTER 0xccu
+static int g_autosave_watch;
+static uint32_t g_autosave_last = 0xffffffffu, g_autosave_blocked;
+
+static void watch_autosave(const PopModApi *api, uint32_t world, uint32_t pt) {
+    uint32_t counter = rd(api, world + W_AUTOSAVE_COUNTER), interval = rd(api, VA_AUTOSAVE_MS);
+    uint8_t b1 = 0, b2 = 0;
+    uint32_t obj = rd(api, VA_AUTOSAVE_BLOCK2_OBJ);
+    api->guest_read_u8(api, VA_AUTOSAVE_BLOCK1, &b1);
+    if (obj)
+        api->guest_read_u8(api, obj + 0x237, &b2);
+    if (g_autosave_last != 0xffffffffu && counter < g_autosave_last)
+        fprintf(g_out, "# autosave: counter restarted after PT %u (%u -> %u): posted\n", pt,
+                g_autosave_last, counter);
+    int blocked = interval && counter > interval;
+    if (blocked != (int)g_autosave_blocked)
+        fprintf(g_out, "# autosave: %s after PT %u: counter %u of %u, flags %u %u\n",
+                blocked ? "due and not posted" : "no longer due", pt, counter, interval, b1, b2);
+    g_autosave_blocked = (uint32_t)blocked;
+    g_autosave_last = counter;
+}
+
 /* After each call of the PT entry: a row when a PT ran. */
 static uint32_t g_fpu_dirty;
 
@@ -387,6 +421,8 @@ static void after_tick(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation 
         write_mem(api, pt);
     if (g_players_every && pt % g_players_every == 0)
         write_players(api, pt);
+    if (g_autosave_watch)
+        watch_autosave(api, world, pt);
     if (pt == g_oosdump_pt) {
         checksum(api, world, 1, 1);
         fprintf(g_out, "# OOS dump written after PT %u (the game's OOS *.log)\n", pt);
@@ -411,6 +447,7 @@ static void before_start_loading(const PopModApi *api, pop_cpu_v1 *cpu, PopHookI
         api->guest_write_u32(api, cpu->ecx + 0x14, g_seed);
     fprintf(g_out, "G,%u,%u,%u\n", orig, g_have_seed ? g_seed : orig, humans);
     g_last_pt = g_last_total = 0xffffffffu;
+    g_autosave_last = 0xffffffffu;
     g_done = 0;
 }
 
@@ -754,6 +791,7 @@ PopModStatus pop_mod_init(const PopModApi *api) {
             st = install(api, 0x0043dcf4u, after_ai_sched, POP_HOOK_AFTER);
     }
     g_players_every = env_u32("RECOMP_EE_SIMPARITY_PLAYERS", 0);
+    g_autosave_watch = env_u32("RECOMP_EE_SIMPARITY_AUTOSAVE", 0) != 0;
     const char *calls = getenv("RECOMP_EE_SIMPARITY_CALLS");
     for (const char *p = calls; st == POP_OK && p && *p;) {
         char *end = NULL;

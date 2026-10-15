@@ -4,8 +4,10 @@
     .venv/bin/python tools/simparity/run.py [--runs N] [--minutes M] [--seed S]
         [--ptps P] [--autosave-ms MS] [--reg [SUBKEY\\]NAME=N] [--reports] [--units PT,PT...] [--units-every N]
         [--oosdump PT] [--max-pt N] [--draws A-B] [--trace-fns F,..] [--mem PT,A,L;..]
-        [--players N] [--calls F,..] [--memfn F,L;..] [--ai-sched]
+        [--players N] [--calls F,..] [--memfn F,L;..] [--ai-sched] [--autosave-watch]
+        [--trace-match TEXT]
         [--lockstep] [--no-civ-timer] [--against STREAM] [--out DIR]
+        [--load SAVE] [--keep-saves] [--then-load MINUTES [--load-against STREAM]]
         [--no-build] [--kit DIR]
         [--insert-dylib PATH]
 
@@ -18,6 +20,14 @@ registry is tools/boot/seed_user.py's (legion's options) with the PT rate
 pinned: Min PTs per Second = Max PTs per Second = P, so the step size does
 not follow the measured tick time. With two runs or more, the streams are
 compared (compare.py) and the exit status says whether they agree.
+
+--load SAVE starts from a saved game instead (tests/menus/simparity-load.script:
+Single Player -> Play Saved Game -> Load, with SAVE alone in the user
+directory's Data\\Saved Games); --minutes then counts from the load.
+--keep-saves copies the saves the game wrote to OUT/mac-<k>-saves/.
+--then-load M loads run 1's first autosave afterwards for M minutes and
+compares that stream with --load-against (a Windows load of a save of the
+same state).
 
 Every run holds tools/game_ports.py's lock: a random map opens the game's
 server on fixed ports. --insert-dylib (or $SIMPARITY_INSERT_DYLIB) is put in
@@ -45,6 +55,7 @@ from game_ports import game_ports_lock  # noqa: E402
 import compare  # noqa: E402
 
 SCRIPT = ROOT / "tests/menus/simparity.script"
+LOAD_SCRIPT = ROOT / "tests/menus/simparity-load.script"
 HKCU = "HKEY_CURRENT_USER\\Software\\SSSI\\Empire Earth"
 SAVE_TO_FILE = "00540aca"  # writes a save game; 0 = done (simparity.md §8)
 # Booting, the menus, the map's creation and the civilization screen (5 game
@@ -74,13 +85,13 @@ def pin_registry(user, ptps, autosave_ms=None, extra=()):
     reg_path.write_text(json.dumps(reg, indent=1))
 
 
-def scenario(minutes, tmp, no_civ_timer=False):
-    text = SCRIPT.read_text()
+def scenario(minutes, tmp, no_civ_timer=False, load=False):
+    text = (LOAD_SCRIPT if load else SCRIPT).read_text()
     text, n = re.subn(r"^wait \d+(\s+# simparity: duration.*)$",
                       lambda m: "wait %d%s" % (int(minutes * 60000), m.group(1)), text, flags=re.M)
     if n != 1:
         sys.exit("simparity.script has no '# simparity: duration' wait")
-    if no_civ_timer:
+    if no_civ_timer and not load:
         text, n = re.subn(r"^# simparity: civ begin.*?^# simparity: civ end[^\n]*\n", "", text,
                           flags=re.M | re.S)
         if n != 1:
@@ -101,7 +112,12 @@ def run_one(k, args, out):
     try:
         seed_user.main(["--user", str(user), "--width", "800", "--height", "600"])
         pin_registry(user, args.ptps, args.autosave_ms, args.reg)
-        script = scenario(args.minutes, tmp, args.no_civ_timer)
+        if args.load:
+            # The game lists Data\\Saved Games (the overlay's writable tier is the user directory).
+            saved = user / "Data" / "Saved Games"
+            saved.mkdir(parents=True, exist_ok=True)
+            shutil.copy(args.load, saved / args.load.name)
+        script = scenario(args.minutes, tmp, args.no_civ_timer, bool(args.load))
         seconds = int(START_SECONDS + args.minutes * 60)
         # The mod is copied per run, so a rebuild cannot touch a running game's plugin.
         mods = tmp / "ee-mods"
@@ -116,6 +132,8 @@ def run_one(k, args, out):
             env["RECOMP_EE_SIMPARITY_NO_CIV_TIMER"] = "1"
         if args.ai_sched:
             env["RECOMP_EE_SIMPARITY_AI_SCHED"] = "1"
+        if args.autosave_watch:
+            env["RECOMP_EE_SIMPARITY_AUTOSAVE"] = "1"
         for key, val in (("RECOMP_EE_CHECKSUM_UNITS", args.units),
                          ("RECOMP_EE_CHECKSUM_UNITS_EVERY", args.units_every),
                          ("RECOMP_EE_CHECKSUM_OOSDUMP", args.oosdump),
@@ -131,6 +149,8 @@ def run_one(k, args, out):
                 env[key] = str(val)
         command = [str(ROOT / "build/recomp/ee_boot"), "--user", str(user), "--seconds", str(seconds),
                    "--script", str(script), "--script-out", str(frames)]
+        if args.trace_match:
+            command += ["--trace", str(out / ("mac-%d-imports.txt" % k)), "--trace-match", args.trace_match]
         prefix = ["nice", "-n", "10", "env"]
         if args.insert_dylib:
             prefix.append("DYLD_INSERT_LIBRARIES=" + args.insert_dylib)
@@ -160,7 +180,14 @@ def run_one(k, args, out):
         if stream:
             problems += save_problems(stream, args.ptps,
                                       args.autosave_ms if "540aca" in (args.calls or "") else None)
-        files = [f for f in user.rglob("*") if f.is_file() and f.parent.name.lower() == "saved games"]
+        files = [f for f in user.rglob("*") if f.is_file() and f.parent.name.lower() == "saved games"
+                 and not (args.load and f.name == args.load.name)]
+        if args.keep_saves and files:
+            kept = out / ("mac-%d-saves" % k)
+            shutil.rmtree(kept, ignore_errors=True)
+            kept.mkdir()
+            for f in files:
+                shutil.copy2(f, kept / f.name)
         if saves or files:
             print("run %d: %d saves, %d files in Saved Games" % (k, len(saves), len(files)), flush=True)
         print("run %d: %.0f s, %s; %s" % (k, took, "ok" if not problems else "; ".join(problems),
@@ -170,18 +197,42 @@ def run_one(k, args, out):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# The tracer's autosave watch (--autosave-watch): the host's counter restarting when the save
+# is posted (0x547676), and the counter past the interval with nothing posted (a blocking flag).
+POSTED = re.compile(r"# autosave: counter restarted after PT (\d+)")
+UNPOSTED = re.compile(r"# autosave: due and not posted after PT (\d+)")
+# A posted autosave is handled by the simulation thread straight away and runs at the end of
+# the CT that carries it: a few CTs later (14 PTs each at 40 PT/s), or after a longer server
+# pause. A post closer than this to the stream's end may not have run yet.
+SAVE_LAG_PTS = 400
+
+
 def save_problems(stream, ptps, autosave_ms=None):
     """A save the game could not write skips its side effects on the simulation (the computer
     players' serializer reschedules their strategy review): every save must succeed, as on
-    Windows. K rows of the save-to-file function (0x540aca) say so; with the autosave
-    interval known, fewer saves than were due is a problem too."""
+    Windows. K rows of the save-to-file function (0x540aca) say so. With the autosave watch,
+    every autosave posted must also have run, and none may be due unposted; without it, and
+    with the interval known, fewer saves than were due is a problem."""
     saves = [c for c in stream.calls if c["fn"] == SAVE_TO_FILE]
     out = ["the save at PT %d failed (0x540aca returned %s)" % (c["pt"], c["eax"])
            for c in saves if c["eax"] != "00000000"]
+    posts = [int(m.group(1)) for m in map(POSTED.match, stream.header) if m]
+    out += ["an autosave was due after PT %s and not posted" % m.group(1)
+            for m in map(UNPOSTED.match, stream.header) if m]
+    last = max(stream.ticks) if stream.ticks else 0
+    if posts and saves:
+        done = sorted(c["pt"] for c in saves)
+        for pt in posts:
+            if not any(pt < s <= pt + SAVE_LAG_PTS for s in done) and pt + SAVE_LAG_PTS <= last:
+                out.append("the autosave posted after PT %d never ran" % pt)
     if stream.ticks and autosave_ms:
-        # The host counts ms per PT (1000 / PT rate) towards the interval.
-        due = max(stream.ticks) * 1000 // ptps // autosave_ms
-        if len(saves) < due - 1:
+        # The host counts ms per PT (1000 / PT rate) towards the interval, from the
+        # game's start or from the load.
+        due = (last - min(stream.ticks) + 1) * 1000 // ptps // autosave_ms
+        if posts:
+            if len(posts) < due:
+                out.append("%d autosaves posted, %d due" % (len(posts), due))
+        elif len(saves) < due - 1:
             out.append("%d saves, %d autosaves due" % (len(saves), due))
     return out
 
@@ -234,14 +285,35 @@ def main():
                         help="'# memfn' lines: LEN bytes of ECX's object on entry of ADDR")
     parser.add_argument("--ai-sched", action="store_true",
                         help="'# sched' lines: computer players scheduling their strategy reviews")
+    parser.add_argument("--trace-match", default=None, metavar="TEXT",
+                        help="ee_boot's import trace, only the calls whose DLL!name contains TEXT "
+                             "('|' between several), to OUT/mac-<k>-imports.txt")
+    parser.add_argument("--autosave-watch", action="store_true",
+                        help="'# autosave' lines: the autosave counter passing the interval unposted, "
+                             "and restarting when the save is posted")
     parser.add_argument("--against", type=Path, action="append", default=[], metavar="STREAM",
                         help="also compare every run with this stream (e.g. a Windows one); skipped "
                              "when the file is missing")
     parser.add_argument("--out", type=Path, default=ROOT / "analysis/simparity/mac")
+    parser.add_argument("--load", type=Path, default=None, metavar="SAVE",
+                        help="start from this saved game (.ees) instead of a new random map; "
+                             "--minutes counts from the load")
+    parser.add_argument("--keep-saves", action="store_true",
+                        help="copy the saves the game wrote to OUT/mac-<k>-saves/")
+    parser.add_argument("--then-load", type=float, default=None, metavar="MINUTES",
+                        help="afterwards, load run 1's first autosave for MINUTES in one more game "
+                             "(implies --keep-saves) and compare it with --load-against")
+    parser.add_argument("--load-against", type=Path, action="append", default=[], metavar="STREAM",
+                        help="with --then-load: a stream of the same save state loaded elsewhere "
+                             "(skipped when missing, or when it starts at another PT)")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--kit", default=None)
     parser.add_argument("--insert-dylib", default=os.environ.get("SIMPARITY_INSERT_DYLIB"))
     args = parser.parse_args()
+    if args.load and not args.load.is_file():
+        parser.error("--load: no such file: %s" % args.load)
+    if args.then_load:
+        args.keep_saves = True
     if not args.no_build:
         command = [sys.executable, str(ROOT / "tools/build.py"), "--cmake-target", "ee_boot"]
         command += ["--kit", args.kit] if args.kit else []
@@ -261,23 +333,63 @@ def main():
         if not ref.is_file():
             print("%s: not here; skipped" % ref)
     for x, y in pairs:
-        a, b = compare.load(x), compare.load(y)
-        report = compare.compare(a, b)
-        timing = save_timing(a, b)
-        if timing and not report["agree"] and min(timing) >= report.get("first_pt", 0):
-            timing = None  # the streams differ before the saves did
-        hidden = []
-        for key in ("players", "calls"):
-            first = (report.get(key) or {}).get("first_difference")
-            if first and not (timing and first["pt"] >= min(timing)):
-                hidden.append("%s differ at PT %d" % (key, first["pt"]))
-        note = "; " + ", ".join(hidden) if hidden else ""
-        if timing:
-            note += ("; a save landed at PT %d / %d (thread timing, simparity.md §9.3), %s"
-                     % (timing + ("nothing differs after it" if report["agree"] else "the rest follows",)))
-        print("%s vs %s: %s%s" % (x.name, y, report["summary"], note), flush=True)
-        same &= (report["agree"] or bool(timing)) and not hidden
+        same &= report_pair(x, y)
+    if args.then_load:
+        same &= then_load(args, traces[0])
     return 0 if same else 1
+
+
+def report_pair(x, y):
+    """Compare two streams and print the verdict; True when they agree, up to a save that
+    landed in a different CT (single-player timing, simparity.md §9.3)."""
+    a, b = compare.load(x), compare.load(y)
+    report = compare.compare(a, b)
+    timing = save_timing(a, b)
+    if timing and not report["agree"] and min(timing) >= report.get("first_pt", 0):
+        timing = None  # the streams differ before the saves did
+    hidden = []
+    for key in ("players", "calls"):
+        first = (report.get(key) or {}).get("first_difference")
+        if first and not (timing and first["pt"] >= min(timing)):
+            hidden.append("%s differ at PT %d" % (key, first["pt"]))
+    note = "; " + ", ".join(hidden) if hidden else ""
+    if timing:
+        note += ("; a save landed at PT %d / %d (thread timing, simparity.md §9.3), %s"
+                 % (timing + ("nothing differs after it" if report["agree"] else "the rest follows",)))
+    print("%s vs %s: %s%s" % (Path(x).name, y, report["summary"], note), flush=True)
+    return (report["agree"] or bool(timing)) and not hidden
+
+
+def then_load(args, first_trace):
+    """Load the first run's first autosave in one more game and compare its stream with
+    --load-against (e.g. legion's load of the Mac's save of the same state): a save written
+    on the Mac must load to Windows' stream (simparity.md §10.2). A reference that starts at
+    another PT holds another state (the save landed in another CT) and is skipped."""
+    saves = [c["pt"] for c in compare.load(first_trace).calls if c["fn"] == SAVE_TO_FILE]
+    files = sorted((args.out / "mac-1-saves").glob("*.ees"), key=lambda f: f.stat().st_mtime)
+    if not saves or not files:
+        print("then-load: run 1 kept no save (--keep-saves and an autosave are needed)")
+        return False
+    load_args = argparse.Namespace(**vars(args))
+    load_args.load, load_args.minutes = files[0], args.then_load
+    load_args.autosave_ms = None  # the registry's 10 minutes: no autosave in the loaded game
+    k = args.runs + 1
+    print("then-load: run %d loads %s (saved at PT %d)" % (k, files[0].name, saves[0]), flush=True)
+    trace, problems = run_one(k, load_args, args.out)
+    if problems:
+        return False
+    ok = True
+    start = min(compare.load(trace).ticks)
+    for ref in args.load_against:
+        if not ref.is_file():
+            print("%s: not here; skipped" % ref)
+            continue
+        ref_start = min(compare.load(ref).ticks)
+        if ref_start != start:
+            print("%s starts at PT %d, this load at %d: another state; skipped" % (ref, ref_start, start))
+            continue
+        ok &= report_pair(trace, ref)
+    return ok
 
 
 if __name__ == "__main__":

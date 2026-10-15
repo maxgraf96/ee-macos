@@ -1,0 +1,30 @@
+# The checksum-stream scenario from a saved game (P4-E, docs/reference/simparity.md §10):
+# Main menu -> Single Player -> Play Saved Game -> the first saved game in the
+# list -> Load, then the game with nobody at the controls. tools/simparity/run.py
+# --load SAVE puts SAVE alone in the user directory's Data\Saved Games, so the
+# list holds that one file. See settings.script for the pointer.
+# menus: manual (tools/simparity/run.py --load; not part of --menus)
+# menus: alone (a loaded game opens the game server: one at a time)
+timeout 4000000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+
+click 511 268                 # Single Player
+wait change within 15000
+wait 1000
+click 748 452                 # Play Saved Game
+wait change within 20000
+wait 1500
+click 295 114                 # the first (only) saved game in the list
+wait 1500
+dump saved-game
+click 511 728                 # Load
+wait size 800 600 within 120000
+wait pixel 300 560 948a7b tol 24 within 240000
+dump in-game-start
+wait 600000                   # simparity: duration (run.py --minutes rewrites it)
+dump in-game-end
+quit

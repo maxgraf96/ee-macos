@@ -19,6 +19,7 @@ Started 2026-10-15, in parallel with Phase 3. Context:
 | P4-B miles-dsound | `mss32` (the 17 AIL functions missing of EE's 34), the shared stub DirectSound, Bink audio, MP3 decode caching | kit `feat/miles` |
 | P4-C sim-parity | The single-player checksum-stream oracle for M3: the game's OOS checksum (EXE 0x545ebf) after every physics tick of a fixed-seed AI skirmish, on the Mac (a mod plugin) and on Windows (Frida, legion 0027/0033/0034), and the first comparison ([simparity.md](reference/simparity.md)) | `phase4/simparity`, kit `feat/simparity` |
 | P4-D ai-divergence | The first Mac/Windows simulation difference (PT 24,301) and the LAN out-of-sync of session 4E: root cause, fix, proof ([simparity.md](reference/simparity.md) §9); the oracle's hidden-state rows (`P`, `K`, `memfn`) and its autosave checks | `phase4/ai-divergence` |
+| P4-E saves | Save and load parity between the Mac and Windows, both ways; the save files compared byte for byte; the Mac autosave that did not run (simparity.md §8 item 7) ([simparity.md](reference/simparity.md) §10) | `phase4/saves`, kit `feat/saves` |
 
 ## Status
 | ID | State | Result |
