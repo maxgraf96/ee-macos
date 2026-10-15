@@ -33,16 +33,19 @@ wait size 800 600 within 60000  # World...", "Loading Complete"), then the game
 wait 1000
 dump loading
 # With custom civilizations off, EE sometimes opens "Choose Civilization"
-# before the game (on the Mac in 2 of 3 runs, never in legion's; parity.md
-# §3): its OK, with the first civilization highlighted, is here. When it did
-# not open, the click lands on the map above the panel and does nothing.
-wait 12000
+# instead of the first game frame (on the Mac in some seeded runs, never in
+# legion's; parity.md §3). Both come about 9 s after the loading screen on
+# the software renderer: the clicks are its OK (the first civilization
+# highlighted), and land on the map above the panel, doing nothing, when the
+# game came up instead.
+wait 15000
 click 400 520
-# The game is up when its own command panel is (bottom of the screen; the
-# loading screens have neither its colour nor its place). The panel's colour
-# depends on the epoch (948a7b wood in the Prehistoric, 939d9c stone in the
-# Renaissance); the loading screen there is 5e4d3b. T = this moment.
-wait pixel 300 560 948a7b tol 40 within 240000
+wait 2000
+click 400 520
+# The game is up when its own command panel is: (300,560) is 556666 on the
+# Renaissance's stone panel (the chooser's parchment there is af9f79, the
+# loading screen 5e4d3b). T = this moment.
+wait pixel 300 560 556666 tol 24 within 120000
 wait 5000
 dump in-game-05s
 wait 25000
