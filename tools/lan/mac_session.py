@@ -154,6 +154,15 @@ def run_app(args, out, script):
     for kv in sorted(env.items()):
         command += ["--env", "%s=%s" % kv]
     command.append(str(app))
+    if args.direct:
+        # The app's executable as this process's child: macOS then counts
+        # this terminal as the app's responsible process, and the terminal's
+        # Local Network access covers the game (an app started by Launch
+        # Services needs its own, which only the user can grant: macOS 15
+        # answers its LAN connects with EHOSTUNREACH meanwhile). `open -a`
+        # then brings the running instance forward, so its window has the
+        # focus as a Finder start's would.
+        command = [str(app / "Contents/MacOS/EmpireEarth")]
     seconds = int(args.minutes * 60)
     done = threading.Event()
 
@@ -176,8 +185,25 @@ def run_app(args, out, script):
         sampler = threading.Thread(target=sample, daemon=True)
         sampler.start()
         try:
-            result = subprocess.run(command, timeout=seconds + 600)
-            code = result.returncode
+            if args.direct:
+                proc = subprocess.Popen(command, env=dict(os.environ, **env),
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(6)
+                before = sorted(int(p) for p in subprocess.run(
+                    ["/usr/bin/pgrep", "-f", str(app / "Contents/MacOS/")], capture_output=True,
+                    text=True).stdout.split())
+                subprocess.run(["/usr/bin/open", "-a", str(app)])
+                time.sleep(3)
+                after = sorted(int(p) for p in subprocess.run(
+                    ["/usr/bin/pgrep", "-f", str(app / "Contents/MacOS/")], capture_output=True,
+                    text=True).stdout.split())
+                for extra in set(after) - set(before):
+                    print("open started a second instance (pid %d): stopped" % extra, flush=True)
+                    os.kill(extra, 9)
+                code = proc.wait(timeout=seconds + 600)
+            else:
+                result = subprocess.run(command, timeout=seconds + 600)
+                code = result.returncode
         except subprocess.TimeoutExpired:
             pid = host_pid(app)
             print("the app outlived its %d minutes; SIGTERM to %s" % (args.minutes, pid), flush=True)
@@ -449,6 +475,8 @@ def main():
     r.add_argument("--name", default="mac-ref", help="the hosted game's name (host)")
     r.add_argument("--app", default=None, help="the player's EmpireEarth.app instead of ee_boot")
     r.add_argument("--home", default=None, help="with --app: its EE_HOME, first run done")
+    r.add_argument("--direct", action="store_true",
+                   help="with --app: start its executable as a child of this process (see run_app)")
     r.add_argument("--wait-ports", type=float, default=30,
                    help="minutes to wait for another game server on this Mac to end")
     s = sub.add_parser("say")
