@@ -13,7 +13,7 @@ Labels: **[measured]** = output of the commands here on an M4 Max (16 cores, mac
 | Apple Silicon Mac | the only target | |
 | Python 3.12 venv | the wrappers and the kit's tools | `uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt` (Python 3.14 cannot build the pinned numpy) |
 | Xcode Command Line Tools | the kit's hosted build (runtime, hosts, harness) | `xcode-select --install` |
-| LLVM clang + lld | freestanding bundles (§5); no CLT needed for these | `brew install llvm lld` (`/opt/homebrew/opt/llvm/bin/clang`, `/opt/homebrew/opt/lld/bin/ld64.lld`) |
+| LLVM clang + lld | freestanding bundles (§5); no CLT needed for these | `brew install llvm lld` (`/opt/homebrew/opt/llvm/bin/clang`, `/opt/homebrew/opt/lld/bin/ld64.lld`), or the bundled toolchain (§5.1), which gives the same bundles |
 | Ghidra 12.1.4 + the func-db environment | development only: regenerating the DB, `setup.py --ghidra`, `export.py --compare` | [function-db.md §9](function-db.md) |
 | Your GOG installation | everything game-backed | linked by `tools/setup.py`, never copied into git |
 
@@ -169,7 +169,7 @@ The translation of a pre-relocated copy of a DLL is byte-identical to the transl
 `tools/build.py --target bundles` (kit `tools/recomp/bundle.py`; CMake `recomp_add_bundles`) builds each module like this:
 
 ```
-clang -target arm64-apple-macos13.0 -std=c11 -O2 -ffreestanding -nostdinc \
+clang --no-default-config -target arm64-apple-macos13.0 -std=c11 -O2 -ffreestanding -nostdinc \
       -isystem $(clang -print-resource-dir)/include -fno-math-errno -ffp-contract=off \
       -DRECOMP_FREESTANDING=1 -DGUEST_IMAGE_BASE=… -DGUEST_HEAP_BASE=… -DGUEST_SIZE=… \
       -I<module gen dir> -I<gen> -I<kit> -I<kit>/runtime -c chunk_NNN.c
@@ -183,6 +183,7 @@ ld64.lld -arch arm64 -platform_version macos 13.0 13.0 -bundle -undefined dynami
 - **Signing.** lld signs arm64 output ad hoc: `codesign -dv` → `flags=0x20002(adhoc,linker-signed)` [measured].
 - **Incremental.** An object is rebuilt only when its source, a header it read (depfile) or the flags change.
 - `RECOMP_FREESTANDING_CC` / `RECOMP_LD64_LLD` select the tools (default: Homebrew's, then `PATH`).
+- **The same bundles whoever builds them.** `--no-default-config` keeps clang's configuration files out (Homebrew's names the CLT's SDK), and the compiler and linker run without `SDKROOT`, `CPATH`, `C_INCLUDE_PATH`, `CCC_OVERRIDE_OPTIONS` and the other variables clang reads (`TOOL_ENV_IGNORED`): `CPATH` would add include directories even under `-nostdinc`.
 
 [measured]
 
@@ -198,6 +199,37 @@ Time: the EXE's 186 objects compile and link in 95 s wall (1,031 CPU-s at 16 job
 The kit's `tools/recomp/tests/test_freestanding.py` keeps this true without game files: the translator's whole synthetic instruction vocabulary (the Unicorn suite's cases, x87 and SEH forms included) compiles with `-ffreestanding -nostdinc` and needs nothing foreign; a translated image links with lld into a bundle; and a stand-in host `dlopen`s it, sees the table register and calls a translated function.
 
 What remains for "builds without the CLT" (M1 DoD): the runtime and hosts are still compiled with the CLT's clang and SDK. Only the generated code is CLT-free today.
+
+### 5.1 The bundled toolchain (Phase 6, P6-B1)
+
+What the app carries so a player's Mac, with no Xcode, Command Line Tools or Homebrew, can run steps 2–4 of the first run ([packaging.md](packaging.md) §1–3, [firstrun.md](firstrun.md)). The kit's `tools/toolchain/` makes it; its README has the details.
+
+```sh
+.venv/bin/python tools/stage_toolchain.py [--kit DIR] [--innoextract <innoextract build dir>]   # → build/toolchain
+```
+
+- **What it builds** [measured]: `python/` (CPython 3.12.13 from python-build-standalone, trimmed, with capstone 5.0.9 and pefile 2024.8.26; 44.1 MB), `llvm/` (clang and lld 23.1.3 from the LLVM source release: one AArch64-only binary with ThinLTO and PGO, 76.1 MB, plus the 10 compiler headers), `THIRD_PARTY_NOTICES.txt` (packaging.md §7), `MANIFEST.json`. 120.6 MB in all, 31.4 MB as `.tar.xz`.
+- **Pinned and reproducible.** Every download is pinned by URL and SHA-256 (kit `tools/toolchain/pins.json`). Two final LLVM builds from the same profile into different directories gave the same binary, and two stagings into different directories the same manifest [measured].
+- **Cost:** about 19 min and 2.6 GB at the peak on this Mac (`--jobs 12 --nice 15`), on the packager's Mac only. Downloads stay in `~/Library/Caches/recomp-kit/toolchain` (`--cache`); the build trees are deleted once staged. `--profile <.profdata>` reuses a PGO profile and skips the instrumented build.
+- **Prerequisites (packager only):** Xcode or the CLT, CMake, Ninja, this venv, the network.
+
+**The interface for the app (P6-B2/B3):**
+
+| | |
+|---|---|
+| where | `EmpireEarth.app/Contents/Resources/toolchain/` (the whole directory, symlinks kept: `ditto` or `cp -R`) |
+| Python | `toolchain/python/bin/python3 -I -B <script>`; `firstrun.py`'s `--python` |
+| clang | `toolchain/llvm/bin/clang` → `bundle.py --cc` / `firstrun.py --cc` / `RECOMP_FREESTANDING_CC` |
+| ld64.lld | `toolchain/llvm/bin/ld64.lld` → `--lld` / `RECOMP_LD64_LLD` |
+| compiler headers | found by clang itself: `bin/../lib/clang/23` from the real path of `llvm` (`clang -print-resource-dir`); keep `bin/` and `lib/` together |
+| writes | none: the `.pyc` ship precompiled and `sitecustomize.py` keeps even `-I` alone from writing bytecode; everything else goes to `~/Library/Application Support/EmpireEarth/` |
+| signing | every Mach-O is signed ad hoc by the staging; sign the app after copying it in |
+
+**Proof on this Mac** [measured, 2026-10-15]: steps 2–4 with only the staged toolchain, under `env -i HOME=$HOME PATH=/usr/bin:/bin` and `nice -n 15`, in a `sandbox-exec` profile that hides `/Applications/Xcode.app`, `/Library/Developer`, `/opt/homebrew` and `/usr/local` (in it `/usr/bin/nm` answers "No developer tools were found"), with `SDKROOT` set to the hidden CLT SDK:
+- the inputs hash to `db/inputs.json` (all nine modules "pinned"); the listings and the generated C (272 files) are `diff -r`-identical to the development venv's;
+- all nine bundles are byte-identical to Homebrew clang and lld 23.1.3's from the same C, `symbols.json` too; no depfile names an SDK file; M1 replay case A06 passes 9/9 on them (`build/recomp/ee_m1_replay --bundles …`);
+- `tools/firstrun/firstrun.py import` + `build --python … --cc … --lld …`: 135.9 s for the build (inputs 12.7 s, translation 28.8 s, compile + link 91.5 s at 12 jobs), peak 0.74 GB under `Build/`, 176 MB kept; the plain steps without the driver took 154 s (12 + 43 + 99 s) and peaked at 0.93 GB, with the listings kept;
+- the staged tree was unchanged afterwards (every file as `MANIFEST.json` records it, no `__pycache__` anywhere in the tools).
 
 ## 6. Tests
 
