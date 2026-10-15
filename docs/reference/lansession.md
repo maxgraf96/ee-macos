@@ -235,3 +235,20 @@ The shareable app (`tools/package_app.py`, first run from the user's Wine wrappe
 
 - `analysis/lan-sessions/session4-c-mac-hosts/` (4C and 4D in one app run: `lan.pcap`, `game.log`, `frames/`, `legion/c-lan-page.png`), `session4-e-mac-joins/` (4E: also `oos/{mac,legion}.log`, `legion/netcode_hooks.json`), `session4-f-mac-hosts/` (4F, also `legion/netcode_hooks.json`), `session4-g-dc-nokey/` (Direct Connect without a key), `session4-rehearsal-{1,2}/`, `autosave-repro/` (`ee_boot.log`), `autosave-app/` (the fixed app's autosave).
 - legion: `C:\EEPort\captures\lan\session4\{c,d,…}\` (screenshots, `*.mkv`, `frida\`), the mailbox progress file and reply.
+
+## 10. Session 5G: the 4E game again, with the autosave fixed (P4-D, 2026-10-15 10:42–11:21)
+
+The re-test of 4E's out-of-sync (§9.3) after the kit's `CreateFile` fix (kit `ee` 35912bd). The cause and its mechanism are in [simparity.md](simparity.md) §9. Labels as above [measured].
+
+| | |
+|---|---|
+| **Set-up** | legion hosts `legion-p4d`: Random Map, Small, Continental, Prehistoric→Nano, Standard - Low, difficulty Easy, slot 3 a computer player on legion's team. **The Mac joins from its LAN list, headless** (`ee_boot` under `mac_session.py run join`, 1920×1080, software renderer), with the simparity tracer passive (`RECOMP_EE_CHECKSUM_TRACE` with `P` rows every 10 PTs and `K` rows for the computer player's schedule, review, serializer and the save; no seed, no skipped timer, no lockstep). legion runs Frida `netcode_hooks` and `checksum_trace` with the same rows. Nobody plays: the civilization screens are OK'd, and the Mac resigns at the end |
+| **Game** | 10:51:09–11:15:26: **24.3 minutes, 38,112 PTs**, 4,155 CTs with PTs. The headless Mac held the game at the 14 PT/s floor for about half of it (395 `EEMLagStatus`) |
+| **Autosaves** | Two, both written on both machines with no dialog: **PT 22,790** (11:01:49) and **PT 35,722** (11:12:37). Each time the computer player (slot 3) was serialized and rescheduled its review at the same PT on both (22,800 and 35,726) |
+| **Checksums** | **The Mac's `0x32` equals legion's own world checksum on all 4,152 ticks** (40–4195), and legion's tally for the Mac's slot on all 4,151. No dump-the-world flag, no `NEMRemovePlayer(isOOS)`, no OOS log on either side |
+| **Per PT** | The Mac's stream and legion's agree on **all 38,112 PTs**: world checksum, world RNG, objects, executed inputs, every player's resources (`P` rows), and all 144 logged calls (the saves, every review and reschedule) |
+| **End** | The Mac resigned (11:15:25): "You have been Defeated!", legion "You are Victorious!"; both went through the statistics to the main menu and exited normally |
+
+**So the out-of-sync of 4E is gone**: the same game, past two autosaves, stays in sync, where 4E went out of sync 16 s after its first.
+
+Evidence (not in git): `analysis/lan-sessions/session5-g-mac-joins/` (`lan.pcap`, `ee_boot.log`, `mac-stream.csv`, `live.script`, `frames/`, `legion/{netcode_hooks.json,stream.csv}`); legion `C:\EEPort\captures\lan\session5\g\` (screenshots, `g-session.mkv`, `frida\`, the save listings), mailbox 0048.
