@@ -212,7 +212,10 @@ def first_player_difference(pa, pb):
     """The first PT both streams have P rows for at which some player's words differ."""
     def key(words):
         return None if words is None else tuple(words[i] for i in P_WORDS)
-    for pt in sorted(set(pa) & set(pb)):
+    common = sorted(set(pa) & set(pb))
+    for pt in common:
+        if pt == common[-1] and set(pa[pt]) != set(pb[pt]):
+            break  # a stream cut off in the middle of its last P rows
         slots = sorted(set(pa[pt]) | set(pb[pt]))
         out = []
         for slot in slots:
