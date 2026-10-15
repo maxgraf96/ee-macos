@@ -10,43 +10,16 @@
 //     and RECOMP_REGISTRY default to ~/Library/Application Support/EmpireEarth
 //     and its registry.json, seeded by tools/boot/seed_user.py. A developer
 //     build would otherwise keep both under build/recomp/.
-//   - TEMPORARY, Phase 4 (audio): the Miles calls the sound plugin makes that
-//     the kit lacks (pending_mss32.cpp); the engine aborts without them.
-//     DirectMusic is the kit's (game.toml [runtime] dmusic).
-//   - TEMPORARY, P3-C (user32): a thread's windows are destroyed when it ends,
-//     as on Windows. The splash thread (EXE 0x5344fb) returns without
-//     DestroyWindow; left alive, its window is the one host_main_window()
-//     names, and so the one activated and sent WM_CLOSE.
 //
-// docs/reference/boot.md §5 lists each with its owner.
+// Nothing else is a stand-in now: Miles (mss32) and DirectMusic are the kit's
+// (Phase 4), and so is destroying a thread's windows when it ends (P3-E).
+// docs/reference/boot.md §5 has the history.
 #include "platform/os.h"
-#include "runtime/guest.h"
-#include "runtime/imports.h"
-#include "runtime/user32_internal.h"
-#include "runtime/win32.h"
 
-#include <cstdio>
 #include <cstdlib>
 #include <string>
-#include <vector>
-
-void ee_pending_mss32_register(); // pending_mss32.cpp
 
 namespace {
-
-void destroy_thread_windows() {
-    const uint32_t tid = guest_current_thread_id();
-    std::vector<uint32_t> mine;
-    for (const auto &kv : user32::windows())
-        if (kv.second.thread == tid && !kv.second.parent)
-            mine.push_back(kv.first);
-    const uint32_t destroy = mine.empty() ? 0 : imports_resolve("USER32.dll", "DestroyWindow");
-    for (uint32_t hwnd : mine)
-        if (destroy && user32::find_window(hwnd)) {
-            fprintf(stderr, "[ee] thread %u ended: destroying its window %08x\n", tid, hwnd);
-            guest_call(guest_current_context(), destroy, hwnd);
-        }
-}
 
 __attribute__((constructor)) void ee_standins_init() {
     if (!getenv("RECOMP_PROFILE_DIR")) {
@@ -59,8 +32,6 @@ __attribute__((constructor)) void ee_standins_init() {
     if (!getenv("RECOMP_REGISTRY") && getenv("RECOMP_PROFILE_DIR"))
         setenv("RECOMP_REGISTRY",
                (std::string(getenv("RECOMP_PROFILE_DIR")) + "/registry.json").c_str(), 1);
-    ee_pending_mss32_register();
-    sched_set_thread_exit_observer(destroy_thread_windows);
 }
 
 } // namespace

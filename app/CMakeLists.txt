@@ -8,8 +8,7 @@
 #   ee_boot     the same game booted headless: the kit's software Direct3D 7
 #               renderer, frame dumps, a boot report and the boot test's
 #               milestones (ee_main.cpp). docs/reference/boot.md.
-set(EE_STANDIN_SOURCES ${CMAKE_CURRENT_LIST_DIR}/ee_standins.cpp
-                       ${CMAKE_CURRENT_LIST_DIR}/pending_mss32.cpp)
+set(EE_STANDIN_SOURCES ${CMAKE_CURRENT_LIST_DIR}/ee_standins.cpp)
 
 if(APPLE AND POP_HAVE_GEN AND NOT POP_TRANSLATE STREQUAL "STUB" AND TARGET recomp_gen_h_milesmix)
   add_executable(ee_boot ${CMAKE_CURRENT_LIST_DIR}/ee_main.cpp ${EE_STANDIN_SOURCES}
