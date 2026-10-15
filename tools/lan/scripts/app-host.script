@@ -1,0 +1,46 @@
+# A LAN session in the windowed app on Metal, the Mac hosting
+# (tools/lan/mac_session.py run host --app): Escape through the intro movies,
+# the main menu, Multiplayer -> Other Multiplayer -> Host Game "mac-ref" ->
+# the room, then the steps appended to the live file (@LIVE@ is replaced by its
+# path), one at a time as they arrive. The menus and the lobby are 1024x768
+# whatever the window's size; the coordinates are host.script's.
+timeout 7200000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+key ESCAPE
+wait 2500
+key ESCAPE
+wait 2500
+key ESCAPE
+wait size 1024 768 within 180000
+wait 3000
+moveby 1 1
+wait 300
+dump main-menu
+
+click 511 371                 # Multiplayer
+wait change within 30000
+wait 2000
+dump won
+
+pointer system
+click 618 644                 # Other Multiplayer
+wait change within 20000
+wait 2000
+dump lan
+
+click 774 662                 # Host Game
+wait change 0.01 within 20000
+wait 1000
+click 554 306                 # the Game Name field
+wait 500
+type mac-ref
+wait 500
+dump host-dialog
+click 448 480                 # Create Game
+wait change 0.05 within 20000
+wait 3000
+dump room                     # Game: mac-ref; the advert goes out on UDP 8585
+log hosting mac-ref; following the live file
+follow @LIVE@

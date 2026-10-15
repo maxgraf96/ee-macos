@@ -154,3 +154,4 @@ def test_info_plist():
     assert plist["LSMinimumSystemVersion"] == "13.0"
     assert plist["LSArchitecturePriority"] == ["arm64"]
     assert plist["CFBundleIconFile"] == "AppIcon"
+    assert "local network" in plist["NSLocalNetworkUsageDescription"]

@@ -197,7 +197,8 @@ Everything lands under `build/` (ignored). A run with the host already built tak
 
 ```
 EmpireEarth.app/Contents/
-  Info.plist                 CFBundleExecutable EmpireEarth, dev.neoee.empireearth, LSMinimumSystemVersion 13.0, arm64
+  Info.plist                 CFBundleExecutable EmpireEarth, dev.neoee.empireearth, LSMinimumSystemVersion 13.0, arm64,
+                             NSLocalNetworkUsageDescription (macOS 15's Local Network prompt: lansession.md §9.2)
   MacOS/EmpireEarth          the launcher (app/launcher/launcher.m, AppKit, 0.1 MB)
   MacOS/EmpireEarthHost      the kit's player host + EE's stand-ins (app/ee_standins.cpp), 16.9 MB, debug stabs stripped
   Frameworks/                libavcodec.61, libavformat.61, libavutil.59 (FFmpeg 7.1.1, LGPL, replaceable)

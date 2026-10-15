@@ -164,6 +164,13 @@ def info_plist(version):
         "LSApplicationCategoryType": "public.app-category.strategy-games",
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
+        # macOS 15 asks the player before an app may use the local network
+        # (Local Network privacy); until they allow it, the LAN game's
+        # connections fail with EHOSTUNREACH and other machines' broadcasts
+        # never arrive (lansession.md §9). This is the prompt's text.
+        "NSLocalNetworkUsageDescription": "Empire Earth finds, hosts and joins multiplayer games "
+                                          "on your local network (LAN games, and VPNs such as "
+                                          "ZeroTier).",
         "NSHumanReadableCopyright": "Our code only: the game is the player's own GOG copy, "
                                     "imported and built on their Mac.",
         "EEBuild": {"repository": version["describe"], "kit": version["kit"]},

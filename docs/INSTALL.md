@@ -81,25 +81,31 @@ The window says what happened and what to do. The usual cases:
 - **The mouse:** click in the window to capture it. Hold **Escape** to release it.
 - **The intro movies:** press **Escape** to skip them.
 - **Quitting:** ⌘Q, or Exit Game in the menu.
-- **Multiplayer:** the game's own LAN play, with other Macs and with Windows players who have the GOG game (§5.1). For games over the internet, use a VPN such as ZeroTier or Tailscale, as with the Windows version.
+- **Settings:** F10 is the game's own menu, as on Windows. The app's settings (window, performance overlay) open with **⌘,** (Command-comma); **F11** shows or hides the frame rate.
+- **Multiplayer:** the game's own LAN play, with other Macs and with Windows players who have the GOG game (§5.1). For games over the internet, use a VPN that passes the game's LAN broadcasts, such as ZeroTier (Tailscale passes none): the game list is the only way to join with GOG copies (§5.1 step 5).
 
 ### 5.1 Playing with Windows players on a LAN
 
-The Mac plays the unmodified Windows GOG game: either side can host. Tested on a home Wi-Fi with one Mac and one Windows 11 PC, a game each way.
+The Mac plays the unmodified Windows GOG game: either side can host. Tested on a home Wi-Fi with one Mac and one Windows 11 PC: a game each way with the developer build, and in this app a game joined from the PC and a game hosted for it, played to the end.
 
 1. **Same network.** Both computers on the same home network (Wi-Fi or cable). Everyone needs the **GOG** Empire Earth Gold: the game compares its files and refuses a different version.
-2. **Firewalls.**
+2. **Local network access (Mac).** The first time the game uses the network, macOS 15 and later asks whether **EmpireEarth** may "find and connect to devices on your local network". Click **Allow**.
+   - Without it, nobody sees the games you host, you see only some of theirs, and **Join Game does nothing**.
+   - If you clicked *Don't Allow*: **System Settings → Privacy & Security → Local Network**, turn on **EmpireEarth**, then quit and reopen the game.
+   - macOS may ask again after you install a new version of the app.
+3. **Firewalls.**
    - **Mac:** the first time you host or join, macOS may ask whether EmpireEarth may accept incoming connections. Click **Allow**.
    - **Windows:** Windows asks the same the first time; tick **Private networks** and click **Allow**. The Wi-Fi must be a *Private* network in Windows' settings.
-3. **Windows players: leave Network Adapter Options at its default** (or the first entry). Choosing another adapter crashes the original game when the match starts. If the Windows PC has VMware, VirtualBox, Hyper-V or VPN adapters, the game may announce itself on one of those, and nobody sees it: disable the adapters you don't need while playing.
-4. **Host:** Multiplayer → **Other Multiplayer** → **Host Game**, type a name, **Create Game**. Leave the options as they are or change them; only the host can.
-5. **Join:** Multiplayer → **Other Multiplayer**. The game appears in the list within a few seconds (click **Refresh List** if not). Select it, **Join Game**.
-   - If it never appears, the host's address can be added by hand under **Direct Connect** (not yet tested from the Mac).
-6. **In the room:** chat in the line under the history. Every player who joined clicks **Ready**; then the host's **Start Game** becomes clickable.
-7. **In the game:** **F10** opens the game menu (Resign, Quit this Game). About three minutes in, the game asks each player to choose a civilization; the game goes on meanwhile, so choose one and click **OK**. After the game, the statistics screen leads back to the lobby.
-8. **Speed:** the game runs at the speed of the slowest computer. A snail icon at the top right means someone is lagging.
+4. **Windows players: leave Network Adapter Options at its default** (or the first entry). Choosing another adapter crashes the original game when the match starts. If the Windows PC has VMware, VirtualBox, Hyper-V or VPN adapters, the game may announce itself on one of those, and nobody sees it: disable the adapters you don't need while playing.
+5. **Host:** Multiplayer → **Other Multiplayer** → **Host Game**, type a name, **Create Game**. Leave the options as they are or change them; only the host can. Computer players: set a free slot to **Computer**. The game refuses to start when every player is on the same team.
+6. **Join:** Multiplayer → **Other Multiplayer**. The game appears in the list within a few seconds (click **Refresh List** if not). Select it, **Join Game**.
+   - **Direct Connect does not work with GOG copies.** Adding the host's address there lists the game, but **Join Game** answers "Invalid CDKey" at once, on Windows and on the Mac alike: the joining game refuses before it contacts the host. Use the list.
+   - If the game never appears in the list: check step 2 on the Mac, and step 4 on Windows.
+7. **In the room:** chat in the line under the history. Every player who joined clicks **Ready**; then the host's **Start Game** becomes clickable.
+8. **In the game:** **F10** opens the game menu (Resign, Quit this Game). About three minutes in, the game asks each player to choose a civilization. The game goes on meanwhile, so choose one and click **OK**; if you don't, it chooses for you when the time is up. After the game, the statistics screen leads back to the lobby.
+9. **Speed:** the game runs at the speed of the slowest computer. A snail icon at the top right means someone is lagging.
 
-Everyone may use the same GOG CD key: the game does not refuse it on a LAN.
+Everyone may use the same GOG CD key when joining from the list: the game does not refuse it on a LAN.
 
 ## 6. Where your files are
 

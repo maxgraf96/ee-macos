@@ -166,6 +166,9 @@ builtin = "none"
 
 [settings]
 rows = ["window", "performance_overlay"]
+# F10 is the game's own menu (Resign, Quit this Game, ...): the kit's settings
+# page opens with Command-comma instead (kit [settings] key).
+key = "none"
 
 [controls]
 default_layout = "hidden"
