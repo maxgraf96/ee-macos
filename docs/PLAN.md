@@ -1,6 +1,6 @@
 # Empire Earth → native macOS (Apple Silicon): port plan
 
-Status: **v0.3** · 2026-10-14 · owner: Max
+Status: **v0.4** · 2026-10-15 · owner: Max
 Background research: [`research/neoee.md`](research/neoee.md), [`research/strategies.md`](research/strategies.md).
 
 ---
@@ -480,7 +480,7 @@ Rough focused-engineering weeks for one developer with AI agents; Phases 0–1 r
 Thread roles come from these censuses, not the static DB.
 
 ### Phase 2: Translation core → **M1: native random-map generator** (≈7–12 wk, per ADR-001 gaps 1–7)
-**Status 2026-10-14:** all kit workstreams are merged (loader, DB translation, freestanding bundles, CRT, exact x87, EH) and the Mac replay is ready. M1 waits on the legion captures. Details in [phase2.md](phase2.md).
+**Status 2026-10-15, 04:30:** all kit workstreams are merged (loader, DB translation, freestanding bundles, CRT, exact x87, EH). **38 random-map cases are byte-identical to Windows** (scripts × sizes × seeds, 9 calls each, both Mac builds). M1 needs ≥ 50: the re-captures and groups B/E are running on legion. Details in [phase2.md](phase2.md).
 
 - **Gate passed:** [ADR-002](decisions/002-exact-x87.md) is accepted, with the design validated on legion hardware. Implement it within ~3.5–4.5 weeks; if the fork's x87 layer can't meet §5.2 within ~6 weeks, replace that layer only.
 - **Gap 2 (EXE hygiene)** is reduced to ~2–3 days of kit changes: make the DB authoritative in `game_config.py`, take code ranges from the DB, disable the data-pointer scan, feed `data_in_code` into the jump-table ranges, exclude DRM (function-db.md §7.4).
@@ -495,7 +495,7 @@ Thread roles come from these censuses, not the static DB.
 - **M1:** maps byte-identical to Windows across a matrix of scripts, sizes and seeds.
 
 ### Phase 3: Platform → **M2: main menu, natively** (≈6–10 wk)
-**Status 2026-10-14:** started in parallel ([phase3.md](phase3.md)): P3-A boot integration, P3-B D3D7 on Metal, P3-C user32/gdi32/dinput; P3-D references requested from legion (0010).
+**Status 2026-10-15:** **M2 reached in substance.** EE boots natively to the main menu, the menus and options work (four scripted scenarios, `tools/test.py --menus`), and a random-map game starts and runs (Metal at 1920×1080, about 110 fps). Open: perceptual comparison against Windows references (0010 Part 3, 0026) and three small in-game oddities ([phase3.md](phase3.md), [menus.md](reference/menus.md)).
 
 - kernel32/msvcrt/advapi32/version/shell32; case-insensitive file mapping (user data in `~/Library/Application Support/EmpireEarth/`); threads; timers.
 - user32/gdi32 on SDL3 (macOS ships Arial, Tahoma, Times New Roman and Verdana, so text metrics can match).
@@ -503,17 +503,23 @@ Thread roles come from these censuses, not the static DB.
 - **M2:** EE boots, menus and options work.
 
 ### Phase 4: Gameplay, audio, video → **M3: single-player parity** (≈5–8 wk)
+**Status 2026-10-15:** core audio and video merged: Miles (all 34 AIL imports), DirectMusic (GothicKit/dmusic with 10 patches), Bink audio ([phase4.md](phase4.md)). Gameplay verification (M3) is next.
+
 - Miles, DirectMusic (dmusic + upstream fixes), Bink.
 - Skirmish, campaigns, scenario editor, save/load. Performance on big late-game battles: x87 fast paths, profiling.
 - **M3:** full playthroughs; checksum streams match Windows on the scenario corpus.
 
 ### Phase 5: LAN → **M4: Mac↔Windows LAN game, no OOS** (≈2–4 wk)
+**Status 2026-10-15:** Winsock/iphlpapi merged (P5-A). The Multiplayer lobby is specified from static analysis and Windows traces ([lobby.md](reference/lobby.md)): one custom-drawn WONAPI popup over a frozen DirectDraw frame. Its presentation (P5-C) and text/fonts/cursor (P5-D) are in progress ([phase5.md](phase5.md)).
+
 - Winsock/iphlpapi HLE; `TCP Protocol.dll`; adapter selection incl. VPN tunnels.
 - Mac↔Mac, then Mac↔`legion` and Mac↔Wine build; soak.
 - VPN matrix: Tailscale (Join by IP), ZeroTier/Hamachi (broadcast). Optional "known peers" convenience.
 - Check Steam/retail builds for version compatibility if friends use them.
 
 ### Phase 6: Shareable app → **M5: 1.0 for friends** (≈2–4 wk)
+**Status 2026-10-15:** **the shareable `EmpireEarth.app` exists** (P6-B1–B3 merged, [phase6.md](phase6.md), [INSTALL.md](INSTALL.md)). It is 191 MB (DMG 78 MB) and holds nothing game-derived. It bundles a 76 MB clang+lld and a trimmed Python. Its first run imports the player's GOG files, then translates and compiles them in about 2–3 min on an M4 Max, with no developer tools. Open: GOG's real installer, a never-Xcode Mac, this repository's licence.
+
 - App bundle + first-run importer: GOG offline installer (Inno) or game folder → hash check → translate + compile (one-time, cached).
 - **Bundled LLVM toolchain** (D10, §5.8): freestanding build, lld link, ad-hoc signing, cached output.
 - **No Ghidra on players' Macs:** first-run translation inputs come from the repo's function DB plus the player's own binaries, decoded by our own tools. Ghidra listings are derived from game code and can't ship. Workstream P6-A, **done 2026-10-15**: `tools/setup.py`/`tools/run.py` need only the repository and the game files, with inputs and generated C byte-identical to the Ghidra pipeline's ([build.md](reference/build.md) §2.1); inventory in [packaging.md](reference/packaging.md).
