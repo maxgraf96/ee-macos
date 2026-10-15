@@ -5,7 +5,7 @@
 # The host's LanGameAdvert for mac-ref goes out on UDP 8585 while the room is
 # open (run_lobby.py reads it from ee_boot --lan-pcap with tools/lan/eelan.py).
 # See lobby-open.script for the two pointers.
-# lobby: alone (the lobby binds UDP 8585 and TCP 33336)
+# lobby: alone (the lobby binds UDP 8585 and UDP/TCP 33336; run_lobby.py holds tools/game_ports.py's lock)
 timeout 400000
 pointer f32 [0x9197a8]+4 [0x9197a8]+8
 hold 250

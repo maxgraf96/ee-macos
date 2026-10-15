@@ -21,8 +21,9 @@ Per scenario:
                   LanGameAdvert for "mac-ref" goes out on UDP 8585 (ee_boot
                   --lan-pcap, decoded with tools/lan/eelan.py)
 
-The lobby binds the LAN ports (UDP 8585, TCP 33336), so scenarios run one at
-a time, and not alongside another copy of the game.
+The lobby binds the LAN ports (UDP 8585, UDP and TCP 33336), so scenarios run
+one at a time, each holding tools/game_ports.py's lock: no other game server
+of this user runs beside it, in any checkout.
 
     .venv/bin/python tests/lobby/run_lobby.py [--kit DIR] [--no-build] [SCENARIO ...]
 
@@ -43,7 +44,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/boot"))
+sys.path.insert(0, str(ROOT / "tools"))
 import seed_user  # noqa: E402
+from game_ports import game_ports_lock  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 OUT = ROOT / "build/lobby"
@@ -169,11 +172,12 @@ def run(name, script, seconds, keep_user):
     try:
         seed_user.main(["--user", str(user)])
         env = dict(os.environ, RECOMP_STRICT="1")
-        result = subprocess.run([str(ROOT / "build/recomp/ee_boot"), "--user", str(user),
-                                 "--seconds", str(seconds), "--script", str(script),
-                                 "--script-out", str(out_dir), "--lan-pcap", str(pcap)],
-                                cwd=ROOT, capture_output=True, text=True, timeout=seconds + 180,
-                                env=env)
+        with game_ports_lock("lobby %s (%s)" % (name, ROOT)):
+            result = subprocess.run([str(ROOT / "build/recomp/ee_boot"), "--user", str(user),
+                                     "--seconds", str(seconds), "--script", str(script),
+                                     "--script-out", str(out_dir), "--lan-pcap", str(pcap)],
+                                    cwd=ROOT, capture_output=True, text=True,
+                                    timeout=seconds + 180, env=env)
         out = result.stdout + result.stderr
         log.write_text(out)
         problems = []

@@ -436,7 +436,7 @@ The coordinates in the scripts are the Mac lobby's own (1024×768): WON page *Ot
 
 ### 13.3 Still open
 
-- **K5–K8** are P5-D's (cursor shapes, text input and IME, `Arc` and the font mapper, the clipboard); CP1252 conversion (K6a) is in `ee`.
+- **K5–K8** are P5-D's (cursor shapes, text input and IME, `Arc` and the font mapper, the clipboard), merged in `ee` 220ac8a (§9.3). The scripted `type` takes their text path (`host_post_text`) headless; the app's `type` presses keys only (pushed key events produce no input-method text).
 - `BitBlt` of a zero-sized rectangle is refused (`gdi: REFUSED blit … 0x0`, a dozen at each layout); Windows returns TRUE. Harmless to the picture; P5-D's area (gdi32 drawing).
 - **`BitBlt` speed.** Every blit goes through GDI's per-pixel path. In `lobby-lan-host`, 346 blits of 1024×768 (back buffer and background pictures): median 0.8 ms (clipped to the paint's dirty rectangle), 90th percentile 80 ms, longest 91 ms (whole-window repaints) [measured, M4 Max with other builds running]. Fine headless; a whole-window repaint at 80 ms is visible latency when screens change, and a fast path for a 32-bpp `SRCCOPY` without clipping is worth having before the lobby is played on the Mac (gdi32 drawing, P5-D's area).
 - Next: Mac↔legion lobby sessions (E4): legion joins `mac-ref` from its LAN list, chat both ways, *Start Game*.

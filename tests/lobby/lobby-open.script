@@ -7,7 +7,7 @@
 # there `pointer system` places the pointer absolutely and the clicks route by
 # WindowFromPoint to the lobby window, as on Windows. Coordinates are the
 # lobby's client pixels: the game moves its window to its own 1024x768 rect.
-# lobby: alone (the lobby binds UDP 8585 and TCP 33336)
+# lobby: alone (the lobby binds UDP 8585 and UDP/TCP 33336; run_lobby.py holds tools/game_ports.py's lock)
 timeout 300000
 pointer f32 [0x9197a8]+4 [0x9197a8]+8
 hold 250
