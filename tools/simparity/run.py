@@ -53,8 +53,9 @@ START_SECONDS = 600
 
 
 def pin_registry(user, ptps, autosave_ms=None, extra=()):
-    """The PT rate pinned, and the other values asked for: NAME=DWORD under the game's key,
-    or SUBKEY\\NAME=DWORD (e.g. 'Game Options\\Difficulty Level=0')."""
+    """The PT rate pinned, and the other values asked for: NAME=VALUE under the game's key,
+    or SUBKEY\\NAME=VALUE (e.g. 'Game Options\\Difficulty Level=0'); a number is a DWORD,
+    anything else a string ('Game Options\\Map Type=Small Islands')."""
     reg_path = user / "registry.json"
     reg = json.loads(reg_path.read_text())
     for name in ("Min PTs per Second", "Max PTs per Second"):
@@ -65,7 +66,11 @@ def pin_registry(user, ptps, autosave_ms=None, extra=()):
         path, _, value = item.partition("=")
         sub, _, name = path.rpartition("\\")
         key = HKCU + ("\\" + sub if sub else "")
-        reg.setdefault(key, {})[name] = {"type": seed_user.REG_DWORD, "data": int(value, 0)}
+        try:
+            entry = {"type": seed_user.REG_DWORD, "data": int(value, 0)}
+        except ValueError:
+            entry = {"type": seed_user.REG_SZ, "data": value}
+        reg.setdefault(key, {})[name] = entry
     reg_path.write_text(json.dumps(reg, indent=1))
 
 
@@ -193,9 +198,9 @@ def main():
     parser.add_argument("--ptps", type=int, default=40, help="PTs per second, pinned (registry)")
     parser.add_argument("--autosave-ms", type=int, default=None, metavar="MS",
                         help="the registry's AutoSave In Milliseconds (seed_user's: 600000; 0 = off)")
-    parser.add_argument("--reg", action="append", default=[], metavar="[SUBKEY\\]NAME=N",
-                        help="a DWORD under the game's registry key, e.g. "
-                             "'Game Options\\Difficulty Level=0' (repeatable)")
+    parser.add_argument("--reg", action="append", default=[], metavar="[SUBKEY\\]NAME=VALUE",
+                        help="a value under the game's registry key (a number: DWORD, else a string), "
+                             "e.g. 'Game Options\\Difficulty Level=0' (repeatable)")
     parser.add_argument("--reports", action="store_true",
                         help="keep the wall-clock statistics reports (EXE 0x547365)")
     parser.add_argument("--lockstep", action="store_true",
