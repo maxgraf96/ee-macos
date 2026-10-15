@@ -1,0 +1,31 @@
+# Main menu -> Multiplayer: the WON lobby, a GDI window over the menu's last
+# frame -> Back -> the main menu again -> Exit Game, the game's own way out.
+#
+# The menu's pointer is the game's own (DirectInput; see tests/menus/
+# settings.script). The lobby hands the system pointer to its window: the game
+# puts its DirectInput mouse in non-exclusive mode while the lobby is up, so
+# there `pointer system` places the pointer absolutely and the clicks route by
+# WindowFromPoint to the lobby window, as on Windows. Coordinates are the
+# lobby's client pixels: the game moves its window to its own 1024x768 rect.
+# lobby: alone (the lobby binds UDP 8585 and TCP 33336)
+timeout 300000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+dump main-menu
+
+click 511 371                 # Multiplayer
+wait change within 30000
+wait 2000
+dump lobby-first              # the WON page: "Init Failed", Other Multiplayer, Back
+
+pointer system
+click 781 644                 # Back
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+wait change within 30000
+wait 1500
+dump main-menu-again
+
+click 511 680                 # Exit Game: the game ends itself

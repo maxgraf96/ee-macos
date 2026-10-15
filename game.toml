@@ -153,10 +153,13 @@ dmusic = true
 system_fonts = true
 
 [network]
-# Sierra's long-gone server, looked up when the Multiplayer screen opens
-# (netcode.md §7): gethostbyname fails at once instead of waiting on DNS
-# (kit runtime/winsock.cpp; P5-A).
-offline_hosts = ["empireearth.m1.sierra.com"]
+# Sierra's long-gone servers, looked up when the Multiplayer lobby opens
+# (netcode.md §7, lobby.md §8): the WON directory servers m1, m2 and m3
+# (WONLobby.cfg, zzWONVersion.cfg). gethostbyname fails at once instead of
+# waiting on DNS (kit runtime/winsock.cpp; P5-A), and the lobby shows
+# "Init Failed" as it does on any Windows PC today.
+offline_hosts = ["empireearth.m1.sierra.com", "empireearth.m2.sierra.com",
+                 "empireearth.m3.sierra.com"]
 
 [mods]
 builtin = "none"

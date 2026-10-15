@@ -1,0 +1,73 @@
+# Main menu -> Multiplayer -> Other Multiplayer (the LAN page) -> Host Game,
+# named mac-ref -> the room: a chat line, the Map Type list opened and closed
+# -> Dissolve Game -> OK -> Logout -> Back -> the main menu -> Exit Game.
+#
+# The host's LanGameAdvert for mac-ref goes out on UDP 8585 while the room is
+# open (run_lobby.py reads it from ee_boot --lan-pcap with tools/lan/eelan.py).
+# See lobby-open.script for the two pointers.
+# lobby: alone (the lobby binds UDP 8585 and TCP 33336)
+timeout 400000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+
+click 511 371                 # Multiplayer
+wait change within 30000
+wait 2000
+dump won
+
+pointer system
+click 618 644                 # Other Multiplayer
+wait change within 20000
+wait 2000
+dump lan                      # LAN / Direct Connect / Game / Options / Help; Games: 0 (0)
+
+click 774 662                 # Host Game
+wait change 0.01 within 20000
+wait 1000
+click 554 306                 # the Game Name field
+wait 500
+type mac-ref
+wait 500
+dump host-dialog
+
+click 448 480                 # Create Game
+wait change 0.05 within 20000
+wait 3000
+click 265 333                 # the chat line
+wait 1000
+dump room                     # Game: mac-ref, Entering mac-ref
+type hello mac
+key RETURN
+wait 2000
+dump room-chat                # the chat history's second line: <player>: hello mac
+
+click 198 503                 # the Map Type list
+wait change 0.005 within 10000
+wait 1000
+dump map-type-open            # the seven random map scripts
+key ESCAPE
+wait change 0.005 within 10000
+wait 1000
+
+click 660 265                 # Dissolve Game
+wait change 0.01 within 10000
+wait 1000
+dump dissolve                 # Are you sure you want to dissolve the game?
+click 452 440                 # OK
+wait change 0.05 within 20000
+wait 1500
+dump lan-again
+
+click 937 733                 # Logout
+wait change 0.05 within 20000
+wait 1500
+click 781 644                 # Back
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+wait change within 30000
+wait 1500
+dump main-menu-again
+
+click 511 680                 # Exit Game: the game ends itself
