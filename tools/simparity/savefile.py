@@ -210,12 +210,13 @@ def compare(a, b, context=16):
         print("header, without its strings: %d / %d bytes, %d differ, first at %d:" % (len(ra), len(rb), diff, d))
         print("   A %s" % ra[max(0, d - context):d + context].hex())
         print("   B %s" % rb[max(0, d - context):d + context].hex())
-    ida = [(sid, body) for _, sid, _, body in a.sections]
-    idb = [(sid, body) for _, sid, _, body in b.sections]
-    if [x for x, _ in ida] != [x for x, _ in idb]:
-        print("sections: %s / %s" % ([x for x, _ in ida], [x for x, _ in idb]))
+    ida = {sid: body for _, sid, _, body in a.sections}
+    idb = {sid: body for _, sid, _, body in b.sections}
+    if list(ida) != list(idb):
+        print("sections: %s / %s" % (list(ida), list(idb)))
         same = False
-    for (sid, x), (_, y) in zip(ida, idb):
+    for sid in [i for i in ida if i in idb]:
+        x, y = ida[sid], idb[sid]
         d = first_difference(x, y)
         if d is None:
             print("section %d: the same (%d bytes unpacked)" % (sid, len(x)))

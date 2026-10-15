@@ -193,19 +193,42 @@ def run_one(k, args, out):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# The tracer's autosave watch (--autosave-watch): the host's counter restarting when the save
+# is posted (0x547676), and the counter past the interval with nothing posted (a blocking flag).
+POSTED = re.compile(r"# autosave: counter restarted after PT (\d+)")
+UNPOSTED = re.compile(r"# autosave: due and not posted after PT (\d+)")
+# A posted autosave is handled by the simulation thread straight away and runs at the end of
+# the CT that carries it: a few CTs later (14 PTs each at 40 PT/s), or after a longer server
+# pause. A post closer than this to the stream's end may not have run yet.
+SAVE_LAG_PTS = 400
+
+
 def save_problems(stream, ptps, autosave_ms=None):
     """A save the game could not write skips its side effects on the simulation (the computer
     players' serializer reschedules their strategy review): every save must succeed, as on
-    Windows. K rows of the save-to-file function (0x540aca) say so; with the autosave
-    interval known, fewer saves than were due is a problem too."""
+    Windows. K rows of the save-to-file function (0x540aca) say so. With the autosave watch,
+    every autosave posted must also have run, and none may be due unposted; without it, and
+    with the interval known, fewer saves than were due is a problem."""
     saves = [c for c in stream.calls if c["fn"] == SAVE_TO_FILE]
     out = ["the save at PT %d failed (0x540aca returned %s)" % (c["pt"], c["eax"])
            for c in saves if c["eax"] != "00000000"]
+    posts = [int(m.group(1)) for m in map(POSTED.match, stream.header) if m]
+    out += ["an autosave was due after PT %s and not posted" % m.group(1)
+            for m in map(UNPOSTED.match, stream.header) if m]
+    last = max(stream.ticks) if stream.ticks else 0
+    if posts and saves:
+        done = sorted(c["pt"] for c in saves)
+        for pt in posts:
+            if not any(pt < s <= pt + SAVE_LAG_PTS for s in done) and pt + SAVE_LAG_PTS <= last:
+                out.append("the autosave posted after PT %d never ran" % pt)
     if stream.ticks and autosave_ms:
         # The host counts ms per PT (1000 / PT rate) towards the interval, from the
-        # game's start or from the load (the counter is not saved).
-        due = (max(stream.ticks) - min(stream.ticks) + 1) * 1000 // ptps // autosave_ms
-        if len(saves) < due - 1:
+        # game's start or from the load.
+        due = (last - min(stream.ticks) + 1) * 1000 // ptps // autosave_ms
+        if posts:
+            if len(posts) < due:
+                out.append("%d autosaves posted, %d due" % (len(posts), due))
+        elif len(saves) < due - 1:
             out.append("%d saves, %d autosaves due" % (len(saves), due))
     return out
 

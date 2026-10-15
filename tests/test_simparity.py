@@ -193,3 +193,23 @@ def test_save_sections_and_compare(tmp_path, capsys):
     assert savefile.compare(sa, sb)  # only the strings differ
     out = capsys.readouterr().out
     assert "header string 0" in out and "section 4: the same" in out
+
+
+def test_autosave_watch(tmp_path):
+    """With the tracer's autosave watch, every posted autosave must run, and none may be due unposted
+    (the Mac autosave that never ran: simparity.md §10)."""
+    watch = ["# autosave: counter restarted after PT %d (60000 -> 0): posted" % pt for pt in (2401, 4802)]
+    ok = compare.load(stream(tmp_path, "ok.csv", ticks(5000),
+                             tail="\n".join(watch + save_rows([2423, 4817])) + "\n"))
+    assert run.save_problems(ok, 40, autosave_ms=60000) == []
+    lost = compare.load(stream(tmp_path, "lost.csv", ticks(5300),
+                               tail="\n".join(watch + save_rows([2423])) + "\n"))
+    assert run.save_problems(lost, 40, autosave_ms=60000) == ["the autosave posted after PT 4802 never ran"]
+    late = compare.load(stream(tmp_path, "late.csv", ticks(4900),
+                               tail="\n".join(watch + save_rows([2423])) + "\n"))
+    assert run.save_problems(late, 40, autosave_ms=60000) == []  # 4802's may still be on its way
+    blocked = compare.load(stream(tmp_path, "blocked.csv", ticks(5000), tail="\n".join(
+        watch[:1] + ["# autosave: due and not posted after PT 4802: counter 60025 of 60000, flags 1 0"]
+        + save_rows([2423])) + "\n"))
+    assert run.save_problems(blocked, 40, autosave_ms=60000) == [
+        "an autosave was due after PT 4802 and not posted", "1 autosaves posted, 2 due"]
