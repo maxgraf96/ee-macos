@@ -1,4 +1,6 @@
-# Mac↔Windows LAN sessions (P5-E, P5-F; M4)
+# Mac↔Windows LAN sessions (P5-E, P5-F, P5-G; M4)
+
+**Session 6 (P5-G, §11), the Mac hosts a long game:** the headless Mac hosted `mac-soak` (two computer players, one per team) and legion joined from its LAN list. The game ran **56.9 minutes, 66,155 PTs (25.7 game minutes at full speed), through five autosaves**, each written on both machines. **The Mac host's own checksum equals legion's on all 9,362 ticks** (the simparity mod's `W` rows against Frida), and the two per-PT streams agree on all 66,150 PTs. Both players resigned, went through the statistics to the lobby and exited. **Direct Connect's "Invalid CDKey" is the original game's behaviour with every GOG copy** (§11.3): the key GOG installs never decrypts as a WON CD key, on Windows or on the Mac, and Direct Connect requires one. Over a VPN without broadcasts (Tailscale), GOG copies therefore cannot meet at all; use ZeroTier (§11.4).
 
 **Session 4 (P5-F, §9), the player app on Metal:** the app joined legion's game from its LAN list and played 10.8 minutes in sync (1,846 ticks equal) until an **out-of-sync at tick 1888, right after the 10-minute autosave, which failed on the Mac** (§9.3; the cause, a `CreateFile` with no access, is fixed in the kit, §9.2 item 4); the app also hosted a game legion joined from its list (§9.1, 4F). Two blockers for players were found and documented: macOS's **Local Network** permission, without which the app neither sees nor joins anyone (§9.2 item 1), and **Direct Connect**, which the original game refuses locally with "Invalid CDKey" (§9.2 item 2).
 
@@ -149,12 +151,12 @@ nice -n 10 env DYLD_INSERT_LIBRARIES=$SHIM timeout 4200 \
 7. **No firewall prompt** on legion (its rules from legion.md §7 cover the game) and none on the Mac (the macOS firewall is off).
 
 ## 8. What M4 still needs
-- **A game played to its end** (a victory, not a resignation) and longer games: tens of thousands of ticks rather than about 1,200. Session 4 reached tick 1,888; what stops longer games now is the next item.
-- **The autosave failed on the Mac** ("Error Creating File", headless and in the app) and the first simulation difference followed it, in LAN (§9.3) and in P4-C's single-player runs. Fixed in kit `feat/lan-app` (§9.2 item 4); a long LAN game with the fix, past two autosaves, is the test.
+- **A game played to its end** (a victory, not a resignation). ~~Longer games~~: §10 (4,152 ticks, legion hosting) and §11 (9,362 ticks and 66,150 PTs, the Mac hosting).
+- ~~**The autosave failed on the Mac**~~ ("Error Creating File") and the first simulation difference followed it (§9.3). Fixed in the kit (§9.2 item 4); in sync past two autosaves with legion hosting (§10) and past five with the Mac hosting (§11).
 - ~~The windowed app on Metal in a LAN game~~: §9 (with a person at the Mac still to do: the Local Network prompt, the civilization screen with a real mouse).
-- **The Mac host's own checksum stream** (P4-C), so that a hosted game has a per-tick record as well as a verdict.
+- ~~**The Mac host's own checksum stream**~~: §11, the simparity mod's `W` rows (`mac_session.py checksums` reads them).
 - **ZeroTier** (not installed on legion: a driver, so the user's decision) and **Mac↔Mac** (a second Mac).
-- ~~Direct Connect between machines, and the one-Mac CD-key question~~: §9.2 item 2 (refused locally by the original game).
+- ~~Direct Connect between machines, and the one-Mac CD-key question~~: §9.2 item 2, and the cause in §11.3 (the original game with GOG's key, on every platform).
 - **The Mac's lobby keep-alive** skipped one period in session B (§7 item 2): find the WONAPI timer that sends it.
 - **legion's pktmon** needs an elevated shell. The user can start `C:\EEPort\captures\pktmon-session3a.cmd` from one, but the Mac's capture already holds the session's traffic.
 
@@ -185,7 +187,7 @@ The shareable app (`tools/package_app.py`, first run from the user's Wine wrappe
    The same connect from this Mac's terminal succeeded, and Python broadcasts from legion (bound to 192.168.1.132, as the game's are) arrived at a listener here; `ee_boot` in session 3 ran under the terminal's permission. Started as a child of the terminal (`mac_session.py run --app --direct`, the window brought forward with `open -a`), the very same app saw legion's game, joined and played (4E). Fixes: `NSLocalNetworkUsageDescription` in the app's Info.plist (the prompt's text), INSTALL.md §5.1 step 2 (Allow; where to turn it on later). The prompts did appear: the user found two macOS networking prompts on this Mac in the morning and clicked Allow at about 09:42. **Ad-hoc-signed binaries may be asked again after every rebuild** (the permission follows the code signature): a developer's `EmpireEarth.app` or `ee_boot` started outside a terminal that has the access, and a player's app after an update.
 2. **Direct Connect refuses to join with "Invalid CDKey", locally, on both platforms** [measured + static].
    - The joining game shows the dialog **before it sends anything**: the app's net trace has no socket call for the add or the join (4D), and nothing from legion reached the Mac in 4C (though there the app could not have received it anyway, item 1).
-   - The check [static]: the Direct Connect join (EXE 0x7ce720) calls 0x746820, which returns the byte at `WONLobbyPrv + 0x90` (the lobby's private state, global 0x944254); when it is 0 the join shows `InvalidCDKeyTitle`/`InvalidCDKeyDetails` (string objects 0x94463c/0x944774) and stops. The LAN list's join does not look at it. What sets the byte is not found yet (not in `WONLobbyPrv`'s construction and init, 0x74db80/0x750d80, to depth 3).
+   - The check [static]: the Direct Connect join (EXE 0x7ce720) calls 0x746820, which returns the byte at `WONLobbyPrv + 0x90` (the lobby's private state, global 0x944254); when it is 0 the join shows `InvalidCDKeyTitle`/`InvalidCDKeyDetails` (string objects 0x94463c/0x944774) and stops. The LAN list's join does not look at it. *Found in session 6 (§11.3):* the byte is the "valid" flag of the lobby's `WONAPI::CDKey` (`WONLobbyPrv + 0x78`). GOG's key never decrypts in either of the two ways the game tries, so the flag stays 0 on every machine.
    - **Keys** (compared by hash, never printed): the app's imported key, `seed_user.py`'s and legion's (`HKLM\SOFTWARE\WOW6432Node\Sierra\CDKeys`) are the same 16 bytes. The kit hands the game the 16 bytes (REG_BINARY stored as hex in `registry.json`, decoded by `runtime/misc.cpp`). The developer registry that `ee_boot` read in session 3 (P4-C found that `--user` was ignored) has **no CD key at all**. So: list joins work with no key (session 3) and with a key equal to the host's (4E); Direct Connect fails with no key (lobby.md §13.4, one Mac) and with the GOG key (4D), before contacting the host.
    - **The controlled pair** [measured]: the app with the key removed from its `registry.json` (session `session4-g-dc-nokey`) gets the same dialog and makes no connect either; with the key it is 4D. And in 4F, legion's Direct Connect join (08:54:20) sent nothing to the Mac, which by then received everything else (its queries, then its list join at 08:54:42). So the refusal is local on both platforms, with and without a key, and duplicate keys are not what stops it.
    - **No key travels on the list's path** [measured]: the joiner's `LobbyJoin` (27 bytes), `VersionCheck` (32) and `NEMClientConnectionRequest` (41) are the same size with the same fields keyless (session 3 B) and keyed (4E); none has room for a key. So a keyless game neither skips a check nor sends an empty key there: there is nothing to send.
@@ -252,3 +254,98 @@ The re-test of 4E's out-of-sync (§9.3) after the kit's `CreateFile` fix (kit `e
 **So the out-of-sync of 4E is gone**: the same game, past two autosaves, stays in sync, where 4E went out of sync 16 s after its first.
 
 Evidence (not in git): `analysis/lan-sessions/session5-g-mac-joins/` (`lan.pcap`, `ee_boot.log`, `mac-stream.csv`, `live.script`, `frames/`, `legion/{netcode_hooks.json,stream.csv}`); legion `C:\EEPort\captures\lan\session5\g\` (screenshots, `g-session.mkv`, `frida\`, the save listings), mailbox 0048.
+
+## 11. Session 6: the Mac hosts a long game; Direct Connect's cause (P5-G, 2026-10-15 13:39–14:46)
+
+The first long game **the Mac hosts**, with the autosave fixed (kit `ee` 85caa75, ee-macos `main` 506d920), and the cause of Direct Connect's "Invalid CDKey". Labels as above; the evidence is in §11.6.
+
+### 11.1 Result
+
+| | |
+|---|---|
+| **Set-up** | **The Mac hosts `mac-soak`, headless** (`ee_boot` under `mac_session.py run host --width 800 --height 600`, software renderer). Settings: Random Map, Small, Continental, Prehistoric→Nano, Standard - Low, difficulty Easy. Teams: the Mac and a computer on team 1; legion and a computer on team 2. legion joins from its LAN list and sets its own team. The simparity tracer runs passive on both sides (`RECOMP_EE_CHECKSUM_TRACE`, `P` rows every 10 PTs, `K` rows for the computer players' schedule, review and serializer and for the save; no seed, no lockstep). On legion, Frida runs `netcode_hooks` and `checksum_trace` with the same rows. The Mac also records `RECOMP_NET_PCAP` and `--lan-pcap`. Nobody plays: the civilization screens are OK'd |
+| **Game** | 13:45:25–14:42:19: **56.9 minutes, 66,155 PTs = 25.7 game minutes at full speed**, 9,383 CTs with PTs. The game ran at **19.4 PT/s on average**, 45 % of full speed (14–27 PT/s per minute after the first five), with 315 `EEMLagStatus`. The headless software-rendering host is the likely laggard [inferred] |
+| **Autosaves** | **Five, each written on both machines** with no dialog, about 10.7 minutes apart: PT **16,139, 29,209, 40,225, 51,958, 63,095** (13:56:02 to 14:38:59). Each time, both computer players (slots 3 and 4) were serialized at the same PT on both machines. The Mac's files are 103–107 KB (`saves.txt`) |
+| **Checksums** | **The Mac host's own world checksum (`W` rows) equals legion's (Frida `world`) on all 9,362 ticks** (40–9425). legion's `0x32` on the wire equals both on all 9,361 it sent. No dump-the-world flag, no `NEMRemovePlayer(isOOS)`, no OOS log on either side |
+| **Per PT** | `compare.py` on the two streams: **all 66,150 PTs agree** (world checksum, second checksum, world RNG, executed inputs, objects). Also equal: 6,615 `P` rows (every player's resources) and all 659 `K` rows (the five saves, every review and reschedule) |
+| **End** | 14:40:50 the Mac resigns: "Do you wish to resign this game and become an observer?" Yes, then "You have been Defeated!". legion sees "--GAME-- Player 'Unknown144' has been defeated!" and "…has resigned from the game". 14:42:19 legion resigns and sees "--GAME-- Player 'Byzantine Rome - (Computer)' is victorious!" (twice) and "You have been Defeated!". Both: F10 → Quit this Game → "Do you wish to quit this game and view the game statistics?" Yes → Post Game Statistics (the same four rows on both) → Exit Game Summary → the LAN page → Logout → Back → **Exit Game**. The Mac sees "--GAME-- Player 'Unknown1634' has dropped out of the game!" when legion leaves (`NEMRemovePlayer`, not out of sync, exiting). The Mac's `ExitProcess(0)` came after 3,665 s with the script complete (116 steps) and no strict-mode stop; legion exited normally, no WM_CLOSE |
+
+**So a Mac host stays in sync with a Windows client through five autosaves and 25.7 game minutes**, tick for tick and PT for PT, with two computer players. With §10 (legion hosting, two autosaves), the out-of-sync of 4E is closed in both roles.
+
+### 11.2 The procedure
+
+- **legion:** mailbox 0060 (part A: the Direct Connect trace, §11.3; part B: this game) and its addendum, which moved the end from about 25 wall minutes to 25 game minutes (64,000 PTs), because the game ran at half speed. Progress lines in `to-mac\0060-mac-host-soak.progress.md`.
+- **The Mac:** a rehearsal (`session6-rehearsal`) found the Team list's rows: the slot's Team box at x = 791, and in the open list "-", 1, 2, 3, 4 at +22, +39, +55, +71, +87 px below it, so slot 4's team 2 is (775, 582). Then `mac_session.py run host`. The room's set-up, Start Game, the civilization OK (400, 520 at 800×600), Resign and Quit were appended live; F10 → Resign (290, 204), Quit this Game (400, 74), Yes (350, 373) at 800×600. A watch script reported legion's progress lines, the `K` rows of the saves and the running `checksums` verdict every 30 s.
+
+### 11.3 Direct Connect's "Invalid CDKey": the original game's behaviour with GOG copies
+
+**Result** [static + measured on both platforms]: Direct Connect needs a valid WON CD key, and the key that GOG's installer writes is not one, on any machine. So a GOG copy refuses every Direct Connect join, Windows to Windows included. This holds for every GOG copy if GOG's installer writes the same 16 bytes for every account [inferred: its offline installers are not personalised; the installs seen here, from one account, agree]. Our side plays no part:
+- the registry value and its 16 bytes are Windows' own;
+- the key's format plays no role, because the game never gets as far as reading it;
+- wininet does not enter this path (its absence answers "connected", as Windows does; lobby.md §8);
+- both platforms fail at the same step.
+
+**The chain** (EXE addresses; `WONAPI::CDKey` by its RTTI, vtable 0x836784):
+
+1. **The lobby loads the key when it starts** (0x67dd3f, queued by 0x5d1653 → 0x67bece → 0x74d410 → `WONLobbyPrv` 0x7512d0), for the Internet page and the LAN page alike. Both machines' `K` rows show this load once, before the join. The key object is the `CDKey` at `WONLobbyPrv + 0x78` (constructed by 0x68ab60). Its byte at +0x18, "valid", is `WONLobbyPrv + 0x90`, the byte that 0x746820 returns.
+2. Inside 0x7512d0 the load runs only when `WONLobby.cfg` has **`CDKeyCheck: true`**, which the GOG file has. It sets the product to the config's **`ProductName: EmpireEarth`** (0x68abe0, which also clears "valid"), then calls `LoadFromRegistry(HKLM, "SOFTWARE\Sierra\CDKeys")` (0x68bd70). That reads the value named after the product, `EmpireEarth` (16 bytes), and calls 0x68b9c0.
+3. **0x68b9c0 decrypts the 16 bytes, twice.**
+   - **First attempt, machine-bound** (vtable slot 1, 0x687ae0, returns true): the Blowfish key (0x68b5b0) is built from **the volume serial number of the drive that holds the Windows directory** (0x68b330: `GetWindowsDirectoryA`, `_splitpath`, `GetVolumeInformationA`) and CRC values of the product name.
+   - **Second attempt, unbound:** the same key without the serial.
+   - The decryption (0x7c2390, Blowfish CBC) reads the plaintext's first dword as its length. When that length does not fit, it returns nothing.
+   - Only a decryption that yields a length goes on to the key's own check, 0x68ad30. That check sets "valid" when a check byte computed from a CRC over the product name and key bytes 0–2 and 4–7 equals key byte 3.
+4. **The joins.**
+   - Direct Connect's join (0x7ce720) asks 0x746820 **unconditionally**. With "valid" 0 it shows `InvalidCDKeyTitle`/`InvalidCDKeyDetails` and returns before any socket call.
+   - One other join, 0x7c6c50, asks only when `CDKeyCheck` is on (0x746800 reads the option). It is not on the LAN list's path, which joins with an invalid key in every session.
+   - Setting `CDKeyCheck: false` would not help Direct Connect: it skips the load, and "valid" stays 0.
+5. **The game's own way to store a key:** the Internet login screen (0x4105a0) asks "Please enter your Empire Earth CD key that is printed on your Empire Earth CD case." when the load fails, and stores what is typed (0x4107aa: `CDKey::Init(string)`, then `SaveToRegistry`). That screen comes only after the WON servers answer. They are gone ("Init Failed: Unable to locate master servers"), so a GOG player can never reach it.
+
+**Measured**: the same `K` rows on both machines (simparity mod on the Mac, `RECOMP_EE_SIMPARITY_CALLS`; Frida `checksum_trace` `calls=` on legion), from Multiplayer to the Direct Connect join:
+
+| Call | Mac (`ee_boot`, the GOG key) | legion (Windows 11, GOG install) |
+|---|---|---|
+| 0x68abe0 product | "EmpireEarth" (11) | the same |
+| 0x68b330 machine key | 0x1a2b3c4d (the kit's fixed serial) | legion's volume serial |
+| 0x7c2390 decrypt | (not logged) | called twice (both modes), 16 bytes |
+| 0x68b9c0 decrypt-and-check | **0**, 16 bytes | **0**, 16 bytes |
+| **0x68ad30 the key's check** | **never called** | **never called** |
+| 0x68bd70 `LoadFromRegistry` | 0 | 0 |
+| 0x746820 "valid" | 0 → "Invalid CDKey" | 0 → "Invalid CDKey" ("Your CDKey is invalid, you may need to reinstall with a valid CDKey.") |
+
+So **the GOG blob does not decrypt as a WON key in either mode**, on Windows or on the Mac. The unbound mode does not depend on the machine, so it fails on every machine. The bound mode could succeed only on a machine whose volume serial is the one the blob was encrypted with, if it was ever encrypted that way. Nothing here suggests GOG meant Direct Connect to work. The game's list joins never look at the key, which is why LAN play works.
+
+**What could make Direct Connect work** (none done here; each is the user's call):
+- **A retail CD key, stored the way the game stores a typed one.** Only with the CD case's key, and only through a tool, since the game's own prompt is unreachable. On the Mac a key stored machine-bound would work on every Mac, because the kit's volume serial is fixed. A Windows player would need the same tool.
+- **Skipping the joining side's check on the Mac.** A Mac could then try any host by address. A list join carries no key (§9.2 item 2), but whether a host's room accepts a Direct Connect join is untested. This removes a CD-key check from the original program, so it is not done without a decision.
+
+### 11.4 Over a VPN without broadcast (Tailscale)
+
+- **How a game gets into the list** [measured, this session's capture]:
+  - A joiner's LAN page broadcasts `LanQuery` to 255.255.255.255:8585.
+  - Every host answers with its `LanGameAdvert` **by unicast** to the querier's address, port 8585.
+  - A host also broadcasts its advert when the room's options change.
+- **Tailscale carries no broadcasts.** So no query reaches a host, the list stays empty, and Direct Connect is refused before it sends anything (§11.3). **Tailscale alone cannot carry an Empire Earth game between GOG copies**, Mac or Windows, in either direction.
+- **What players can do:**
+  - **ZeroTier**, which is free for macOS and Windows and carries broadcasts. Everyone joins one ZeroTier network; the game list then works as on a LAN. The kit sends the game's broadcasts on every interface, ZeroTier's included (P5-A). A ZeroTier game has not been played here: ZeroTier is not installed on legion, because it needs a driver and that is the user's decision.
+  - Any other VPN that passes LAN broadcasts. On Windows, Tailscale and ZeroTier can be installed side by side.
+- **A possible port-side addition** (not done; the user's call): a kit `[network]` setting that names peer addresses, for example Tailscale IPs, to which the game's UDP 8585 broadcasts are also sent by unicast.
+  - The hosts' answers are unicast already, so a Mac could then list a host over Tailscale: a Mac joining a Windows or Mac host, or two Macs.
+  - A Windows joiner would still need broadcasts, so in a mixed game over Tailscale the Windows player would host.
+
+### 11.5 Tools (ee-macos `phase5/lan-soak`)
+
+- `mac_session.py run --width W --height H`: the game's resolution for `ee_boot`. The default stays 1920×1080; 800×600 draws a quarter of the pixels.
+- `run` writes `saves.txt`: the saved games the run wrote, with name, size and time. The files themselves are deleted with the user directory, which holds the CD key.
+- `mac_session.py checksums` also reads this Mac's own values: the `W` rows of `DIR/mac-stream.csv`, or of `--stream FILE`, from `RECOMP_EE_CHECKSUM_TRACE`. A Mac host's checksums, which never go on the wire, are compared tick by tick with the wire and with Frida.
+- The `K` rows of the CD-key path, on both sides:
+  - Mac: `RECOMP_EE_SIMPARITY_CALLS=7512d0/2,68abe0/1,68bd70/2,68b9c0/2,68ad30/1,68b330/1,746820/0,7ce720/0`.
+  - legion: `checksum_trace` with `calls=` and the same list plus `7c2390/3`.
+  - Either one can tell whether a key is accepted, without printing it.
+
+### 11.6 Evidence (not in git)
+
+- **Mac:**
+  - `analysis/lan-sessions/session6-b-mac-hosts/`: `lan.pcap`, `net.pcap`, `ee_boot.log`, `mac-stream.csv`, `live.script`, `saves.txt`, `frames/`, and `legion/` (`netcode_hooks.json`, `stream.csv`, screenshots).
+  - `session6-dc-probe-mac-key/`: the Mac's Direct Connect probe: `k.csv`, `trace.txt`, `frames/`, and `legion/` (legion's part-A stream and screenshots).
+  - `session6-rehearsal/`.
+- **legion:** `C:\EEPort\captures\lan\session6\{a,b}\` (screenshots, `b-session.mkv`, `frida\`, the save and OOS listings, the registry before and after), and the mailbox 0060 progress file and reply.

@@ -3,10 +3,10 @@
 app on Metal, against another machine's (docs/reference/lansession.md).
 
     .venv/bin/python -I tools/lan/mac_session.py run host|join [--out DIR] [--minutes M] [--name G]
-        [--app EmpireEarth.app --home DIR]
+        [--width W --height H] [--app EmpireEarth.app --home DIR]
     .venv/bin/python -I tools/lan/mac_session.py say DIR 'click 660 206' 'dump start'
     .venv/bin/python -I tools/lan/mac_session.py status DIR
-    .venv/bin/python -I tools/lan/mac_session.py checksums DIR [--frida netcode_hooks.json]
+    .venv/bin/python -I tools/lan/mac_session.py checksums DIR [--frida netcode_hooks.json] [--stream CSV]
     .venv/bin/python -I tools/lan/mac_session.py report DIR [--lag]
 
 `run` seeds a fresh user directory, holds tools/game_ports.py's lock (one game
@@ -21,7 +21,10 @@ server on this Mac at a time) and runs build/recomp/ee_boot with:
   - its frames in DIR/frames, its output in DIR/ee_boot.log.
 
 At the end it copies the game's own logs (OOS*.log, *Error*.log) out of the
-user directory and deletes the directory (it holds the player's CD key).
+user directory, lists its saved games in DIR/saves.txt (name, size, time) and
+deletes the directory (it holds the player's CD key). --width/--height set
+the game's resolution (default 1920x1080; 800x600 draws a quarter of the
+pixels in the software renderer).
 
 With --app, `run` starts the player's app instead (tools/package_app.py; its
 first run done in --home, the app's EE_HOME) through Launch Services
@@ -45,11 +48,13 @@ roster, chat, ready, StartGame), the game's ticks, checksum responses and any
 removal for out-of-sync.
 
 `checksums` lines up, tick by tick, the world checksums of the session: the
-0x32 responses on the wire (each client's own value, by sender) and, with
---frida, the Windows peer's windows/frida/netcode_hooks.js snapshot (`world`:
-the value that machine computed; `logged`: a host's tally, by slot). It
-prints how many ticks each pair shares, how many agree, and the first that
-does not.
+0x32 responses on the wire (each client's own value, by sender), this Mac's
+own values from the W rows of its simparity stream (DIR/mac-stream.csv, or
+--stream; RECOMP_EE_CHECKSUM_TRACE, so a Mac host's values are on record
+too) and, with --frida, the Windows peer's windows/frida/netcode_hooks.js
+snapshot (`world`: the value that machine computed; `logged`: a host's
+tally, by slot). It prints how many ticks each pair shares, how many agree,
+and the first that does not.
 
 DIR defaults to analysis/lan-sessions/<UTC time>-<host|join> (ignored: the
 evidence holds game state). Run the binary under whatever wrapper this machine
@@ -94,7 +99,7 @@ def cmd_run(args):
     user = Path(tempfile.mkdtemp(prefix="ee-lan-session-"))
     seconds = int(args.minutes * 60)
     try:
-        seed_user.main(["--user", str(user)])
+        seed_user.main(["--user", str(user), "--width", str(args.width), "--height", str(args.height)])
         env = dict(os.environ, RECOMP_NET_TRACE="1")
         env.setdefault("RECOMP_STRICT", "1")
         command = [str(ROOT / "build/recomp/ee_boot"), "--user", str(user), "--seconds", str(seconds),
@@ -112,9 +117,23 @@ def cmd_run(args):
                 shutil.copy2(path, out / path.name)
                 kept.append(path.name)
         print("game logs kept: %s" % (", ".join(kept) or "none"), flush=True)
+        list_saves(user, out)
         return result.returncode
     finally:
         shutil.rmtree(user, ignore_errors=True)
+
+
+def list_saves(user, out):
+    """The saved games the run wrote (names, sizes, times) in DIR/saves.txt:
+    the autosaves are evidence that the host's save request ran here. The
+    files themselves are game state and go with the user directory."""
+    saves = sorted(p for p in user.rglob("*.ees") if p.is_file())
+    with open(out / "saves.txt", "w") as f:
+        for p in saves:
+            st = p.stat()
+            f.write("%s\t%d\t%s\n" % (p.relative_to(user), st.st_size,
+                                       datetime.datetime.fromtimestamp(st.st_mtime).strftime("%H:%M:%S")))
+    print("saved games: %d (saves.txt)" % len(saves), flush=True)
 
 
 def host_pid(app):
@@ -319,6 +338,20 @@ def wire_checksums(pcap):
     return out
 
 
+def stream_checksums(path):
+    """{tick: checksum} from the W rows of a simparity stream
+    (RECOMP_EE_CHECKSUM_TRACE, mods/simparity): the game's own network
+    checksum (flags 1) at each CT, which a host never sends."""
+    out = {}
+    with open(path) as f:
+        for line in f:
+            if line.startswith("W,"):
+                _, ct, _pt, dump, flags, value = line.strip().split(",")[:6]
+                if flags == "1" and dump == "0":
+                    out[int(ct)] = int(value, 16)
+    return out
+
+
 def cmd_checksums(args):
     streams = {}
     for sender, ticks in wire_checksums(Path(args.dir) / "lan.pcap").items():
@@ -326,6 +359,11 @@ def cmd_checksums(args):
             streams["wire 0x32 from %s" % sender] = ticks
         else:
             streams["wire 0x32 from this Mac"] = ticks
+    stream = Path(args.stream) if args.stream else Path(args.dir) / "mac-stream.csv"
+    if stream.exists():
+        own = stream_checksums(stream)
+        if own:
+            streams["stream W rows (this Mac's own)"] = own
     if args.frida:
         snap = json.loads(Path(args.frida).read_text())
         world = {}
@@ -473,6 +511,8 @@ def main():
     r.add_argument("--out", default=None)
     r.add_argument("--minutes", type=float, default=60)
     r.add_argument("--name", default="mac-ref", help="the hosted game's name (host)")
+    r.add_argument("--width", type=int, default=1920, help="the game's resolution (ee_boot)")
+    r.add_argument("--height", type=int, default=1080)
     r.add_argument("--app", default=None, help="the player's EmpireEarth.app instead of ee_boot")
     r.add_argument("--home", default=None, help="with --app: its EE_HOME, first run done")
     r.add_argument("--direct", action="store_true",
@@ -490,6 +530,8 @@ def main():
     c = sub.add_parser("checksums")
     c.add_argument("dir")
     c.add_argument("--frida", default=None, help="a netcode_hooks.json snapshot")
+    c.add_argument("--stream", default=None,
+                   help="this Mac's simparity stream (default DIR/mac-stream.csv): its W rows")
     rp = sub.add_parser("report")
     rp.add_argument("dir")
     rp.add_argument("--lag", action="store_true", help="list every EEMLagStatus too")
