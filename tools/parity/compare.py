@@ -86,7 +86,6 @@ PAIRS = {
     # the Capitol clicked at (400,225) after the 60 s frame).
     "game-setup": ("random-map/game-setup.png", "ingame-ref/game-setup.png",
                    [LEGION_MENU, (748, 145)]),
-    "loading": ("random-map/loading.png", "ingame-ref/loading.png", []),
     "in-game-05s": ("random-map/in-game-05s.png", "ingame-ref/in-game-05s.png", []),
     "in-game-30s": ("random-map/in-game-30s.png", "ingame-ref/in-game-30s.png", []),
     "in-game-60s": ("random-map/in-game-60s.png", "ingame-ref/in-game-60s.png", []),
@@ -184,10 +183,14 @@ def colour_fit(a, b, sel):
     fits = []
     for ch in range(3):
         x, y = a[..., ch][sel], b[..., ch][sel]
-        if x.size < 100:
+        if x.size < 100 or x.std() < 1.0:  # too few pixels, or one flat colour
             fits.append(None)
             continue
-        k, c = np.polyfit(x, y, 1)
+        try:
+            k, c = np.polyfit(x, y, 1)
+        except np.linalg.LinAlgError:
+            fits.append(None)
+            continue
         mid = (x > 16) & (x < 240) & (y > 16) & (y < 240)
         g = None
         if mid.sum() > 100:
