@@ -118,3 +118,7 @@ The first should say `"quarantined":0,"translocated":false`, the second `0`.
 - **The zip** instead of the DMG: double-click it in Downloads; open the app from Downloads; expect the same alert.
 
 Afterwards keep the app, or remove everything as in [INSTALL.md](../INSTALL.md) §7. The data folder holds a copy of the game and the CD key.
+
+## 9. Result, 2026-10-15 (release 0.7)
+The user took release 0.7 (`EmpireEarth-0.7.dmg`) and GOG's offline installer to their other Mac, which has never had Xcode, Homebrew or this repository. Their report: **it worked**. The app installed and imported from the installer, and a **LAN game played for over 30 minutes "really well"**. The details of §7 (prompt counts, build time on that Mac's CPU) were not reported; ask for `launcher.log` if they matter.
+
