@@ -21,6 +21,8 @@
 
 namespace {
 
+bool g_registry_defaulted = false;
+
 __attribute__((constructor)) void ee_standins_init() {
     if (!getenv("RECOMP_PROFILE_DIR")) {
         char dir[4096];
@@ -29,9 +31,18 @@ __attribute__((constructor)) void ee_standins_init() {
             setenv("RECOMP_PROFILE_DIR", dir, 1);
         }
     }
-    if (!getenv("RECOMP_REGISTRY") && getenv("RECOMP_PROFILE_DIR"))
+    if (!getenv("RECOMP_REGISTRY") && getenv("RECOMP_PROFILE_DIR")) {
         setenv("RECOMP_REGISTRY",
                (std::string(getenv("RECOMP_PROFILE_DIR")) + "/registry.json").c_str(), 1);
+        g_registry_defaulted = true;
+    }
 }
 
 } // namespace
+
+// Whether RECOMP_REGISTRY is this file's default rather than the caller's: a
+// host with a user directory of its own (ee_boot --user) moves it there, since
+// this constructor ran before the host's main() read its arguments.
+extern "C" bool ee_standins_registry_defaulted() {
+    return g_registry_defaulted;
+}

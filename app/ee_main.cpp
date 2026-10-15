@@ -70,6 +70,9 @@
 #include <string>
 #include <vector>
 
+// app/ee_standins.cpp: whether RECOMP_REGISTRY is its default (main's --user moves it).
+extern "C" bool ee_standins_registry_defaulted();
+
 namespace {
 
 double g_seconds = 120.0;
@@ -651,7 +654,11 @@ int main(int argc, char **argv) {
     // overlay's writable tier is RECOMP_PROFILE_DIR, the registry RECOMP_REGISTRY.
     os_mkdir(user.c_str());
     setenv("RECOMP_PROFILE_DIR", user.c_str(), 1);
-    if (!getenv("RECOMP_REGISTRY"))
+    // ee_standins.cpp's constructor ran first and defaulted RECOMP_REGISTRY to
+    // the default user directory's; only a caller's own RECOMP_REGISTRY wins
+    // over the user directory (without this, --user DIR read and rewrote
+    // ~/Library/Application Support/EmpireEarth/registry.json).
+    if (!getenv("RECOMP_REGISTRY") || ee_standins_registry_defaulted())
         setenv("RECOMP_REGISTRY", (user + "/registry.json").c_str(), 1);
     if (!game.empty())
         setenv("RECOMP_EXE", (game + "/Empire Earth.exe").c_str(), 1);
