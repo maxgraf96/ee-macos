@@ -12,10 +12,11 @@
                                                    # the game's frame), headless (tests/lobby/, docs/reference/lobby.md)
     .venv/bin/python tools/test.py --simparity [OPTIONS]  # the single-player checksum stream, run
                                                    # twice on the Mac; both must agree, every
-                                                   # save must succeed (default: 3 minutes, no civ
-                                                   # timer, an autosave a minute, against legion's
-                                                   # stream if present; tools/simparity/,
-                                                   # docs/reference/simparity.md)
+                                                   # autosave must run and succeed, and the first
+                                                   # save, loaded, must match Windows' load of it
+                                                   # (default: 3 minutes, no civ timer, an autosave
+                                                   # a minute, against legion's streams if present;
+                                                   # tools/simparity/, docs/reference/simparity.md)
     .venv/bin/python tools/test.py --m1-replay [PACKS...]  # the Mac M1 replay (tests/m1/replay/):
                                                    # self-tests, or replay packs with both builds
     .venv/bin/python tools/test.py --native ...    # any other option: kit/tools/test.py's, for this game
@@ -57,9 +58,15 @@ def main(argv):
         # games must agree with each other and with legion's run of the same
         # scenario when its stream is here (analysis/ is not in git), up to a save
         # that landed in different CTs (thread timing, §9.3).
+        # Every autosave posted must run (the counter watch, simparity.md §10.5), and the
+        # first run's first save, loaded, must give the stream Windows got from loading the
+        # Mac's save of the same state (legion 0066), when that stream is here (§10.2).
         argv = argv or ["--no-civ-timer", "--minutes", "3", "--autosave-ms", "60000",
                         "--players", "10", "--calls", "43dcf4/1,42f912/1,43ded9/0,540aca/0,42f783/2",
-                        "--against", str(kitpath.ROOT / "analysis/simparity/win/win-as-1/stream.csv")]
+                        "--autosave-watch",
+                        "--against", str(kitpath.ROOT / "analysis/simparity/win/win-as-1/stream.csv"),
+                        "--then-load", "2", "--load-against",
+                        str(kitpath.ROOT / "analysis/simparity/win/win-load-mac-2423/stream.csv")]
         return subprocess.call([sys.executable, str(kitpath.ROOT / "tools/simparity/run.py")] + argv)
     if "--eh" in argv:
         argv = [a for a in argv if a != "--eh"]

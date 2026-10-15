@@ -7,7 +7,8 @@
         [--players N] [--calls F,..] [--memfn F,L;..] [--ai-sched] [--autosave-watch]
         [--trace-match TEXT]
         [--lockstep] [--no-civ-timer] [--against STREAM] [--out DIR]
-        [--load SAVE] [--keep-saves] [--no-build] [--kit DIR]
+        [--load SAVE] [--keep-saves] [--then-load MINUTES [--load-against STREAM]]
+        [--no-build] [--kit DIR]
         [--insert-dylib PATH]
 
 Each run boots build/recomp/ee_boot headless with a fresh user directory,
@@ -24,6 +25,9 @@ compared (compare.py) and the exit status says whether they agree.
 Single Player -> Play Saved Game -> Load, with SAVE alone in the user
 directory's Data\\Saved Games); --minutes then counts from the load.
 --keep-saves copies the saves the game wrote to OUT/mac-<k>-saves/.
+--then-load M loads run 1's first autosave afterwards for M minutes and
+compares that stream with --load-against (a Windows load of a save of the
+same state).
 
 Every run holds tools/game_ports.py's lock: a random map opens the game's
 server on fixed ports. --insert-dylib (or $SIMPARITY_INSERT_DYLIB) is put in
@@ -296,12 +300,20 @@ def main():
                              "--minutes counts from the load")
     parser.add_argument("--keep-saves", action="store_true",
                         help="copy the saves the game wrote to OUT/mac-<k>-saves/")
+    parser.add_argument("--then-load", type=float, default=None, metavar="MINUTES",
+                        help="afterwards, load run 1's first autosave for MINUTES in one more game "
+                             "(implies --keep-saves) and compare it with --load-against")
+    parser.add_argument("--load-against", type=Path, action="append", default=[], metavar="STREAM",
+                        help="with --then-load: a stream of the same save state loaded elsewhere "
+                             "(skipped when missing, or when it starts at another PT)")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--kit", default=None)
     parser.add_argument("--insert-dylib", default=os.environ.get("SIMPARITY_INSERT_DYLIB"))
     args = parser.parse_args()
     if args.load and not args.load.is_file():
         parser.error("--load: no such file: %s" % args.load)
+    if args.then_load:
+        args.keep_saves = True
     if not args.no_build:
         command = [sys.executable, str(ROOT / "tools/build.py"), "--cmake-target", "ee_boot"]
         command += ["--kit", args.kit] if args.kit else []
@@ -321,23 +333,63 @@ def main():
         if not ref.is_file():
             print("%s: not here; skipped" % ref)
     for x, y in pairs:
-        a, b = compare.load(x), compare.load(y)
-        report = compare.compare(a, b)
-        timing = save_timing(a, b)
-        if timing and not report["agree"] and min(timing) >= report.get("first_pt", 0):
-            timing = None  # the streams differ before the saves did
-        hidden = []
-        for key in ("players", "calls"):
-            first = (report.get(key) or {}).get("first_difference")
-            if first and not (timing and first["pt"] >= min(timing)):
-                hidden.append("%s differ at PT %d" % (key, first["pt"]))
-        note = "; " + ", ".join(hidden) if hidden else ""
-        if timing:
-            note += ("; a save landed at PT %d / %d (thread timing, simparity.md §9.3), %s"
-                     % (timing + ("nothing differs after it" if report["agree"] else "the rest follows",)))
-        print("%s vs %s: %s%s" % (x.name, y, report["summary"], note), flush=True)
-        same &= (report["agree"] or bool(timing)) and not hidden
+        same &= report_pair(x, y)
+    if args.then_load:
+        same &= then_load(args, traces[0])
     return 0 if same else 1
+
+
+def report_pair(x, y):
+    """Compare two streams and print the verdict; True when they agree, up to a save that
+    landed in a different CT (single-player timing, simparity.md §9.3)."""
+    a, b = compare.load(x), compare.load(y)
+    report = compare.compare(a, b)
+    timing = save_timing(a, b)
+    if timing and not report["agree"] and min(timing) >= report.get("first_pt", 0):
+        timing = None  # the streams differ before the saves did
+    hidden = []
+    for key in ("players", "calls"):
+        first = (report.get(key) or {}).get("first_difference")
+        if first and not (timing and first["pt"] >= min(timing)):
+            hidden.append("%s differ at PT %d" % (key, first["pt"]))
+    note = "; " + ", ".join(hidden) if hidden else ""
+    if timing:
+        note += ("; a save landed at PT %d / %d (thread timing, simparity.md §9.3), %s"
+                 % (timing + ("nothing differs after it" if report["agree"] else "the rest follows",)))
+    print("%s vs %s: %s%s" % (Path(x).name, y, report["summary"], note), flush=True)
+    return (report["agree"] or bool(timing)) and not hidden
+
+
+def then_load(args, first_trace):
+    """Load the first run's first autosave in one more game and compare its stream with
+    --load-against (e.g. legion's load of the Mac's save of the same state): a save written
+    on the Mac must load to Windows' stream (simparity.md §10.2). A reference that starts at
+    another PT holds another state (the save landed in another CT) and is skipped."""
+    saves = [c["pt"] for c in compare.load(first_trace).calls if c["fn"] == SAVE_TO_FILE]
+    files = sorted((args.out / "mac-1-saves").glob("*.ees"), key=lambda f: f.stat().st_mtime)
+    if not saves or not files:
+        print("then-load: run 1 kept no save (--keep-saves and an autosave are needed)")
+        return False
+    load_args = argparse.Namespace(**vars(args))
+    load_args.load, load_args.minutes = files[0], args.then_load
+    load_args.autosave_ms = None  # the registry's 10 minutes: no autosave in the loaded game
+    k = args.runs + 1
+    print("then-load: run %d loads %s (saved at PT %d)" % (k, files[0].name, saves[0]), flush=True)
+    trace, problems = run_one(k, load_args, args.out)
+    if problems:
+        return False
+    ok = True
+    start = min(compare.load(trace).ticks)
+    for ref in args.load_against:
+        if not ref.is_file():
+            print("%s: not here; skipped" % ref)
+            continue
+        ref_start = min(compare.load(ref).ticks)
+        if ref_start != start:
+            print("%s starts at PT %d, this load at %d: another state; skipped" % (ref, ref_start, start))
+            continue
+        ok &= report_pair(trace, ref)
+    return ok
 
 
 if __name__ == "__main__":

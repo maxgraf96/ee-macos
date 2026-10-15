@@ -1,11 +1,12 @@
 # Single-player simulation parity: the checksum-stream oracle (P4-C)
 
-Status: Phase 4, workstreams P4-C (the oracle) and P4-D (the divergence), 2026-10-15. Static RE done; the Mac tracer, its Windows twin, the scenario and the comparison tool work; Mac↔Mac, Windows↔Windows and Mac↔Windows results in §7. **The first simulation difference (PT 24301) was the autosave**: on the Mac the save failed, so it skipped a side effect the save has on the computer player's schedule (§9; fixed in the kit). Owners: P4-C (simparity), P4-D (ai-divergence).
+Status: Phase 4, workstreams P4-C (the oracle), P4-D (the divergence) and P4-E (saves), 2026-10-15. Static RE done; the Mac tracer, its Windows twin, the scenario and the comparison tool work; Mac↔Mac, Windows↔Windows and Mac↔Windows results in §7. **The first simulation difference (PT 24301) was the autosave**: on the Mac the save failed, so it skipped a side effect the save has on the computer player's schedule (§9; fixed in the kit). **Saves are portable both ways** (§10): a Windows save loaded on the Mac, and a Mac save loaded on Windows, give the same stream on both platforms. Owners: P4-C (simparity), P4-D (ai-divergence), P4-E (saves).
 Code:
 - [`mods/simparity/simparity.c`](../../mods/simparity/simparity.c): the Mac tracer, a kit mod plugin (public `pop_mod_api.h` only);
 - [`windows/frida/checksum_trace.js`](../../windows/frida/checksum_trace.js): its Windows twin (legion 0027);
 - [`tests/menus/simparity.script`](../../tests/menus/simparity.script): the scenario;
-- [`tools/simparity/run.py`](../../tools/simparity/run.py) and [`compare.py`](../../tools/simparity/compare.py); `tools/test.py --simparity`.
+- [`tools/simparity/run.py`](../../tools/simparity/run.py) and [`compare.py`](../../tools/simparity/compare.py); `tools/test.py --simparity`;
+- [`tests/menus/simparity-load.script`](../../tests/menus/simparity-load.script) (a game from a saved game) and [`tools/simparity/savefile.py`](../../tools/simparity/savefile.py) (reads and compares `.ees` saves).
 
 Labels:
 - **[static]**: read from the GOG binaries (the func-db Ghidra projects, Ghidra 12.1.4, and the DB listings);
@@ -130,6 +131,7 @@ A kit mod plugin, built with `ee_boot` into `build/recomp/ee-mods/simparity/` (`
 | `RECOMP_EE_SIMPARITY_PLAYERS=N` | `P` rows after every Nth PT: each player's 12 words at +0xaf0 (resources and counters, which no checksum covers) |
 | `RECOMP_EE_SIMPARITY_CALLS=F[/N],…` | `K` rows: every call of these functions at any PT, with N stack arguments (default 3, the rest 0), the player slot ECX is (or −1) and EAX |
 | `RECOMP_EE_SIMPARITY_MEMFN=F,L;…` | `# memfn` lines: L bytes of ECX's object on every entry of F |
+| `RECOMP_EE_SIMPARITY_AUTOSAVE=1` | `# autosave` lines: the host's autosave counter (`EEPhysics+0xcc`) restarting, i.e. a save posted (§9.1), and the counter past the interval with nothing posted (a blocking flag set) |
 
 Hooks:
 - always: after 0x546c63 (a row per PT), before 0x4bee57 (the seed), before 0x683bc8 (messages to the server), before and after 0x545ebf (the game's own calls, `W` rows; the tracer's own calls are not counted);
@@ -163,6 +165,7 @@ Pointers never appear in a row (heap addresses differ between platforms); the ob
 - With `--no-civ-timer` the runner leaves the civilization block out of the script, and the game has no screen, no pause and no click.
 - `tools/simparity/run.py` (`tools/test.py --simparity`): a fresh user directory per run, `seed_user.py`'s registry (legion's options, 800×600) with **Min = Max PTs per Second = 40**, seed 1000, the reports skipped; `ee_boot` in strict mode under `tools/game_ports.py`'s lock; the mod copied per run (a rebuild cannot touch a running game); streams to `analysis/simparity/mac/` (ignored). With two runs or more it compares them. `--autosave-ms MS` sets the registry's `AutoSave In Milliseconds` (seed_user's 600000); `--against STREAM` compares every run with a stored stream, hidden rows included; when `K` rows of the save (0x540aca) are logged, a run fails if a save returned non-zero or fewer saves happened than were due.
 - Two streams whose saves landed at different PTs (§9.3) are reported as such, and a difference that follows such a save is not counted against them.
+- `--load SAVE` starts from a saved game instead (`tests/menus/simparity-load.script`: Single Player → Play Saved Game → the first entry → Load, with SAVE alone in the user directory's `Data\Saved Games`); `--minutes` then counts from the load. `--keep-saves` copies the saves a run wrote to `OUT/mac-<k>-saves/`. `--autosave-watch` turns on the `# autosave` lines, and then a run fails if an autosave was posted and never ran, or was due and not posted (§10.5). `--trace-match TEXT` writes `ee_boot`'s import trace of the matching calls to `OUT/mac-<k>-imports.txt`.
 - `tools/test.py --simparity` without options: two 3-minute games, no civilization timer, an autosave every minute (`P` and `K` rows on), compared with each other and with legion's `win-as-1` when `analysis/simparity/win/win-as-1/stream.csv` is here.
 - `tools/simparity/compare.py A B`: the first PT whose row differs and which fields, rows around it, the CT schedule's first difference, the message types sent up to there, and the objects that differ at the latest common per-object snapshot (matched by vtable and id). `tests/test_simparity.py` checks it on synthetic streams, and that both tracers and the comparer declare the same rows.
 
@@ -176,6 +179,10 @@ Pointers never appear in a row (heap addresses differ between platforms); the ob
 | 0045 | `win-ai-1`: as `win-ph`, with `P` rows every PT, `K` rows of the computer player's resource adds, the computer player on every review entry (`memfn`), `# sched`, `# call` lines in PT 24301 | the same |
 | 0046 | `win-as-1`: an autosave every minute (registry 60000), 5 minutes; `win-long-1`: the default autosave, 25 minutes; both with `P` rows every 10 PTs and `K` rows of the schedule, the review, the AI's serializer and the save | the same |
 | 0047 + 0049 | `win-long-2`: as `win-long-1` with the easiest computer player (`Difficulty Level` and `Computer Player Difficulty Level` 0), so the idle player lives past the second autosave; the lockstep runs of 0047 were dropped (§9.3) | the same |
+| 0049 | `win-isl-1`: as `win-long-2` on Small Islands, 30 minutes, three autosaves (PT 24011, 48007, 72017) | the same |
+| 0065 | `win-load-48007`, `win-load-24011`: `win-isl-1`'s second and first autosaves loaded (Play Saved Game), 12 and 5 minutes | the same |
+| 0066 | `win-as-2`: `win-as-1` again, its save files kept (`saves\`); `win-load-mac-2423`: the Mac's first one-minute autosave loaded, 5 minutes | the same |
+| 0067 | `win-as-3`…: `win-as-2` again until the first autosave lands at PT 2423, the Mac's, for the file comparison (§10.4) | the same |
 
 Streams are fetched to `analysis/simparity/win/` (ignored) with `scp`. Legion's Frida run writes CRLF line ends, which `compare.py` ignores.
 
@@ -279,3 +286,36 @@ All [measured], seed 1000, no civilization timer, 40 PT/s, Mac kit `ee` 35912bd:
 | Mac `as30`: an autosave every 30 s, 22,867 PTs, traced | | 19 of 19 autosaves posted, handled, executed and written; the game kept 10 files, deleting the oldest |
 | **LAN**, session 5G (lansession.md §10): legion hosts, a computer player, the Mac joins headless; both tracers passive | **38,112** (24 minutes, two autosaves at PT 22,790 and 35,722 on both) | **identical** on every PT, `P` and all 144 `K` rows; the Mac's `0x32` equals legion's world checksum on all 4,152 ticks; no out-of-sync |
 | Mac `as3` vs `win-as-1` (an autosave every minute, no lockstep) | 11,183 | the first save at the same PT on both, and identical to PT 5616; then the second save landed one CT apart and the streams differ from PT 5617 (§9.3) |
+
+## 10. Saves: loads on both platforms, the files, the autosave that did not run (P4-E)
+
+Saving changes the simulation (§9), so a save has to be written, loaded and timed alike on every machine. Mac runs: ee-macos `phase4/saves`, kit `ee` 85caa75; Windows: legion 0065–0067. All [measured] unless labelled.
+
+### 10.1 What a load does
+- **The path.** Single Player → Play Saved Game → a file → Load (`tests/menus/simparity-load.script`, `run.py --load`). The game sends `EEMStartLoading` as for a new game (a `G` row with its own seed), then the load (0x540a15) reads the file. The stream resumes at the save's PT: the first `T` row is the loaded state, before any PT runs.
+- **The file restores the world RNG**, and the load then draws from it itself: on `win-isl-1`'s 48007 save the first draw starts from `39eaf325`, the RNG the original game had after PT 48006, and the load makes 50 draws before the first PT (`R` rows: 13 each from 0x61ad41, 0x5ecd26 and `RandomInt` from 0x61b11b, the rest from the computer player's code at 0x4304f2–0x43065d and four other sites). That load also has 2 more objects than the original (285 against 283); a load of the Mac's PT-2423 save has the original's 95.
+- **So a loaded game does not continue the stream of the game that saved it**: with the RNG 50 draws on, the checksum differs from the first PT. It is the game's own behaviour, the same on Windows (0065: 285 objects; every checksum equal to the Mac's load, §10.2). The computer player's plans are unaffected at first: its reschedule (PT 48007) and its resource deposits from PT 48044 come at the same PTs, with the same arguments, as in `win-isl-1`.
+- **Deterministic, seed-free:** two loads of the same file give the same stream, with seed 1000 forced at `EEMStartLoading` or with the game's own seed.
+- **The autosave counter is not saved:** after a load the next autosave is posted 24,001 PTs after the load PT (after PT 72007 for the 48006 load), on both platforms.
+- **A foreign save loads silently:** Windows loads the Mac's file (renamed) with no message, and the Mac loads Windows' files.
+
+### 10.2 Parity: the same save loaded on both platforms
+| Save | Loaded on the Mac vs on Windows | Common PTs | Result |
+|---|---|---|---|
+| Windows `win-isl-1`, after PT 48006 (`AutoSave … 12h.11m.22s`; Small Islands, the easiest computer player) | `mac-load-48007` vs `win-load-48007`, 12 minutes | **28,715** (PT 48006–76720) | **identical**: checksum, world RNG, objects, inputs, CT schedule, `P` rows. The post-load autosave was posted after PT 72007 on both and landed one CT apart (after PT 72030 on the Mac, 72016 on Windows; §10.3), which did not reach the simulation in the time left |
+| Windows `win-isl-1`, after PT 24010 (`… 12h.01m.21s`) | `mac-load-24011` vs `win-load-24011`, 5 minutes | **11,962** (PT 24010–35971) | **identical**, `P` and `K` rows included |
+| Mac `mac-as1`, after PT 2422 (Continental, the one-minute autosave of the `win-as-1` game) | `mac-load-mac-2423` vs `win-load-mac-2423`, 5 minutes | **11,989** (PT 2422–14410) | **identical**, `P` and `K` rows included |
+
+So a save carries the game between platforms both ways, and the translated load path behaves as Windows': the 50 draws, the extra objects and every later PT.
+
+### 10.3 Where an autosave lands in single player
+- The post is deterministic (§9.1): after the same PT on both platforms, from the game's start or from a load.
+- Where it lands is the next CT the server builds after the simulation thread queued it (§9.3), and that differs:
+
+  | Interval | Mac | Windows |
+  |---|---|---|
+  | 10 minutes | one CT later, every time: after PT 24024 against 24010 (`long1`, `long2`, `isl1–3`), 48020 against 48006, 72030 against 72016 after a load | the next CT |
+  | one minute | the first after PT 2422 (4 runs out of 4), later ones a CT after Windows (4830 against 4802) | after PT 2422 or 2408 (`win-as-1`, `win-as-2`) |
+
+- **Consequence:** in single player a Mac game and a Windows game agree until a save lands in different CTs and the computer player's next review falls at a different PT (§9.3). In multiplayer the host's CT carries the save, so every machine saves at the same PT.
+- [inferred] The Mac's server runs further ahead of its simulation than Windows' does. That is thread timing in the kit's cooperative scheduler, not simulation.
