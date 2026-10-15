@@ -155,3 +155,43 @@ def test_info_plist():
     assert plist["LSArchitecturePriority"] == ["arm64"]
     assert plist["CFBundleIconFile"] == "AppIcon"
     assert "local network" in plist["NSLocalNetworkUsageDescription"]
+
+
+def test_the_launcher_names_game_ports_something_else_holds(tmp_path):
+    """`EmpireEarth --check-ports` (app/launcher/launcher.m): the game's fixed
+    ports that cannot be bound - a UDP port someone holds, a TCP port someone
+    listens on - and not a free one. EE_GAME_PORTS replaces 33334-33336 with
+    ports this test owns, so a game running on this Mac changes nothing."""
+    import os
+    import socket
+    if not shutil.which("xcrun"):
+        pytest.skip("no Xcode clang to build the launcher with")
+    launcher = tmp_path / "EmpireEarth"
+    subprocess.run(["xcrun", "clang", "-fobjc-arc", "-fmodules", "-arch", "arm64",
+                    "-mmacosx-version-min=" + package_app.MIN_MACOS, "-O2", "-framework", "AppKit",
+                    "-o", str(launcher), str(ROOT / "app/launcher/launcher.m")], check=True)
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp.bind(("0.0.0.0", 0))
+    free = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    free.bind(("0.0.0.0", 0))
+    tcp_port = free.getsockname()[1]
+    free.close()
+    env = dict(os.environ, EE_GAME_PORTS="udp:%d,tcp:%d" % (udp.getsockname()[1], tcp_port))
+
+    def check():
+        r = subprocess.run([str(launcher), "--check-ports"], env=env, capture_output=True, text=True)
+        return r.returncode, r.stdout.strip()
+
+    try:
+        assert check() == (1, "in use: UDP %d" % udp.getsockname()[1])
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("0.0.0.0", tcp_port))
+        listener.listen(1)
+        try:
+            assert check() == (1, "in use: UDP %d, TCP %d" % (udp.getsockname()[1], tcp_port))
+        finally:
+            listener.close()
+    finally:
+        udp.close()
+    assert check() == (0, "")

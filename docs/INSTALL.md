@@ -82,6 +82,7 @@ The window says what happened and what to do. The usual cases:
 - **The intro movies:** press **Escape** to skip them.
 - **Quitting:** ⌘Q, or Exit Game in the menu.
 - **Settings:** F10 is the game's own menu, as on Windows. The app's settings (window, performance overlay) open with **⌘,** (Command-comma); **F11** shows or hides the frame rate.
+- **One copy at a time:** the game uses fixed network ports (33334–33336) for every game, single player included. If another copy of Empire Earth is running on this Mac (this app, a Wine copy, CrossOver), or another program holds those ports, the app says so when it starts: close the other one first. Started anyway, the game stops as soon as you start a game (Play Random Map, the Scenario Editor, a LAN game).
 - **Multiplayer:** the game's own LAN play, with other Macs and with Windows players who have the GOG game (§5.1). For games over the internet, use a VPN that passes the game's LAN broadcasts, such as ZeroTier (Tailscale passes none): the game list is the only way to join with GOG copies (§5.1 step 5).
 
 ### 5.1 Playing with Windows players on a LAN
@@ -117,7 +118,7 @@ Everything is in **`~/Library/Application Support/EmpireEarth/`**. To open it, c
 | `Build/` | The game built for your Mac, about 180 MB. |
 | `registry.json` | The game's settings and your CD key, read from your own GOG files. It never leaves your Mac. |
 | `Data/`, `Users/` | Saved games, scenarios and player profiles. |
-| `Logs/` | The app's and the game's logs, for when something goes wrong. |
+| `Logs/` | The app's and the game's logs, for when something goes wrong: `game.log` is the last run's, `game.previous.log` the one before. If the game stops, send `game.log`. |
 
 Nothing is written into the app itself, and nothing outside this folder.
 
