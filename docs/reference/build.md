@@ -42,6 +42,8 @@ git submodule update --init kit
 
 `tools/run.py` re-exports by itself when the inputs are missing or older than the DB, `db/inputs.json` or `tools/inputs/`. `--link-only` skips step 3.
 
+A player's Mac does steps 2–3 and the build through the first-run driver instead (`tools/firstrun/firstrun.py`, [firstrun.md](firstrun.md)). It imports the game into `~/Library/Application Support/EmpireEarth/Game/`, writes the same inputs in a work directory shaped like this repository, and builds the same bundles (byte-identical, firstrun.md §5.4).
+
 ### 2.1 Inputs without Ghidra (Phase 6, P6-A)
 
 The first-run pipeline on a player's Mac (PLAN D10, §5.8) has no Ghidra, and the app cannot ship listings, which are derived from game code. So the inputs are made on the player's machine from the DB plus the player's binaries.

@@ -12,11 +12,11 @@ The app ships only our code. On first run it imports the player's own GOG files,
 
 | Step | What runs | Needs | Output (all in `~/Library/Application Support/EmpireEarth/`, never in the app) | Time [measured] |
 |---|---|---|---|---|
-| 1. Import | locate the game folder, check the nine modules' SHA-256 (`game.toml`) | Python (stdlib) | a link to the folder, or an extracted copy (395 MB); importing from the GOG installer (Inno Setup) is still to do | — |
+| 1. Import ([firstrun.md](firstrun.md) §1–4) | locate the game (GOG installer, install folder, `Empire Earth` folder, Wine wrapper or bottle); check the nine modules' SHA-256 (`game.toml`) and all 294 files against `db/gog-files.json` (size, MD5); copy into `Game/`; seed the registry from the player's GOG script | Python (stdlib); for the installer, innoextract (822 KB, §3 there) | `Game/Empire Earth/` (413 MB; APFS clones from a wrapper on the same volume take no space), `registry.json`, `game-path.txt` | 0.7 s from the user's Wineskin wrapper (294 files cloned and hashed); the installer path is tested on a synthetic GOG-shaped installer only (firstrun.md §3.4) |
 | 2. Inputs | `tools/inputs/export.py` ([build.md](build.md) §2.1) | Python, capstone, pefile, `db/functions/*.json`, `db/inputs.json` | listings + `funcdb.json`, 214 MB, checked against the pinned digests | 15 s |
 | 3. Translate | `kit/tools/recomp/translate.py`, once per module | Python, capstone, pefile | generated C, 269 MB | 43 s, one process after another (the EXE alone takes 27 s and 2.0 GB RSS) |
 | 4. Compile + link | `kit/tools/recomp/bundle.py` → `clang -ffreestanding -nostdinc`, `ld64.lld -bundle` | clang, ld64.lld, 10 clang headers | objects (271 MB), then nine bundles (169 MB) | 102 s wall, 1,352 CPU-s at 16 jobs |
-| 5. Clean up | delete the listings, C and objects; keep the bundles, keyed by module hashes and translator version | — | 169 MB steady state | — |
+| 5. Clean up | delete the listings (after translation), C and objects; keep the bundles in `Build/<key>/`, keyed by a digest of the modules, `game.toml`, `globals.toml`, `db/inputs.json`, the translator, the runtime headers, `bundle.py` and the compiler (firstrun.md §5.2) | — | 176 MB steady state (nine bundles + `symbols.json`) | — |
 
 - Steps 2–4 ran end to end with the two components described below: a trimmed python-build-standalone runtime, and clang and lld from the official LLVM 23.1.3 release [measured].
   - The runtime's inputs hash to the pins.
@@ -25,6 +25,9 @@ The app ships only our code. On first run it imports the player's own GOG files,
   - Case A06 of the M1 replay passes 9/9 on those bundles.
   - The M1 bundles are byte-identical to Homebrew clang 23.1.3's.
 - **Total on an M4 Max: about 2.7 minutes, peak disk about 0.93 GB** [measured, sum of the rows].
+- **The first-run driver** (`tools/firstrun/firstrun.py`, P6-B2, [firstrun.md](firstrun.md)) runs steps 1–5 with JSON-lines progress and resumes after a stop. Its bundles are byte-identical to `tools/build.py --regenerate --target bundles`'s, and M1 case A06 passes 9/9 on them [measured].
+  - It deletes the listings once the translation is done, so its peak under `Build/` is **0.74 GB** [measured].
+  - With other agents' builds loading this Mac (load average ~67) it took 250 s; uncontended, the rows above apply.
 - **On a base M1** (4 performance + 4 efficiency cores): about 7–9 minutes [inferred: 1,352 CPU-s at roughly 1.5× slower cores over about 6 effective cores, plus the single-threaded translation].
   - The three DLL-sized translations can run beside the EXE's (about 30 s in all [inferred]).
   - On 8 GB Macs, cap the compile at 4 jobs: some EXE chunks are large [inferred].
@@ -57,7 +60,7 @@ Optional savings [inferred]:
 | `bin/lld` (shipped as `ld64.lld`) | 146.2 MB | **130.9 MB** | 27.2 MB | yes |
 | `lib/clang/23/include` | 16 MB | **10 headers, about 84 KB on disk**: `stddef.h`, its seven `__stddef_*.h`, `stdint.h`, `limits.h` (the depfile of a freestanding compile) | — | those 10 |
 | `lib/clang/23/lib/darwin/libclang_rt.osx.a` | 0.23 MB | — | — | no: `bundle.py` links with `-undefined dynamic_lookup` and no compiler-rt |
-| `bin/llvm-nm` | 47.6 MB | 45.7 MB | — | only for `bundle.py`'s undefined-symbol check. That check should read the Mach-O symbol table in Python instead: on a player's Mac `/usr/bin/nm` is another CLT stub |
+| `bin/llvm-nm` | 47.6 MB | 45.7 MB | — | no, once kit `feat/importer` is merged: `bundle.py` then reads the Mach-O symbol table itself (`macho_undefined`, equal to `llvm-nm -u` on all nine bundles [measured]). Until then it is needed for `bundle.py`'s undefined-symbol check: on a player's Mac `/usr/bin/nm` is another CLT stub |
 | **Total shipped** | | **about 303 MB** | **about 65 MB** | |
 
 All figures [measured].
