@@ -469,6 +469,10 @@ int main(int argc, char **argv) {
     }
     if (!trace.empty() && !(g_trace = fopen(trace.c_str(), "w")))
         fprintf(stderr, "[ee] cannot write %s\n", trace.c_str());
+    // Line by line: a trace is read most when the run died, and a fault
+    // ends the process without flushing a buffer.
+    if (g_trace)
+        setvbuf(g_trace, nullptr, _IOLBF, 1 << 16);
 
     BootOptions opts;
     opts.name = "EmpireEarth";
