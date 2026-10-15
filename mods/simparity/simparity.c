@@ -39,6 +39,15 @@
  *   RECOMP_EE_SIMPARITY_AI_SCHED=1     "# sched" lines: every time a computer
  *                                      player schedules its next strategy
  *                                      review (EXE 0x43dcf4)
+ *   RECOMP_EE_SIMPARITY_PLAYERS=N      P rows after every Nth PT: each player's
+ *                                      resources and counters (+0xaf0, 12
+ *                                      words), which no checksum covers
+ *   RECOMP_EE_SIMPARITY_CALLS=F,..     K rows: every call of these EXE
+ *                                      functions, any PT (caller, the player
+ *                                      slot ECX is or -1, three stack
+ *                                      arguments, EAX on return)
+ *   RECOMP_EE_SIMPARITY_MEMFN=F,L[;..] "# memfn" lines: L bytes of ECX's object
+ *                                      on every entry of EXE function F
  *   RECOMP_EE_SIMPARITY_LOCKSTEP=1     the server sends a CT only once the
  *                                      simulation has run every PT it was
  *                                      sent (waits at most 60 s), so a message
@@ -62,6 +71,10 @@
  *   R,pt,fn,caller,rng_in,rng_out             a call of a function that draws
  *                                             random numbers, in the PT window
  *                                             of RECOMP_EE_CHECKSUM_DRAWS
+ *   P,pt,slot,w0,..,w11                       a player's 12 words at +0xaf0
+ *                                             (RECOMP_EE_SIMPARITY_PLAYERS)
+ *   K,pt,fn,caller,self,a0,a1,a2,eax          a call of a logged function
+ *                                             (RECOMP_EE_SIMPARITY_CALLS)
  */
 #include "pop_mod_api.h"
 
@@ -91,6 +104,11 @@ POP_MOD_DECLARE_ABI();
 #define VA_IAT_SLEEP 0x0082318cu     /* kernel32 Sleep */
 #define SRV_NEXT_CT 0x190u           /* NESynchronousServer: the next CT to send */
 #define W_PT_LEFT 0xb8u              /* PTs left of the current CT */
+
+#define VA_PLAYERS 0x00918374u      /* EEPlayer *[]: the player table (0 = the world) */
+#define N_PLAYER_SLOTS 9u
+#define PL_WORDS 0xaf0u              /* resources (EEComputerPlayer vtable slot 18 adds) */
+#define N_PL_WORDS 12u
 
 #define W_RNG 0x18u      /* URandom state (mRandomNumberGenerator) */
 #define W_PTPS 0x58u     /* PTs per second (uint) */
@@ -227,6 +245,94 @@ static void write_units(const PopModApi *api, uint32_t pt) {
     }
 }
 
+/* P rows: each player's resources and counters, simulation state that the
+ * world checksum does not cover (the computer player's strategy review
+ * compares them with its thresholds, 0x43f66f). */
+static uint32_t g_players_every;
+
+static void write_players(const PopModApi *api, uint32_t pt) {
+    for (uint32_t slot = 0; slot < N_PLAYER_SLOTS; ++slot) {
+        uint32_t p = rd(api, VA_PLAYERS + 4 * slot);
+        if (!p)
+            continue;
+        fprintf(g_out, "P,%u,%u", pt, slot);
+        for (uint32_t w = 0; w < N_PL_WORDS; ++w)
+            fprintf(g_out, ",%08x", rd(api, p + PL_WORDS + 4 * w));
+        fprintf(g_out, "\n");
+    }
+}
+
+/* The player slot an object is, or -1: pointers differ between platforms. */
+static int player_slot(const PopModApi *api, uint32_t obj) {
+    for (uint32_t slot = 0; obj && slot < N_PLAYER_SLOTS; ++slot)
+        if (rd(api, VA_PLAYERS + 4 * slot) == obj)
+            return (int)slot;
+    return -1;
+}
+
+static uint32_t current_pt(const PopModApi *api) {
+    uint32_t world = rd(api, VA_WORLD_PTR);
+    return world ? rd(api, world + W_PT) + 1 : 0;
+}
+
+/* K rows: every call of a logged function, at any PT (no window). */
+static _Thread_local struct {
+    uint32_t fn, caller, a0, a1, a2, pt;
+    int self;
+} g_log_stack[64];
+static _Thread_local uint32_t g_log_depth;
+
+static void before_log_fn(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv, void *user) {
+    (void)inv;
+    if (g_log_depth < 64) {
+        g_log_stack[g_log_depth].fn = (uint32_t)(uintptr_t)user;
+        g_log_stack[g_log_depth].caller = rd(api, cpu->esp);
+        g_log_stack[g_log_depth].a0 = rd(api, cpu->esp + 4);
+        g_log_stack[g_log_depth].a1 = rd(api, cpu->esp + 8);
+        g_log_stack[g_log_depth].a2 = rd(api, cpu->esp + 12);
+        g_log_stack[g_log_depth].self = player_slot(api, cpu->ecx);
+        g_log_stack[g_log_depth].pt = current_pt(api);
+    }
+    ++g_log_depth;
+}
+
+static void after_log_fn(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv, void *user) {
+    (void)api;
+    (void)inv;
+    (void)user;
+    if (!g_log_depth)
+        return;
+    --g_log_depth;
+    if (g_log_depth >= 64 || g_done)
+        return;
+    fprintf(g_out, "K,%u,%08x,%08x,%d,%08x,%08x,%08x,%08x\n", g_log_stack[g_log_depth].pt,
+            g_log_stack[g_log_depth].fn, g_log_stack[g_log_depth].caller,
+            g_log_stack[g_log_depth].self, g_log_stack[g_log_depth].a0, g_log_stack[g_log_depth].a1,
+            g_log_stack[g_log_depth].a2, cpu->eax);
+}
+
+/* "# memfn" lines: ECX's object on entry of a function. */
+#define MAX_MEMFN 8
+static struct {
+    uint32_t fn, len;
+} g_memfn[MAX_MEMFN];
+static uint32_t g_nmemfn;
+
+static void before_memfn(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv, void *user) {
+    (void)inv;
+    uint32_t i = (uint32_t)(uintptr_t)user;
+    if (i >= g_nmemfn || g_done || !cpu->ecx)
+        return;
+    uint32_t pt = current_pt(api);
+    for (uint32_t off = 0; off < g_memfn[i].len; off += 32) {
+        fprintf(g_out, "# memfn %08x %u p%d+%04x:", g_memfn[i].fn, pt, player_slot(api, cpu->ecx),
+                off);
+        for (uint32_t w = 0; w < 32 && off + w < g_memfn[i].len; w += 4)
+            fprintf(g_out, " %08x", rd(api, cpu->ecx + off + w));
+        fprintf(g_out, "\n");
+    }
+}
+
 /* After each call of the PT entry: a row when a PT ran. */
 static uint32_t g_fpu_dirty;
 
@@ -276,6 +382,8 @@ static void after_tick(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation 
         write_units(api, pt);
     if (g_nmem)
         write_mem(api, pt);
+    if (g_players_every && pt % g_players_every == 0)
+        write_players(api, pt);
     if (pt == g_oosdump_pt) {
         checksum(api, world, 1, 1);
         fprintf(g_out, "# OOS dump written after PT %u (the game's OOS *.log)\n", pt);
@@ -612,6 +720,8 @@ PopModStatus pop_mod_init(const PopModApi *api) {
     fprintf(g_out,
             "# ee-simparity/1 mac flags2=0x%x seed=%s no_reports=%d lockstep=%d no_civ_timer=%d\n",
             g_flags2, g_have_seed ? seed : "game", skip, lockstep, no_civ);
+    if (env_u32("RECOMP_EE_SIMPARITY_PLAYERS", 0))
+        fprintf(g_out, "# players: P rows every %u PTs\n", env_u32("RECOMP_EE_SIMPARITY_PLAYERS", 0));
 
     PopModStatus st = install(api, VA_PHYSICS_TICK, after_tick, POP_HOOK_AFTER);
     if (st == POP_OK)
@@ -639,6 +749,42 @@ PopModStatus pop_mod_init(const PopModApi *api) {
         st = install(api, 0x0043dcf4u, before_ai_sched, POP_HOOK_BEFORE);
         if (st == POP_OK)
             st = install(api, 0x0043dcf4u, after_ai_sched, POP_HOOK_AFTER);
+    }
+    g_players_every = env_u32("RECOMP_EE_SIMPARITY_PLAYERS", 0);
+    const char *calls = getenv("RECOMP_EE_SIMPARITY_CALLS");
+    for (const char *p = calls; st == POP_OK && p && *p;) {
+        char *end = NULL;
+        uint32_t addr = (uint32_t)strtoul(p, &end, 16);
+        if (end == p)
+            break;
+        uint32_t id = 0;
+        void *fn = (void *)(uintptr_t)addr;
+        st = api->hook_install_ex(api, addr, 0, before_log_fn, POP_HOOK_BEFORE, POP_HOOK_NO_GAME_VIEW,
+                                  fn, &id);
+        if (st == POP_OK)
+            st = api->hook_install_ex(api, addr, 0, after_log_fn, POP_HOOK_AFTER,
+                                      POP_HOOK_NO_GAME_VIEW, fn, &id);
+        if (st != POP_OK)
+            fprintf(g_out, "# calls: cannot hook %08x (%d)\n", addr, (int)st);
+        st = POP_OK; /* a diagnostic: never fatal */
+        p = *end == ',' ? end + 1 : end;
+    }
+    const char *memfn = getenv("RECOMP_EE_SIMPARITY_MEMFN");
+    for (const char *p = memfn; st == POP_OK && p && *p && g_nmemfn < MAX_MEMFN;) {
+        char *end = NULL;
+        uint32_t addr = (uint32_t)strtoul(p, &end, 16);
+        if (end == p || *end != ',')
+            break;
+        uint32_t len = (uint32_t)strtoul(end + 1, &end, 0);
+        uint32_t id = 0;
+        g_memfn[g_nmemfn].fn = addr;
+        g_memfn[g_nmemfn].len = len;
+        if (api->hook_install_ex(api, addr, 0, before_memfn, POP_HOOK_BEFORE, POP_HOOK_NO_GAME_VIEW,
+                                 (void *)(uintptr_t)g_nmemfn, &id) == POP_OK)
+            ++g_nmemfn;
+        else
+            fprintf(g_out, "# memfn: cannot hook %08x\n", addr);
+        p = *end == ';' ? end + 1 : end;
     }
     const char *draws = getenv("RECOMP_EE_CHECKSUM_DRAWS");
     if (st == POP_OK && draws && *draws) {

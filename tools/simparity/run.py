@@ -2,8 +2,10 @@
 """Run the single-player checksum-stream scenario on the Mac (P4-C).
 
     .venv/bin/python tools/simparity/run.py [--runs N] [--minutes M] [--seed S]
-        [--ptps P] [--reports] [--units PT,PT...] [--units-every N]
-        [--oosdump PT] [--max-pt N] [--draws A-B] [--lockstep] [--no-civ-timer] [--out DIR]
+        [--ptps P] [--autosave-ms MS] [--reports] [--units PT,PT...] [--units-every N]
+        [--oosdump PT] [--max-pt N] [--draws A-B] [--trace-fns F,..] [--mem PT,A,L;..]
+        [--players N] [--calls F,..] [--memfn F,L;..] [--ai-sched]
+        [--lockstep] [--no-civ-timer] [--out DIR]
         [--no-build] [--kit DIR]
         [--insert-dylib PATH]
 
@@ -49,11 +51,13 @@ HKCU = "HKEY_CURRENT_USER\\Software\\SSSI\\Empire Earth"
 START_SECONDS = 600
 
 
-def pin_registry(user, ptps):
+def pin_registry(user, ptps, autosave_ms=None):
     reg_path = user / "registry.json"
     reg = json.loads(reg_path.read_text())
     for name in ("Min PTs per Second", "Max PTs per Second"):
         reg[HKCU][name] = {"type": seed_user.REG_DWORD, "data": ptps}
+    if autosave_ms is not None:
+        reg[HKCU]["AutoSave In Milliseconds"] = {"type": seed_user.REG_DWORD, "data": autosave_ms}
     reg_path.write_text(json.dumps(reg, indent=1))
 
 
@@ -83,7 +87,7 @@ def run_one(k, args, out):
     frames.mkdir(parents=True)
     try:
         seed_user.main(["--user", str(user), "--width", "800", "--height", "600"])
-        pin_registry(user, args.ptps)
+        pin_registry(user, args.ptps, args.autosave_ms)
         script = scenario(args.minutes, tmp, args.no_civ_timer)
         seconds = int(START_SECONDS + args.minutes * 60)
         # The mod is copied per run, so a rebuild cannot touch a running game's plugin.
@@ -97,13 +101,19 @@ def run_one(k, args, out):
             env["RECOMP_EE_SIMPARITY_LOCKSTEP"] = "1"
         if args.no_civ_timer:
             env["RECOMP_EE_SIMPARITY_NO_CIV_TIMER"] = "1"
+        if args.ai_sched:
+            env["RECOMP_EE_SIMPARITY_AI_SCHED"] = "1"
         for key, val in (("RECOMP_EE_CHECKSUM_UNITS", args.units),
                          ("RECOMP_EE_CHECKSUM_UNITS_EVERY", args.units_every),
                          ("RECOMP_EE_CHECKSUM_OOSDUMP", args.oosdump),
                          ("RECOMP_EE_CHECKSUM_MAX_PT", args.max_pt),
                          ("RECOMP_EE_CHECKSUM_FLAGS", args.flags),
                          ("RECOMP_EE_CHECKSUM_DRAWS", args.draws),
-                         ("RECOMP_EE_CHECKSUM_TRACE_FNS", args.trace_fns)):
+                         ("RECOMP_EE_CHECKSUM_TRACE_FNS", args.trace_fns),
+                         ("RECOMP_EE_CHECKSUM_MEM", args.mem),
+                         ("RECOMP_EE_SIMPARITY_PLAYERS", args.players),
+                         ("RECOMP_EE_SIMPARITY_CALLS", args.calls),
+                         ("RECOMP_EE_SIMPARITY_MEMFN", args.memfn)):
             if val is not None:
                 env[key] = str(val)
         command = [str(ROOT / "build/recomp/ee_boot"), "--user", str(user), "--seconds", str(seconds),
@@ -146,6 +156,8 @@ def main():
     parser.add_argument("--minutes", type=float, default=5.0, help="game time with nobody at the controls")
     parser.add_argument("--seed", type=int, default=1000, help="the game seed (EEMStartLoading)")
     parser.add_argument("--ptps", type=int, default=40, help="PTs per second, pinned (registry)")
+    parser.add_argument("--autosave-ms", type=int, default=None, metavar="MS",
+                        help="the registry's AutoSave In Milliseconds (seed_user's: 600000; 0 = off)")
     parser.add_argument("--reports", action="store_true",
                         help="keep the wall-clock statistics reports (EXE 0x547365)")
     parser.add_argument("--lockstep", action="store_true",
@@ -161,6 +173,16 @@ def main():
                         help="R rows: every call of a random-drawing function in PTs A..B")
     parser.add_argument("--trace-fns", default=None, metavar="ADDR,...",
                         help="with --draws: '# call' lines for these EXE functions (hex)")
+    parser.add_argument("--mem", default=None, metavar="PT,ADDR,LEN;...",
+                        help="'# mem' lines: LEN bytes of the object whose pointer is at ADDR, after PT")
+    parser.add_argument("--players", type=int, default=None, metavar="N",
+                        help="P rows (each player's resources, +0xaf0) after every Nth PT")
+    parser.add_argument("--calls", default=None, metavar="ADDR,...",
+                        help="K rows: every call of these EXE functions (hex), any PT")
+    parser.add_argument("--memfn", default=None, metavar="ADDR,LEN;...",
+                        help="'# memfn' lines: LEN bytes of ECX's object on entry of ADDR")
+    parser.add_argument("--ai-sched", action="store_true",
+                        help="'# sched' lines: computer players scheduling their strategy reviews")
     parser.add_argument("--out", type=Path, default=ROOT / "analysis/simparity/mac")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--kit", default=None)

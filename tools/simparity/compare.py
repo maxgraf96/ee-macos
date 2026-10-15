@@ -15,6 +15,11 @@ windows/frida/checksum_trace.js (Windows) writes, one row per line:
                                              the host's value never goes on the wire)
   R,pt,fn,caller,rng_in,rng_out              a call of a function that draws random numbers,
                                              in the PT window the tracer was asked for
+  P,pt,slot,w0,..,w11                        a player's resources and counters (+0xaf0), which
+                                             no checksum covers
+  K,pt,fn,caller,self,a0,a1,a2,eax           a call of a logged function (self: the player slot
+                                             ECX is, or -1); compared without a2 and eax, which
+                                             are often stack garbage or a void return
 
 The streams agree when every PT both of them reached has the same row: the
 game's checksum (cs, flags 1), the second checksum (cs2), the world RNG state,
@@ -24,6 +29,8 @@ depends on wall-clock time). W rows (multiplayer) are matched by PT. The report 
 first PT that differs and which fields, the CT schedule (C rows) and the
 messages (S rows) up to there, and, where both streams have per-object rows
 (U) at or before that PT, the objects that differ (matched by vtable and id).
+Player rows (P) and logged calls (K) are compared on their own: the first PT
+at which a player's words differ, and the first logged call that differs.
 Exit status: 0 agree, 1 differ, 2 unusable input. docs/reference/simparity.md.
 """
 import argparse
@@ -47,6 +54,8 @@ class Stream:
         self.units = {}   # pt -> list of dicts
         self.checks = {}  # W rows by CT
         self.draws = []   # R rows in order
+        self.players = {}  # pt -> {slot: words}
+        self.calls = []   # K rows in order
 
 
 def load(path):
@@ -55,7 +64,8 @@ def load(path):
     cur = None
 
     def new_game(g):
-        return {"G": g, "ticks": {}, "cts": [], "sends": [], "units": {}, "checks": [], "draws": []}
+        return {"G": g, "ticks": {}, "cts": [], "sends": [], "units": {}, "checks": [], "draws": [],
+                "players": {}, "calls": []}
 
     for line in Path(path).read_text(errors="replace").splitlines():
         line = line.strip()
@@ -89,6 +99,15 @@ def load(path):
             elif kind == "R":
                 cur["draws"].append({"pt": int(f[1]), "fn": f[2].lower(), "caller": f[3].lower(),
                                      "rng_in": f[4].lower(), "rng_out": f[5].lower()})
+            elif kind == "P":
+                words = tuple(w.lower() for w in f[3:])
+                if len(words) != 12:
+                    raise ValueError(line)
+                cur["players"].setdefault(int(f[1]), {})[int(f[2])] = words
+            elif kind == "K":
+                cur["calls"].append({"pt": int(f[1]), "fn": f[2].lower(), "caller": f[3].lower(),
+                                     "self": int(f[4]), "args": tuple(x.lower() for x in f[5:8]),
+                                     "eax": f[8].lower()})
             elif kind == "U":
                 cur["units"].setdefault(int(f[1]), []).append(
                     {"i": int(f[2]), "vtable": f[3].lower(), "id": int(f[4]), "x": int(f[5]),
@@ -115,6 +134,7 @@ def load(path):
         x["ct"] -= s.ct0
     s.checks = {w["ct"]: w for w in g["checks"]}
     s.draws = g["draws"]
+    s.players, s.calls = g["players"], g["calls"]
     return s
 
 
@@ -182,6 +202,42 @@ def first_draw_difference(da, db):
     return None
 
 
+def first_player_difference(pa, pb):
+    """The first PT both streams have P rows for at which some player's words differ."""
+    for pt in sorted(set(pa) & set(pb)):
+        if pa[pt] != pb[pt]:
+            slots = sorted(set(pa[pt]) | set(pb[pt]))
+            out = []
+            for slot in slots:
+                wa, wb = pa[pt].get(slot), pb[pt].get(slot)
+                if wa != wb:
+                    words = None if wa is None or wb is None else \
+                        [i for i in range(len(wa)) if wa[i] != wb[i]]
+                    out.append({"slot": slot, "words": words, "a": wa, "b": wb})
+            return {"pt": pt, "players": out}
+    return None
+
+
+def call_key(c):
+    """What a K row is compared on: the third stack word and EAX are often not the function's
+    (stack garbage beyond its arguments, a void return), so only the first two arguments count."""
+    return (c["pt"], c["fn"], c["caller"], c["self"], c["args"][:2])
+
+
+def first_call_difference(ca, cb, last_pt=None):
+    """The first K row (in order) that differs; only PTs up to last_pt (both streams reached)."""
+    if last_pt is not None:
+        ca = [c for c in ca if c["pt"] <= last_pt]
+        cb = [c for c in cb if c["pt"] <= last_pt]
+    for i, (x, y) in enumerate(zip(ca, cb)):
+        if call_key(x) != call_key(y):
+            return {"index": i, "pt": x["pt"], "a": ca[max(0, i - 3):i + 4], "b": cb[max(0, i - 3):i + 4]}
+    if len(ca) != len(cb):
+        i = min(len(ca), len(cb))
+        return {"index": i, "pt": (ca if len(ca) > i else cb)[i]["pt"], "a": ca[i:i + 4], "b": cb[i:i + 4]}
+    return None
+
+
 def compare(a, b, context=5):
     rep = {"a": str(a.path), "b": str(b.path), "agree": True}
     common = sorted(set(a.ticks) & set(b.ticks))
@@ -212,6 +268,13 @@ def compare(a, b, context=5):
     common_w = sorted(set(wa) & set(wb))
     rep["game_checksums"] = {"common": len(common_w),
                              "differ": [p for p in common_w if wa[p] != wb[p]][:20]}
+    # Hidden state: players' resources (P rows) and logged calls (K rows).
+    if a.players and b.players:
+        rep["players"] = {"common": len(set(a.players) & set(b.players)),
+                          "first_difference": first_player_difference(a.players, b.players)}
+    if a.calls and b.calls:
+        rep["calls"] = {"a": len(a.calls), "b": len(b.calls),
+                        "first_difference": first_call_difference(a.calls, b.calls, rep["last_common_pt"])}
     if first is None:
         rep["summary"] = ("agree on all %d common PTs (1..%s)" % (len(common), rep["last_common_pt"])
                           if common else "no common PTs")
@@ -265,6 +328,21 @@ def main():
         print("game checksums (W rows): %d common PTs, %d differ %s" % (
             rep["game_checksums"]["common"], len(rep["game_checksums"]["differ"]),
             rep["game_checksums"]["differ"][:5]))
+    if rep.get("players"):
+        d = rep["players"]["first_difference"]
+        print("players (P rows): %d common PTs; %s" % (
+            rep["players"]["common"], "agree" if d is None else "first differ at PT %d" % d["pt"]))
+        for x in (d or {}).get("players", []):
+            print("  slot %d words %s: A %s / B %s" % (x["slot"], x["words"], x["a"], x["b"]))
+    if rep.get("calls"):
+        d = rep["calls"]["first_difference"]
+        print("logged calls (K rows): %d / %d; %s" % (
+            rep["calls"]["a"], rep["calls"]["b"], "agree" if d is None else
+            "first differ at row %d, PT %d" % (d["index"], d["pt"])))
+        for side in ("a", "b"):
+            for c in (d or {}).get(side, []):
+                print("  %s PT %d %s from %s self %d args %s eax %s" % (
+                    side.upper(), c["pt"], c["fn"], c["caller"], c["self"], " ".join(c["args"]), c["eax"]))
     if rep["ct_schedule_first_difference"]:
         d = rep["ct_schedule_first_difference"]
         print("CT schedule differs at C row %d: A %s / B %s" % (d["index"], d["a"], d["b"]))

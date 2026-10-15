@@ -33,6 +33,8 @@
 //                                              host's value never goes on the wire)
 //   R,pt,fn,caller,rng_in,rng_out              a call of a function that draws random numbers, in
 //                                              the PT window of PARAMS.draws
+//   P,pt,slot,w0,..,w11                        a player's 12 words at +0xaf0 (resources), PARAMS.players
+//   K,pt,fn,caller,self,a0,a1,a2,eax           a call of a function of PARAMS.calls, any PT
 //
 // PARAMS:
 //   out=<path>          the stream file (required)
@@ -50,6 +52,11 @@
 //                       caller, ECX, three stack arguments, EAX and the world RNG around the call
 //   mem=<pt>,<a>,<len>[;...]  after PT pt, "# mem" lines: len bytes of the object whose pointer is at
 //                       a (hex; 91837c = player 2 of the player table)
+//   players=<n>         P rows after every nth PT: each player's resources and counters (+0xaf0,
+//                       12 words), which no checksum covers
+//   calls=<f>,<f>,...   K rows: every call of these EXE functions (hex), at any PT: caller, the
+//                       player slot ECX is (or -1), three stack arguments, EAX on return
+//   memfn=<f>,<len>[;...]  "# memfn" lines: len bytes of ECX's object on every entry of f (hex)
 //   ai_sched=<bool>     "# sched" lines: every time a computer player schedules its next strategy
 //                       review (EXE 0x43dcf4)
 //   lockstep=<bool>     the server builds a CT (EEServer vtable +0x28, EXE 0x4c3703, called from
@@ -122,6 +129,33 @@ function writeMem(m, pt) {
   }
 }
 
+// The player table (EEPlayer *[], slot 0 = the world) and the words P rows show.
+const VA_PLAYERS = at(0x918374), N_PLAYER_SLOTS = 9, PL_WORDS = 0xaf0, N_PL_WORDS = 12;
+const playersEvery = Number(P.players || 0) >>> 0;
+if (playersEvery) emit('# players: P rows every ' + playersEvery + ' PTs');
+function writePlayers(pt) {
+  for (let slot = 0; slot < N_PLAYER_SLOTS; slot++) {
+    const p = VA_PLAYERS.add(4 * slot).readPointer();
+    if (p.isNull()) continue;
+    const row = ['P', pt, slot];
+    try {
+      for (let w = 0; w < N_PL_WORDS; w++) row.push(h8(p.add(PL_WORDS + 4 * w).readU32()));
+    } catch (e) {
+      continue; // not a player
+    }
+    emit(row.join(','));
+  }
+}
+function playerSlot(obj) {
+  for (let slot = 0; !obj.isNull() && slot < N_PLAYER_SLOTS; slot++)
+    if (VA_PLAYERS.add(4 * slot).readPointer().equals(obj)) return slot;
+  return -1;
+}
+function currentPt() {
+  const world = VA_WORLD_PTR.readPointer();
+  return world.isNull() ? 0 : world.add(W_PT).readU32() + 1;
+}
+
 function nextUnit(u) {
   const link = u.add(8).readPointer();
   return link.isNull() ? NULL : link.readPointer();
@@ -172,6 +206,7 @@ Interceptor.attach(at(0x546c63), {
     emit(['T', pt, ct, h8(cs), h8(cs2), h8(world.add(W_RNG).readU32()), VA_INPUTS.readU32(), units].join(','));
     if ((unitsEvery && pt % unitsEvery === 0) || unitPts.has(pt)) writeUnits(pt);
     for (const m of memDumps) if (m.pt === pt) writeMem(m, pt);
+    if (playersEvery && pt % playersEvery === 0) writePlayers(pt);
     if (pt === oosdump) {
       worldChecksum(world, 1, 1);
       emit('# OOS dump written after PT ' + pt + " (the game's OOS *.log)");
@@ -253,6 +288,41 @@ if (lockstep) Interceptor.attach(at(0x4c3703), {
     }
   },
 });
+
+// K rows: every call of these functions, at any PT.
+for (const f of String(P.calls || '').split(',').filter((x) => x.length)) {
+  const fn = parseInt(f, 16);
+  Interceptor.attach(at(fn), {
+    onEnter() {
+      const sp = this.context.esp;
+      this.row = ['K', currentPt(), h8(fn), h8(this.returnAddress.toUInt32()), playerSlot(this.context.ecx),
+                  h8(sp.add(4).readU32()), h8(sp.add(8).readU32()), h8(sp.add(12).readU32())];
+    },
+    onLeave(ret) {
+      if (done) return;
+      this.row.push(h8(ret.toUInt32()));
+      emit(this.row.join(','));
+    },
+  });
+}
+// "# memfn" lines: ECX's object on every entry of these functions.
+for (const x of String(P.memfn || '').split(';').filter((y) => y.length)) {
+  const [f, len] = x.split(',');
+  const fn = parseInt(f, 16), n = Number(len);
+  Interceptor.attach(at(fn), {
+    onEnter() {
+      const self = this.context.ecx;
+      if (done || self.isNull()) return;
+      const pt = currentPt(), slot = playerSlot(self);
+      for (let off = 0; off < n; off += 32) {
+        const words = [];
+        for (let w = 0; w < 32 && off + w < n; w += 4) words.push(h8(self.add(off + w).readU32()));
+        emit('# memfn ' + h8(fn) + ' ' + pt + ' p' + slot + '+' + off.toString(16).padStart(4, '0') + ': ' +
+             words.join(' '));
+      }
+    },
+  });
+}
 
 // A computer player schedules its next strategy review (0x43dcf4, thiscall (uint now)):
 // next = (int)(float)(now + [this+0xc5c] * 1000).

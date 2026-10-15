@@ -77,12 +77,12 @@ def test_units_matched_by_vtable_and_id(tmp_path):
 
 def test_tracers_write_the_same_rows():
     """Both tracers declare the same row kinds with the same fields."""
-    rows = re.compile(r"^\s*(?://|\*)?\s*([GCTSUWR]),([a-z_0-9,]+)", re.M)
+    rows = re.compile(r"^\s*(?://|\*)?\s*([GCTSUWRPK]),([a-z_0-9,.]+)", re.M)
     mac = dict(rows.findall((ROOT / "mods/simparity/simparity.c").read_text()))
     win = dict(rows.findall((ROOT / "windows/frida/checksum_trace.js").read_text()))
     doc = dict(rows.findall(compare.__doc__))
-    assert set(mac) == set(win) == set(doc) == set("GCTSUWR")
-    for kind in "GCTSUWR":
+    assert set(mac) == set(win) == set(doc) == set("GCTSUWRPK")
+    for kind in "GCTSUWRPK":
         assert mac[kind].split() == win[kind].split() == doc[kind].split()
 
 
@@ -94,3 +94,23 @@ def test_first_draw_difference(tmp_path):
     rep = compare.compare(compare.load(a), compare.load(b))
     assert rep["first_pt"] == 9 and rep["fields"] == ["rng"]
     assert rep["draws"]["index"] == 2 and rep["draws"]["b"][2]["rng_out"] == "00000999"
+
+
+def test_players_and_calls(tmp_path):
+    words = ["%08x" % w for w in range(12)]
+    pa = ["P,%d,2,%s" % (pt, ",".join(words)) for pt in (1, 2, 3)]
+    other = list(words)
+    other[4] = "000000ff"
+    pb = pa[:2] + ["P,3,2,%s" % ",".join(other)]
+    ka = ["K,2,0042f783,00500000,2,00000004,0000000a,00000000,00000000",
+          "K,3,0042f783,00500000,2,00000004,0000000b,00000000,00000000"]
+    kb = [ka[0].replace(",00000000,00000000", ",12345678,9abcdef0"),  # a2, eax: not compared
+          ka[1].replace("0000000b", "0000000c")]
+    a = stream(tmp_path, "a.csv", ticks(5), tail="\n".join(pa + ka) + "\n")
+    b = stream(tmp_path, "b.csv", ticks(5), tail="\n".join(pb + kb) + "\n")
+    rep = compare.compare(compare.load(a), compare.load(b))
+    assert rep["agree"]  # the checksums do not see it...
+    d = rep["players"]["first_difference"]
+    assert d["pt"] == 3 and d["players"][0]["slot"] == 2 and d["players"][0]["words"] == [4]
+    c = rep["calls"]["first_difference"]  # ...the hidden state does
+    assert c["index"] == 1 and c["pt"] == 3 and c["b"][1]["args"][1] == "0000000c"
