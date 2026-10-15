@@ -89,7 +89,7 @@ The window says what happened and what to do. The usual cases:
 The Mac plays the unmodified Windows GOG game: either side can host. Tested on a home Wi-Fi with one Mac and one Windows 11 PC: a game each way with the developer build, and in this app a game joined from the PC and a game hosted for it, played to the end.
 
 1. **Same network.** Both computers on the same home network (Wi-Fi or cable). Everyone needs the **GOG** Empire Earth Gold: the game compares its files and refuses a different version.
-2. **Local network access (Mac).** The first time the game uses the network, macOS 15 and later asks whether **EmpireEarth** may find devices on your local network. Click **Allow**.
+2. **Local network access (Mac).** The first time the game uses the network, macOS 15 and later asks whether **EmpireEarth** may "find and connect to devices on your local network". Click **Allow**.
    - Without it, nobody sees the games you host, you see only some of theirs, and **Join Game does nothing**.
    - If you clicked *Don't Allow*: **System Settings → Privacy & Security → Local Network**, turn on **EmpireEarth**, then quit and reopen the game.
    - macOS may ask again after you install a new version of the app.
