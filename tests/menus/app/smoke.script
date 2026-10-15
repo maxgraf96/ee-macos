@@ -1,0 +1,27 @@
+# The windowed app's smoke run (RECOMP_INPUT_SCRIPT; not part of --menus,
+# which is headless): Escape through the intro movies, the 1024x768 main
+# menu, Game Settings and back, then quit. See ../settings.script for the
+# pointer.
+timeout 240000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+key ESCAPE
+wait 2500
+key ESCAPE
+wait 2500
+key ESCAPE
+wait size 1024 768 within 180000
+wait 3000
+moveby 1 1
+wait 300
+dump app-main-menu
+click 511 577                 # Game Settings
+wait change within 15000
+wait 1000
+dump app-settings
+click 888 746                 # Cancel
+wait change within 15000
+wait 1000
+dump app-main-menu-again
+quit
