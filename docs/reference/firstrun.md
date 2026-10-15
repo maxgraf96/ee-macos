@@ -1,6 +1,6 @@
 # First run: import, verify, translate, compile
 
-Status: Phase 6, workstream P6-B2 (importer), 2026-10-15. This is the driver between "the player points the app at their GOG files" and "the bundles are cached and the game can start" (PLAN D10, §5.8; [packaging.md](packaging.md) §1). P6-B1 bundles the toolchain (Python with capstone and pefile, clang, ld64.lld). P6-B3 builds the app and its UI on top of the command-line contract in §6.
+Status: Phase 6, workstream P6-B2 (importer), 2026-10-15. This is the driver between "the player points the app at their GOG files" and "the bundles are cached and the game can start" (PLAN D10, §5.8; [packaging.md](packaging.md) §1). P6-B1 bundles the toolchain (Python with capstone and pefile, clang, ld64.lld). **P6-B3 built the app and its first-run window on the contract in §6** (§6.1 has the app's side as built; [packaging.md](packaging.md) §8 the app).
 
 Labels: **[measured]** = run on this Mac (M4 Max, 16 cores, macOS 15.5), with other agents' builds loading the CPU (load average 40–70); **[static]** = read from files or code; **[inferred]** = reasoning, not run.
 
@@ -314,16 +314,55 @@ The app shows the first-run UI unless `state` is `ready`.
 - **Registration.** Each bundle registers its module from a constructor (build.md §5), and the runtime's weak `recomp_call`/`recomp_jump` dispatch through the registry. So the host only `dlopen`s them:
   - in its own code, by reading `build.json`;
   - or with the kit's existing `RECOMP_EXTRA_CODE=<path>:<path>:…`, which `dlopen`s a colon-separated list.
-- **Before starting,** the host should run `status` and refuse a build whose key is not `expected_key`: bundles from another kit have another ABI.
-- **`symbols.json`.** The kit's `host_resource("symbols.json")` looks in the app's `Resources/`, which must not hold it (packaging.md §6). The host needs a way to name `<home>/Build/<key>/symbols.json`, for example a `RECOMP_SYMBOLS` variable or a fallback to the profile (a kit change for P6-B3).
+- **Before starting,** the launcher runs `status`. Only `ready` (the current build's key is `expected_key`, every bundle present) starts the game: bundles from another kit have another ABI.
+- **`symbols.json`** (resolved in P6-B3): the kit's `host_resource("symbols.json")` is `$RECOMP_SYMBOLS`, else `$RECOMP_CODE_DIR/symbols.json` (kit `runtime/layout.cpp`). The app's `Resources/` never holds one.
+- **The load order** (as built): the kit's player host reads `RECOMP_CODE_DIR/build.json`'s `load_order` (kit `host/code_dir.h`). It `dlopen`s each bundle and stops with a message if one is missing, does not load, or registers nothing, or if no bundle covers the EXE's entry point.
 
-**What the app must carry for the first run** [static]:
+**What the app must carry for the first run** (as built, packaging.md §8: `Contents/Resources/ee/` in this shape, `tools/package_app.py` `ee_sources`) [measured: the packaged app's first run used only these]:
 - this repository's `tools/firstrun/`, `tools/inputs/`, `tools/boot/seed_user.py`, `tools/kitpath.py`;
 - `game.toml`, `globals.toml`, `db/functions/*.json`, `db/inputs.json`, `db/gog-files.json`;
 - the kit's `tools/recomp/translate.py`, `tools/recomp/bundle.py`, `tools/game_config.py`;
-- the runtime headers of §5.2;
-- `bin/innoextract` with its four licence texts (§3.1);
-- P6-B1's Python, clang and ld64.lld.
+- the runtime headers of §5.2: the include closure of the five, five files today (`x86.h`, `intrinsics.h`, `seh.h`, `thunks.h`, `freestanding.h`);
+- `bin/innoextract`; its four licence texts are in the app's `THIRD_PARTY_NOTICES.txt`;
+- P6-B1's Python, clang and ld64.lld, in `Contents/Resources/toolchain/`.
+
+Nothing else from the kit: no `tools/build.py`, no CMake.
+
+### 6.1 The app's side, as built (P6-B3)
+
+`Contents/MacOS/EmpireEarth` (`app/launcher/launcher.m`, AppKit, Objective-C) drives `firstrun.py` with this contract:
+- **Invocation:** `toolchain/python/bin/python3 -I -B ee/tools/firstrun/firstrun.py --home <home> --quiet …`.
+  - `status` and `build` get `--cc`, `--lld` and `--kit`, all inside the app; `import` gets `--innoextract`.
+  - The environment is the launcher's, with `PATH=/usr/bin:/bin:/usr/sbin:/sbin` and no `PYTHON*`, `RECOMP_*`, `SDKROOT`, `CPATH` or similar.
+  - `<home>` is `$EE_HOME`, else `~/Library/Application Support/EmpireEarth`.
+- **The window**, unless `status` says `ready`:
+  - a welcome line;
+  - "Choose your GOG Empire Earth Gold installer or game folder": an `NSOpenPanel` that takes files, folders and `.app`s;
+  - drag and drop onto the window;
+  - up to four one-click suggestions from `probe` (usable candidates only; `ok` is not false);
+  - one progress bar.
+    - The import fills the first 3 %, or 15 % when an `extract` phase shows it is the installer.
+    - The build fills the rest by §6's weights (preflight 1, inputs 5, translate 15, compile 78, publish and cleanup 0.5 each).
+    - Above the bar: "Step 1 of 2"/"Step 2 of 2", the phase in words and the elapsed time. Below it: firstrun's message with "N of M".
+  - Errors: a headline per error code, firstrun's message, and what to do (INSTALL.md §4 has the table). A problem with the chosen files offers the choice again; anything else offers *Try Again* and *Show Log* (`Build/firstrun.log` in Finder).
+- **Stopping:**
+  - *Cancel*, ⌘Q, closing the window and SIGTERM all send SIGTERM to `firstrun.py`, which stops its compilers and exits 130. The app quits once it has: `applicationShouldTerminate` answers "later". If firstrun does not stop within 15 s, it gets SIGKILL.
+  - The window then offers *Continue*, and the next start sees `build-resumable` and carries on. Measured: stopped in the compile step, the next start resumed and finished (`runs: 2`).
+- **Imported but not built** (`needs-build`, `build-resumable`): the build starts by itself.
+- **`ready`:** the launcher `exec`s `Contents/MacOS/EmpireEarthHost`, with no window, in the same process (packaging.md §8 has the environment). The host's output goes to `<home>/Logs/game.log`, the launcher's own lines to `<home>/Logs/launcher.log`.
+- **For tests and automation**, all with no window:
+  - `EmpireEarth --no-ui [--import PATH] [--no-play]` (with no `--import`, the first usable candidate `probe` finds). It prints firstrun's JSON lines on stdout and the host's environment on stderr, and passes SIGINT and SIGTERM on to firstrun;
+  - `EmpireEarth --status` prints the `status` result;
+  - `EmpireEarth --import PATH` opens the window and starts importing at once;
+  - `$EE_PROBE_PATHS` (colon-separated) replaces probe's usual places, `$EE_FIRSTRUN_NICE` lowers the build's priority and `$EE_FIRSTRUN_JOBS` sets its jobs.
+
+**The home as built** (§4.1, plus `Logs/`):
+
+```
+<home>/Game/Empire Earth/ …   Game/import.json   Build/<key>/{9 bundles, symbols.json, build.json}
+<home>/Build/current.json     Build/firstrun.log  registry.json  game-path.txt
+<home>/Logs/launcher.log      Logs/game.log (+ game.previous.log)   Data/ Users/ …   .firstrun.lock
+```
 
 ## 7. Files
 
@@ -348,7 +387,7 @@ The app shows the first-run UI unless `state` is `ready`.
 - **`nm` on a player's Mac.** bundle.py's undefined-symbol check runs `llvm-nm` beside clang or on `PATH`, else `nm`. Without the Command Line Tools, `/usr/bin/nm` is a stub that pops up the CLT installer.
   - Kit `feat/importer` makes bundle.py read the Mach-O's symbol table itself (`macho_undefined`). It agrees with llvm-nm on all nine bundles, with tests.
   - Until that is merged, the importer's preflight refuses a stub `nm` (`toolchain-missing`) rather than letting it pop up; P6-B1 could ship `llvm-nm` instead.
-- **`symbols.json` lookup.** See §6: needs a kit change for the dlopen host.
+- ~~**`symbols.json` lookup.**~~ Resolved in P6-B3 (§6).
 - **Homebrew clang reads `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/SDKSettings.json`** even with `-nostdinc` (in every object's depfile) [measured]. On a Mac without the CLT the file is absent, which P6-B1's bundled clang must tolerate; packaging.md measured the official LLVM release working.
 - **Inno Setup ≥ 6.4.2:** §3.2; settled by the morning test.
 - **Defaults to decide for players:** the resolution (1920×1080, legion's) and the player name (the account's first name).

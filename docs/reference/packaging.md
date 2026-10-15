@@ -1,6 +1,6 @@
 # Packaging: what the first run needs on a player's Mac
 
-Status: Phase 6, 2026-10-15: P6-A's inventory, with the importer (P6-B2, §1) and the bundled toolchain (P6-B1, §2, §3, §7) built and measured. The app bundle itself (P6-B3) is next.
+Status: Phase 6, 2026-10-15: P6-A's inventory, with the importer (P6-B2, §1) and the bundled toolchain (P6-B1, §2, §3, §7) built and measured, and **the app itself built and proven end to end (P6-B3, §8)**: `tools/package_app.py` makes a 191 MB `EmpireEarth.app` (86 MB zip, 78 MB DMG) holding nothing game-derived; its first run on this Mac, with no developer tools reachable, imported the user's wrapper and built the game in 131 s, and the game reached the main menu. The player-facing guide is [INSTALL.md](../INSTALL.md).
 
 Labels: **[measured]** = run on this Mac (M4 Max, 16 cores, macOS 15.5); **[static]** = read from files, binaries or code; **[inferred]** = reasoning, not run.
 
@@ -99,10 +99,20 @@ A re-run after an app update re-translates only when the translator or the DB ch
   - `clang`, `ld64.lld`;
   - FFmpeg's dylibs.
 
-  The staged toolchain arrives signed: `stage.py` signs its six Mach-O files ad hoc (`python3.12`, `libpython3.12.dylib`, two `lib-dynload` modules, `libcapstone.dylib`, and `llvm`, which takes the identifier `org.llvm.clang` from its embedded `Info.plist`) and checks them with `codesign --verify --strict`. `clang` and `ld64.lld` are symlinks to `llvm` inside the toolchain directory, which an app's seal records as symlinks. Copy the directory into the app with symlinks kept (`ditto`, `cp -R`), then sign the app as usual, inside out [static: not yet tried inside an app; P6-B3].
+  The staged toolchain arrives signed: `stage.py` signs its six Mach-O files ad hoc (`python3.12`, `libpython3.12.dylib`, two `lib-dynload` modules, `libcapstone.dylib`, and `llvm`, which takes the identifier `org.llvm.clang` from its embedded `Info.plist`) and checks them with `codesign --verify --strict`. `clang` and `ld64.lld` are symlinks to `llvm` inside the toolchain directory, which an app's seal records as symlinks.
 
-  **Without the hardened runtime, library validation is off**, so the host can `dlopen` the locally built bundles; the M1, EH and replay harnesses do this today. Players open the app once with *Open Anyway* in Privacy & Security.
-- **App Translocation:** an app started from Downloads runs from a read-only random path. Nothing may be written inside the app: the cache, user data and registry all live in `~/Library/Application Support/EmpireEarth/` (already the case for the user data).
+  **As built (P6-B3, `tools/package_app.py` `sign`)** [measured]: `xattr -cr`, then every Mach-O inside out. The launcher, the host and FFmpeg's three dylibs are signed `codesign --force --sign - --timestamp=none`. The toolchain's six and innoextract arrive validly signed and are kept byte for byte, so `MANIFEST.json` still describes them. Then the bundle is sealed (`codesign --force --sign -`). `codesign --verify --deep --strict` passes: `Signature=adhoc`, `flags=0x2(adhoc)`, `TeamIdentifier=not set`, no hardened runtime and no entitlements.
+
+  **Without the hardened runtime, library validation is off**, so the host can `dlopen` the locally built bundles: the packaged app loads the nine bundles its first run built (`[host] …: 9 bundles, 9 modules, 51909 translated functions`) [measured]. Players open the app once with *Open Anyway* in Privacy & Security.
+- **Gatekeeper** [measured, macOS 15.5]: `spctl -a -vv -t exec` says `rejected` for the app, quarantined or not. `syspolicy_check distribution` reports one fatal finding, "Notary Ticket Missing". A copy unpacked from the zip and given `com.apple.quarantine` (`0081;…;Safari;…`, as a download) is therefore blocked on first open. Players use the steps in [INSTALL.md](../INSTALL.md) §3:
+  - macOS 15: *Done* in the "Not Opened" dialog, then System Settings → Privacy & Security → *Open Anyway* (a password), then *Open Anyway* again;
+  - macOS 13–14: Control-click → *Open* also works.
+
+  The dialog itself was not raised here: it is modal and would have stayed on screen, unattended. No Gatekeeper setting was changed.
+- **The bundles the first run builds** are made by the app's own clang and lld, signed ad hoc by lld, and never quarantined (only downloads are), so Gatekeeper never assesses them [inferred; they load, measured].
+- **App Translocation:** an app started from Downloads runs from a read-only random path. Nothing may be written inside the app: the cache, user data and registry all live in `~/Library/Application Support/EmpireEarth/`.
+  - A full first run left all 1,199 files of the app byte-identical (SHA-256 before and after) [measured].
+  - The launcher, the first run and the game also ran from the read-only DMG volume (§8) [measured].
 - **If we get a Developer ID** (notarization requires the hardened runtime):
   - The host needs `com.apple.security.cs.disable-library-validation`, so it can load bundles that our team did not sign.
   - `clang`, `ld64.lld` and the Python executable must be signed with the Developer ID and the hardened runtime too, as nested code.
@@ -138,12 +148,20 @@ Made only on the player's Mac, never shipped:
 
    A slim export could leave out the RTTI classes, the community provenance and the x87 statistics. This is not required: none of them is game content, but the smaller file is the more obviously clean one.
 
-A packaging check should assert that the app contains:
-- no PE image;
-- none of the generated `fn_*` symbols;
-- no file from `analysis/` or `build/recomp/`.
+**The packaging check** (`tools/check_app.py`, run by `tools/package_app.py`, which deletes the app when it fails) [measured on the built app: passes]. It fails the build when the app holds:
+- **a PE image:** an `MZ` file with a `PE\0\0` header, whatever its name;
+- **a file of the game's:** any file whose size and MD5 match one of the 294 in `db/gog-files.json`, the nine modules included;
+- **translated code:**
+  - a Mach-O with `fn_<address>`/`body_<address>` symbols;
+  - a strong image table (`recomp_func_addrs`, `recomp_call`…; the runtime's own are weak, kit `runtime/dispatch.cpp`);
+  - any `.bundle`;
+- **a translation's by-products by name:** `symbols.json`, `funcdb.json`, `functions.tsv`, `chunk_*.c`, `table.c`, `funcs.h`, `*.asm`, `*.gpr`, `*.rep`, `*.exe`, `*.dll`, `*.ssa`, `*.bik`, an `analysis`, `gen` or `aux-*` folder;
+- **the same bytes as a file under `analysis/`, `build/recomp/` or `original/`.**
+  - Only files of the same size are hashed.
+  - Virtual environments and hidden folders there are skipped: `analysis/*/.venv` holds the same pefile and capstone as the app.
+  - A match with a file this repository or the kit tracks is allowed: `build/recomp/gen/x86.h` is a copy of the kit header the app carries.
 
-The kit's `check_repo.py` already does the same for the repositories.
+It also **warns** when a file spells out the packager's home directory. Today that is only FFmpeg's three dylibs, which keep their `./configure --prefix=…/build/cmake/macos-player/ffmpeg` line. `tests/test_package_app.py` checks every rule on synthetic apps.
 
 ## 7. Licence notices
 
@@ -159,3 +177,85 @@ The kit's `check_repo.py` already does the same for the repositories.
 - **GeneralUser GS** has its own licence (it permits use in software projects; its text ships in full).
 - python-build-standalone's MPL-2.0 covers its build scripts and the patches it applies to CPython; the notice carries the MPL text and the release URL, which is what the MPL asks of a binary.
 - glslang's licence file also carries GPL-3.0 with Bison's exception, for a Bison grammar glslang no longer uses: nothing GPL is built in.
+
+## 8. The app as built (P6-B3)
+
+```sh
+.venv/bin/python tools/package_app.py [--kit DIR] [--toolchain build/toolchain] [--innoextract DIR] \
+    [--toolchain-cache ~/Library/Caches/recomp-kit/toolchain] [--out build/dist] [--no-host-build] [--no-archives]
+```
+
+The command:
+1. builds the kit's **player host** (`tools/build.py --target player`, a CMake tree with no translation at all; kit `host/README.md` "The player host");
+2. compiles the **launcher** and draws the **icon** with this Mac's Xcode clang (players need none);
+3. writes `THIRD_PARTY_NOTICES.txt`: the kit's `tools/toolchain/notices.py` with innoextract's four components;
+4. assembles, signs (§5), checks (§6), then zips (`ditto -c -k --keepParent`) and makes a DMG (`hdiutil … -format ULMO`, the app beside an `Applications` link).
+
+Everything lands under `build/` (ignored). A run with the host already built takes about 45 s.
+
+**Layout** [measured]:
+
+```
+EmpireEarth.app/Contents/
+  Info.plist                 CFBundleExecutable EmpireEarth, dev.neoee.empireearth, LSMinimumSystemVersion 13.0, arm64
+  MacOS/EmpireEarth          the launcher (app/launcher/launcher.m, AppKit, 0.1 MB)
+  MacOS/EmpireEarthHost      the kit's player host + EE's stand-ins (app/ee_standins.cpp), 16.9 MB, debug stabs stripped
+  Frameworks/                libavcodec.61, libavformat.61, libavutil.59 (FFmpeg 7.1.1, LGPL, replaceable)
+  Resources/toolchain/       python/ (44.1 MB), llvm/ (76.2 MB, clang and ld64.lld symlinks kept), MANIFEST.json
+  Resources/ee/              game.toml, globals.toml, db/{functions/*.json, inputs.json, gog-files.json},
+                             tools/{firstrun/*.py, inputs/*.py, boot/seed_user.py, kitpath.py},
+                             kit/tools/{recomp/translate.py, recomp/bundle.py, game_config.py},
+                             kit/runtime/{x86.h, intrinsics.h, seh.h, thunks.h, freestanding.h}, bin/innoextract
+  Resources/THIRD_PARTY_NOTICES.txt, AppIcon.icns (our own drawing: a tower on a blue tile, app/launcher/make_icon.m),
+             general-midi.sf2 + its licence, classic-modes.json, ffmpeg-NOTICE.md
+```
+
+| Part | MB | Files |
+|---|---|---|
+| `Resources/toolchain/llvm` | 76.2 | 13 |
+| `Resources/toolchain/python` | 44.1 | 1,139 |
+| `Resources/general-midi.sf2` (GeneralUser GS) | 32.3 | 1 |
+| `MacOS/EmpireEarthHost` | 16.9 | 1 |
+| `Resources/ee/db` | 15.1 | 11 |
+| `Frameworks` (FFmpeg) | 3.1 | 3 |
+| notices, icon, mode list, FFmpeg notice, Info.plist, seal | 2.2 | 11 |
+| `Resources/ee/bin/innoextract` | 0.8 | 1 |
+| `Resources/ee/kit` + `tools` + tomls | 0.6 | 24 |
+| **app** | **191.2** | **1,202** (incl. 2 symlinks) |
+| `EmpireEarth.zip` | 86.1 | |
+| `EmpireEarth.dmg` (ULMO) | 78.0 | |
+
+**The launcher** (`Contents/MacOS/EmpireEarth`) runs `firstrun.py status` with the bundled Python, `-I -B` and an environment with no Homebrew `PATH` and no `RECOMP_*`, `PYTHON*`, `SDKROOT` or `CPATH`. It passes `--cc`, `--lld`, `--kit` and `--innoextract` by full path. Then:
+- **`ready`:** it `exec`s the host, with no window, in about 0.6 s. The host gets:
+  - `RECOMP_CODE_DIR=<home>/Build/<key>`;
+  - `RECOMP_SYMBOLS=<that>/symbols.json`;
+  - `RECOMP_EXE=<home>/Game/Empire Earth/Empire Earth.exe`;
+  - `RECOMP_PROFILE_DIR=<home>`, `RECOMP_REGISTRY=<home>/registry.json`.
+
+  Its stdout and stderr go to `<home>/Logs/game.log` (the previous run's is kept as `game.previous.log`). One process, so one Dock icon. Before the `exec` it checks that every bundle and the EXE exist; otherwise it rebuilds or asks for the game again.
+- **Anything else:** the first-run window (firstrun.md §6.1).
+
+**The first run on this Mac, as a player's** [measured, 2026-10-15]. The packaged app was copied to a scratch folder and run as `EmpireEarth --no-ui --import "/Applications/Empire Earth.app" --no-play`:
+- under `sandbox-exec` with a profile that denies reads, writes and execs in `/Applications/Xcode.app`, `/Library/Developer`, `/opt/homebrew` and `/usr/local` (in it `/usr/bin/nm` answers "No developer tools were found");
+- with `env -i HOME PATH=/usr/bin:/bin TMPDIR USER EE_HOME`, at `nice 10`.
+
+| | |
+|---|---|
+| import from the user's Wineskin wrapper | 0.6 s, 294 files, all APFS clones (the wrapper unchanged) |
+| inputs / translate / compile + link (16 jobs) | 12.9 / 29.2 / 85.4 s |
+| **total, wall** | **131.4 s** (1,291 CPU-s) |
+| peak under the home | 0.95 GB by `du` (0.74 GB of it `Build/`; `Game/` counts 0.40 GB but its clones take no new space) |
+| steady state | `Build/` 181 MB (nine bundles 177 MB + `symbols.json` 7.4 MB); `Game/` 404 MB by `du`, shared with the wrapper |
+| the app afterwards | all 1,199 files byte-identical, signature valid |
+
+- **The second start skips the first run** [measured]. `open -n -W` with `EE_HOME`, `RECOMP_HOST_NO_AUDIO=1` and the windowed smoke script (`tests/menus/app/smoke.script`):
+  - the launcher logged `status: ready` and `exec`'d the host in the same second;
+  - the host loaded 9 bundles (51,909 translated functions) and took the focus;
+  - the game played the intro, reached the 1024×768 main menu ("v2.00.2974"), opened Game Settings and returned;
+  - it quit with guest exit code 0.
+- **Through the window** [measured]. `open … --args --import "/Applications/Empire Earth.app"` with a fresh home:
+  - the window showed import, then "Step 2 of 2", with one bar and the phase text;
+  - the build took 150 s at `nice 10` beside a kit test build;
+  - the window closed, and the same process became the game, which reached the main menu.
+- **Not measured: a Mac that never had Xcode.** The sandbox hides the developer tools from the first run, but the host and launcher were built on this Mac. A friend's Mac is the remaining check (phase6.md).
+

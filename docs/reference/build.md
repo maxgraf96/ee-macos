@@ -231,10 +231,32 @@ What the app carries so a player's Mac, with no Xcode, Command Line Tools or Hom
 - `tools/firstrun/firstrun.py import` + `build --python … --cc … --lld …`: 135.9 s for the build (inputs 12.7 s, translation 28.8 s, compile + link 91.5 s at 12 jobs), peak 0.74 GB under `Build/`, 176 MB kept; the plain steps without the driver took 154 s (12 + 43 + 99 s) and peaked at 0.93 GB, with the listings kept;
 - the staged tree was unchanged afterwards (every file as `MANIFEST.json` records it, no `__pycache__` anywhere in the tools).
 
+### 5.2 The shareable app (Phase 6, P6-B3)
+
+```sh
+.venv/bin/python tools/build.py --target player        # the kit's player host: build/player/EmpireEarth.app
+.venv/bin/python tools/package_app.py [--toolchain build/toolchain] [--innoextract DIR]   # -> build/dist/
+.venv/bin/python tools/check_app.py build/dist/EmpireEarth.app          # the packaging check on its own
+```
+
+- **The player host** is the kit's `recomp_player`: the windowed app (`recomp_app`'s sources) with **no translation linked in**, plus `app/ee_standins.cpp`, attached by `app/CMakeLists.txt` as for `recomp_app`.
+  - It is built in its own CMake tree (`build/cmake/macos-player`, preset `macos-player`: `POP_TRANSLATE=OFF`), which has no generated code at all.
+  - It loads the bundles a first run built from `RECOMP_CODE_DIR` (`build.json`'s `load_order`) and `symbols.json` from beside them (kit `host/README.md` "The player host").
+  - The tree compiles none of this Mac's paths into the host (`RECOMP_NO_DEVELOPER_PATHS`), and the host never looks for `original/`.
+- **`tools/package_app.py`** makes `build/dist/EmpireEarth.app`, `EmpireEarth.zip` and `EmpireEarth.dmg`, using:
+  - the player host;
+  - the launcher (`app/launcher/launcher.m`);
+  - P6-B1's staged toolchain;
+  - innoextract;
+  - what the first run needs from this repository and the kit.
+
+  It signs them ad hoc and runs the packaging check, which deletes the app when it finds anything game-derived. [packaging.md](packaging.md) §5, §6 and §8 have the layout, the signing, the check and the measurements. The player's guide is [INSTALL.md](../INSTALL.md).
+- **Never give away `build/EmpireEarth.app`** (`tools/run.py`, `--target app`): it links the translation. Only `build/dist/` is for friends.
+
 ## 6. Tests
 
 ```sh
-.venv/bin/python tools/test.py                    # tests/test_*.py, then the kit's portable suites
+.venv/bin/python tools/test.py                    # tests/test_*.py (packaging check: test_package_app.py), then the kit's portable suites
 .venv/bin/python tools/test.py --m1 [--regenerate]   # the M1 harness
 .venv/bin/python tools/test.py --m1-replay [PACKS...]   # the Mac M1 replay: self-tests, or replay packs
 .venv/bin/python tools/test.py --boot [--regenerate]  # the whole game, booted headless to the main menu
