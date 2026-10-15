@@ -1,0 +1,50 @@
+# Main menu -> Game Tools -> Civilization Builder (exit) -> Game Tools ->
+# Scenario Editor (exit, "No" to saving) -> Game Tools. See settings.script
+# for the pointer.
+#
+# The run ends at Game Tools: its "Main Menu" button lies exactly where the
+# main menu's Exit Game is, and EE's UIButton::MouseLButtonUp (engine+0x65322)
+# fires "clicked" for any release inside its rectangle, pressed or not, so
+# when the main menu sees the same release the game exits [measured: 4 of 5
+# runs; static].
+# menus: alone (the Scenario Editor opens the game server: one at a time)
+timeout 300000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+
+click 511 474                 # Game Tools
+wait change within 15000
+wait 1000
+dump game-tools
+
+click 511 268                 # Civilization Builder
+wait change within 30000
+wait 1500
+dump civ-builder
+
+click 686 712                 # its exit (the door)
+wait change within 15000
+wait 1000
+dump game-tools-again
+
+click 511 371                 # Scenario Editor: black, the loading screen ("Creating
+wait size 800 600 within 60000  # World...", "Loading Complete"), then the editor.
+# Clicks are ignored until the editor is up: wait for its own panel (the
+# parchment under the map controls), which neither screen before it has.
+wait pixel 300 500 efd7a5 tol 24 within 240000
+wait 3000
+dump scenario-editor
+
+click 603 580                 # its exit (the door, bottom right)
+wait pixel 400 290 e6dbbd tol 24 within 15000  # the dialog's parchment
+wait 1000
+dump save-before-exit         # "Save scenario before exiting?"
+
+click 399 373                 # No
+wait size 1024 768 within 60000
+wait 1500
+dump game-tools-third
+quit

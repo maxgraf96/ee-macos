@@ -1,0 +1,43 @@
+# Main menu -> Game Settings: the Video, Audio and Interface tabs -> Cancel ->
+# back at the main menu -> Exit Game, the game's own way out.
+#
+# Every scenario starts at the main menu (ee_boot starts a script there) at
+# 1024x768. The pointer is the game's own: RTSMouse, the object at EXE
+# 0x9197a8, keeps its position as two floats at +4 and +8 in screen pixels
+# (EXE 0x510e5d integrates DirectInput motion into them). EE scales each count
+# by the smallest it has seen (100 at first), so a one-count move settles that
+# at 1 before anything else.
+timeout 300000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+dump main-menu
+
+click 511 577                 # Game Settings
+wait change within 15000
+wait 1000
+dump video
+
+click 430 33                  # the Audio tab
+wait change 0.02 within 10000
+wait 1000
+dump audio
+
+click 618 33                  # the Interface tab
+wait change 0.02 within 10000
+wait 1000
+dump interface
+
+click 240 33                  # back to Video
+wait change 0.02 within 10000
+wait 1000
+dump video-again
+
+click 888 746                 # Cancel
+wait change within 15000
+wait 1000
+dump main-menu-again
+
+click 511 680                 # Exit Game: the game ends itself
