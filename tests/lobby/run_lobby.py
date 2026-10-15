@@ -21,6 +21,11 @@ Per scenario:
                   LanGameAdvert for "mac-ref" goes out on UDP 8585 (ee_boot
                   --lan-pcap, decoded with tools/lan/eelan.py)
 
+Every scenario also times the lobby's paints (RECOMP_GDI_TIMING, BeginPaint
+to the end of EndPaint) and fails when the median exceeds 25 ms: the kit's
+GDI fast paths make one 1-3 ms, its per-pixel path 80 ms or more
+(docs/reference/lobby.md §13.5).
+
 The lobby binds the LAN ports (UDP 8585, UDP and TCP 33336), so scenarios run
 one at a time, each holding tools/game_ports.py's lock: no other game server
 of this user runs beside it, in any checkout.
@@ -118,6 +123,14 @@ def lan_messages(pcap):
         shutil.rmtree(out, ignore_errors=True)
 
 
+PAINT_MEDIAN_MS = 25
+
+
+def paint_times(log_text):
+    """The milliseconds of each `gdi: paint` line (RECOMP_GDI_TIMING)."""
+    return [float(m) for m in re.findall(r"gdi: paint \w+: ([\d.]+) ms", log_text)]
+
+
 def check_scenario(name, out_dir, problems, log_text):
     frames = {p.stem: load_png(p) for p in out_dir.glob("*.png")}
     if name == "lobby-open":
@@ -171,7 +184,7 @@ def run(name, script, seconds, keep_user):
     pcap = OUT / ("%s.pcap" % name)
     try:
         seed_user.main(["--user", str(user)])
-        env = dict(os.environ, RECOMP_STRICT="1")
+        env = dict(os.environ, RECOMP_STRICT="1", RECOMP_GDI_TIMING="1")
         with game_ports_lock("lobby %s (%s)" % (name, ROOT)):
             result = subprocess.run([str(ROOT / "build/recomp/ee_boot"), "--user", str(user),
                                      "--seconds", str(seconds), "--script", str(script),
@@ -206,6 +219,16 @@ def run(name, script, seconds, keep_user):
         written = [d[0] for d in dumps]
         if written != wanted:
             problems.append("frames written %s, the script dumps %s" % (written, wanted))
+        paints = sorted(paint_times(out))
+        if paints:
+            median = paints[len(paints) // 2]
+            print("     %s: %d paints, median %.1f ms, 90th percentile %.1f ms, longest %.1f ms" %
+                  (name, len(paints), median, paints[int(len(paints) * 0.9)], paints[-1]))
+            if median > PAINT_MEDIAN_MS:
+                problems.append("the lobby's median paint took %.1f ms (more than %d)" %
+                                (median, PAINT_MEDIAN_MS))
+        else:
+            problems.append("no paint was timed (RECOMP_GDI_TIMING)")
         if not problems:
             check_scenario(name, out_dir, problems, out)
         return name, problems, log, dumps
