@@ -3,7 +3,7 @@
 
     .venv/bin/python tools/package_app.py [--out build/dist] [--kit DIR]
         [--toolchain DIR] [--innoextract DIR] [--toolchain-cache DIR]
-        [--no-host-build] [--no-archives] [--jobs N]
+        [--no-host-build] [--no-archives] [--release DIR] [--jobs N]
 
 The app holds nothing game-derived (docs/reference/packaging.md §6). On a
 player's Mac its first run imports their own GOG files, translates and
@@ -32,7 +32,8 @@ with no translation), compile the launcher and draw the icon (the Xcode
 clang of this Mac: players need none), assemble, write the notices (the kit's
 tools/toolchain/notices.py, with innoextract's components), sign ad hoc
 inside out with no hardened runtime (packaging.md §5), run the packaging
-check (tools/check_app.py), then zip (ditto) and DMG (hdiutil).
+check (tools/check_app.py), then zip (ditto) and DMG (hdiutil; the app, an
+Applications link and app/ReadMeFirst.txt as "Read Me First.txt").
 
 Inputs: --toolchain (default build/toolchain, from tools/stage_toolchain.py),
 --innoextract (the directory tools/firstrun/innoextract/build.sh wrote;
@@ -40,9 +41,11 @@ default the newest upstream build in $EE_BUILD_CACHE, else
 ../ee-build-cache), --toolchain-cache (the downloads the notices are read
 from; default ~/Library/Caches/recomp-kit/toolchain).
 Outputs (all under build/, ignored): <out>/EmpireEarth.app, EmpireEarth.zip,
-EmpireEarth.dmg, check.json.
+EmpireEarth.dmg, check.json. --release DIR also copies the zip and the DMG
+there as EmpireEarth-<VERSION>.zip/.dmg, with their SHA256SUMS.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -51,6 +54,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -62,6 +66,10 @@ APP = "EmpireEarth"
 DISPLAY = "Empire Earth"
 HOST = "EmpireEarthHost"
 MIN_MACOS = "13.0"
+# CFBundleShortVersionString. CFBundleVersion is <commits>.<UTC yymmddHHMM>
+# of the build, so every build has its own.
+VERSION = "0.7"
+README = ROOT / "app/ReadMeFirst.txt"
 
 # This repository's part of the first run (firstrun.md §6), relative to ROOT.
 EE_FILES = ("game.toml", "globals.toml", "db/inputs.json", "db/gog-files.json", "tools/kitpath.py",
@@ -143,8 +151,15 @@ def version_info(kit):
     def git(*args, cwd=ROOT):
         r = subprocess.run(["git", "-C", str(cwd)] + list(args), capture_output=True, text=True)
         return r.stdout.strip() if r.returncode == 0 else ""
+    now = time.gmtime()
     return {"describe": git("describe", "--always", "--dirty"), "count": git("rev-list", "--count", "HEAD"),
-            "kit": git("describe", "--always", "--dirty", cwd=kit)}
+            "kit": git("describe", "--always", "--dirty", cwd=kit),
+            "stamp": time.strftime("%y%m%d%H%M", now), "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", now)}
+
+
+def bundle_version(version):
+    """CFBundleVersion: the commit count, then the build's minute (UTC)."""
+    return "%s.%s" % (version.get("count") or "0", version.get("stamp") or "0")
 
 
 def info_plist(version):
@@ -155,8 +170,8 @@ def info_plist(version):
         "CFBundleExecutable": APP,
         "CFBundleIconFile": "AppIcon",
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "0.6",
-        "CFBundleVersion": version["count"] or "1",
+        "CFBundleShortVersionString": VERSION,
+        "CFBundleVersion": bundle_version(version),
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleDevelopmentRegion": "en",
         "LSMinimumSystemVersion": MIN_MACOS,
@@ -173,7 +188,8 @@ def info_plist(version):
                                           "ZeroTier).",
         "NSHumanReadableCopyright": "Our code only: the game is the player's own GOG copy, "
                                     "imported and built on their Mac.",
-        "EEBuild": {"repository": version["describe"], "kit": version["kit"]},
+        "EEBuild": {"repository": version["describe"], "kit": version["kit"],
+                    "built": version.get("built", "")},
     }
 
 
@@ -252,7 +268,8 @@ def write_notices(kit, toolchain, innoextract, cache, work):
 
 def archives(app, out):
     """EmpireEarth.zip (ditto keeps symlinks and the signature) and
-    EmpireEarth.dmg (the app and an Applications link, to drag onto)."""
+    EmpireEarth.dmg (the app and an Applications link, to drag onto, and
+    "Read Me First.txt")."""
     z = out / (APP + ".zip")
     z.unlink(missing_ok=True)
     run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", app, z])
@@ -263,9 +280,31 @@ def archives(app, out):
         stage.mkdir()
         run(["ditto", app, stage / app.name])
         (stage / "Applications").symlink_to("/Applications")
+        shutil.copyfile(README, stage / "Read Me First.txt")
         run(["hdiutil", "create", "-quiet", "-volname", DISPLAY, "-srcfolder", stage, "-ov",
              "-format", "ULMO", "-fs", "APFS", dmg])
     return z, dmg
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def release(files, dest):
+    """Copies (never moves) the archives into `dest` as EmpireEarth-<VERSION>.<ext>
+    and writes SHA256SUMS beside them, in shasum -a 256's format."""
+    dest.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for f in files:
+        name = "%s-%s%s" % (APP, VERSION, f.suffix)
+        shutil.copy2(f, dest / name)
+        lines.append("%s  %s\n" % (sha256(dest / name), name))
+    (dest / "SHA256SUMS").write_text("".join(lines))
+    return [dest / ("%s-%s%s" % (APP, VERSION, f.suffix)) for f in files]
 
 
 def main(argv=None):
@@ -277,9 +316,13 @@ def main(argv=None):
                     default=Path.home() / "Library/Caches/recomp-kit/toolchain")
     ap.add_argument("--no-host-build", action="store_true", help="use build/player/EmpireEarth.app as it is")
     ap.add_argument("--no-archives", action="store_true")
+    ap.add_argument("--release", type=Path, default=None,
+                    help="also copy the zip and DMG there as EmpireEarth-%s.*, with SHA256SUMS" % VERSION)
     ap.add_argument("--jobs", default=str(min(os.cpu_count() or 4, 12)))
     kit, rest = kitpath.take_kit(list(sys.argv[1:] if argv is None else argv))
     args = ap.parse_args(rest)
+    if args.release and args.no_archives:
+        ap.error("--release needs the archives")
     kit_args = ["--kit", str(kit)] if kit != ROOT / "kit" else []
     out = args.out.resolve()
     if ROOT / "build" not in out.parents and out != ROOT / "build":
@@ -324,6 +367,11 @@ def main(argv=None):
         z, dmg = archives(app, out)
         result.update(zip=str(z), zip_bytes=z.stat().st_size, dmg=str(dmg), dmg_bytes=dmg.stat().st_size)
         print("\n%s: %.1f MB\n%s: %.1f MB" % (z, z.stat().st_size / 1e6, dmg, dmg.stat().st_size / 1e6))
+        if args.release:
+            copies = release([dmg, z], args.release.resolve())
+            result.update(release=[str(c) for c in copies])
+            print("\nRelease %s:" % VERSION)
+            print((args.release.resolve() / "SHA256SUMS").read_text(), end="")
     (out / "check.json").write_text(json.dumps(result, indent=1) + "\n")
     print("\nBuilt %s (%.1f MB)" % (app, total / 1e6))
     return 0

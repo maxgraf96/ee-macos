@@ -13,9 +13,10 @@
 //                  found), then import and build with one progress bar, and
 //                  start the game when that is done.
 //
-// Nothing is written inside the app (App Translocation makes it read-only):
-// everything goes to the data folder, ~/Library/Application Support/
-// EmpireEarth, or $EE_HOME for tests.
+// Nothing is written inside the app, which may be read-only (a disk image,
+// another user's copy); the only change it makes there is clearing the
+// quarantine mark (below). Everything else goes to the data folder,
+// ~/Library/Application Support/EmpireEarth, or $EE_HOME for tests.
 //
 //   EmpireEarth                         the app: window when needed
 //   EmpireEarth --import PATH           the window, importing PATH at once
@@ -27,20 +28,42 @@
 //   EmpireEarth --status                print firstrun's status result, exit
 //   EmpireEarth --check-ports           the game's network ports something
 //                                       else holds; exit 1 if any
+//   EmpireEarth --check-install [APP]   where the app runs from, whether it
+//                                       is translocated, its quarantined
+//                                       files: one JSON line, changes nothing
+//   EmpireEarth --move-to-applications [ARGS…]
+//                                       what the translocation alert's "Move
+//                                       to Applications" does, with no window:
+//                                       copy into Applications, start it
+//                                       there with ARGS, exit
 //
 // Before the game starts, the launcher checks that the game's fixed network
 // ports are free; when another copy of the game (or anything else) holds
 // them, it asks the player to close it, or to start anyway.
 //
+// Before anything else runs, the launcher looks at its own bundle
+// (packaging.md §5.1). A copy downloaded from the internet carries
+// com.apple.quarantine on every file. The player approves the app once (Open
+// Anyway); the launcher then clears the mark from the app's files, so the
+// Python, clang, ld64.lld, innoextract and the host it runs are never
+// assessed one by one. An app that macOS runs translocated (opened straight
+// from the disk image or Downloads) asks to be moved into Applications first.
+//
 // $EE_FIRSTRUN_NICE lowers the build's priority (tests); $EE_PROBE_PATHS
-// (colon-separated) replaces probe's usual places.
+// (colon-separated) replaces probe's usual places. For tests:
+// $EE_APPLICATIONS_DIR replaces /Applications, $EE_TEST_TRANSLOCATED_FROM=PATH
+// makes the launcher behave as if translocated from PATH, $EE_TEST_ALERT
+// (move or quit) answers the translocation alert without showing it,
+// $EE_TEST_APP=APP makes APP the app whose quarantine is cleared.
 //
 // docs/reference/firstrun.md §6 is the contract with firstrun.py.
 #import <AppKit/AppKit.h>
 
 #include <arpa/inet.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fts.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -48,6 +71,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 extern char **environ;
@@ -122,6 +146,402 @@ static void launcher_log(EEPaths *paths, NSString *line) {
         fputs(text.UTF8String, out);
         fclose(out);
     }
+}
+
+// ------------------------------------------- quarantine, translocation --
+//
+// A downloaded app carries com.apple.quarantine, and a copy dragged out of
+// a quarantined disk image or unpacked from a quarantined zip carries it on
+// every file. Gatekeeper assesses the app when it is opened; the player
+// approves it once (Open Anyway in Privacy & Security, INSTALL.md §3). The
+// launcher only runs after that, and then clears the mark from every file of
+// its own bundle, so that the code it runs in turn (Python, clang, ld64.lld,
+// innoextract, the host and FFmpeg's dylibs) is never assessed by itself.
+// The mark is not part of the code signature: codesign --verify --deep
+// --strict passes before and after.
+//
+// App Translocation: a quarantined app that the player opens where it was
+// downloaded, or straight from the disk image, runs from a random read-only
+// mount (/private/var/folders/…/AppTranslocation/…/d/EmpireEarth.app). The
+// launcher asks to be moved into Applications first.
+
+static const char *const kQuarantine = "com.apple.quarantine";
+
+typedef struct {
+    unsigned long files, quarantined, cleared, failed;
+    int firstErrno;
+    char firstFailure[PATH_MAX];
+} EEQuarantine;
+
+// Every file, folder and symlink in `root` (the root too, links not followed)
+// with com.apple.quarantine; with `clear`, the mark removed. A file or folder
+// of ours that has no write permission is made writable for the moment it
+// takes (macOS refuses to change a read-only file's extended attributes).
+static EEQuarantine quarantine_scan(NSString *root, BOOL clear) {
+    EEQuarantine q;
+    memset(&q, 0, sizeof q);
+    char *roots[] = {(char *)root.fileSystemRepresentation, NULL};
+    FTS *fts = fts_open(roots, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+    if (!fts)
+        return q;
+    for (FTSENT *e; (e = fts_read(fts));) {
+        if (e->fts_info == FTS_DP)
+            continue; // a folder is seen once, on the way in
+        q.files++;
+        if (getxattr(e->fts_path, kQuarantine, NULL, 0, 0, XATTR_NOFOLLOW) < 0)
+            continue;
+        q.quarantined++;
+        if (!clear)
+            continue;
+        int rc = removexattr(e->fts_path, kQuarantine, XATTR_NOFOLLOW);
+        int err = rc == 0 ? 0 : errno;
+        if (rc != 0 && (err == EACCES || err == EPERM) && e->fts_statp &&
+            e->fts_info != FTS_SL && e->fts_info != FTS_SLNONE &&
+            e->fts_statp->st_uid == getuid() && !(e->fts_statp->st_mode & S_IWUSR)) {
+            mode_t mode = e->fts_statp->st_mode & 07777;
+            if (chmod(e->fts_path, mode | S_IWUSR) == 0) {
+                rc = removexattr(e->fts_path, kQuarantine, XATTR_NOFOLLOW);
+                err = rc == 0 ? 0 : errno;
+                chmod(e->fts_path, mode);
+            }
+        }
+        if (rc == 0) {
+            q.cleared++;
+        } else {
+            if (!q.failed) {
+                q.firstErrno = err;
+                strlcpy(q.firstFailure, e->fts_path, sizeof q.firstFailure);
+            }
+            q.failed++;
+        }
+    }
+    fts_close(fts);
+    return q;
+}
+
+// The app this launcher belongs to, or nil when it runs outside one (a test
+// build): then nothing is scanned or moved. $EE_TEST_APP names another app
+// instead, so that tests clear a quarantined copy with a launcher that is not
+// inside it: starting anything inside a quarantined app makes Gatekeeper ask
+// the person at the screen.
+static NSString *own_bundle(void) {
+    NSString *test = NSProcessInfo.processInfo.environment[@"EE_TEST_APP"];
+    if (test.length)
+        return test.stringByStandardizingPath;
+    NSBundle *b = NSBundle.mainBundle;
+    NSString *exe = b.executablePath.stringByResolvingSymlinksInPath;
+    NSString *path = b.bundlePath;
+    if (![path.pathExtension isEqual:@"app"] ||
+        ![exe hasPrefix:[path.stringByResolvingSymlinksInPath stringByAppendingString:@"/Contents/MacOS/"]])
+        return nil;
+    return path;
+}
+
+static void *security_symbol(const char *name) {
+    static void *security;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        security = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY | RTLD_LOCAL);
+    });
+    return security ? dlsym(security, name) : NULL;
+}
+
+// Whether `path` runs translocated, and from where (*original, when macOS
+// says). Security's SecTranslocateIsTranslocatedURL answers (macOS 10.12+,
+// exported but no longer in the SDK's headers); the mount's own place,
+// …/AppTranslocation/…, answers too, whatever the API says.
+static BOOL is_translocated(NSString *path, NSString **original) {
+    if (original)
+        *original = nil;
+    NSString *fake = NSProcessInfo.processInfo.environment[@"EE_TEST_TRANSLOCATED_FROM"];
+    if (fake.length) {
+        if (original)
+            *original = fake.stringByStandardizingPath;
+        return YES;
+    }
+    if (!path.length)
+        return NO;
+    typedef Boolean (*IsTranslocated)(CFURLRef, bool *, CFErrorRef *);
+    typedef CFURLRef (*OriginalPath)(CFURLRef, CFErrorRef *);
+    IsTranslocated isTranslocated = (IsTranslocated)security_symbol("SecTranslocateIsTranslocatedURL");
+    OriginalPath originalPath = (OriginalPath)security_symbol("SecTranslocateCreateOriginalPathForURL");
+    NSURL *url = [NSURL fileURLWithPath:path];
+    bool api = false;
+    if (isTranslocated && !isTranslocated((__bridge CFURLRef)url, &api, NULL))
+        api = false;
+    BOOL byPlace = [path rangeOfString:@"/AppTranslocation/"].location != NSNotFound;
+    if (!api && !byPlace)
+        return NO;
+    if (original && originalPath) {
+        CFURLRef o = originalPath((__bridge CFURLRef)url, NULL);
+        if (o)
+            *original = ((__bridge_transfer NSURL *)o).path;
+    }
+    return YES;
+}
+
+// What the player is told when quarantined code would not run.
+static NSString *quarantine_fix(NSString *app) {
+    return [NSString stringWithFormat:@"Open Terminal (in Applications → Utilities), paste this line "
+                                      @"and press Return:\n\n    xattr -cr \"%@\"\n\nThen open Empire "
+                                      @"Earth again.",
+                                      app ?: @"/Applications/EmpireEarth.app"];
+}
+
+// The files of the app that still carry the mark (0 when it runs outside an
+// app). Something nested that failed to start with some left is taken for
+// macOS refusing quarantined code.
+static unsigned long quarantine_left(void) {
+    NSString *app = own_bundle();
+    return app ? quarantine_scan(app, NO).quarantined : 0;
+}
+
+static NSString *version_text(void) {
+    NSDictionary *info = NSBundle.mainBundle.infoDictionary;
+    return [NSString stringWithFormat:@"%@ (%@)", info[@"CFBundleShortVersionString"] ?: @"?",
+                                      info[@"CFBundleVersion"] ?: @"?"];
+}
+
+// --check-install [APP]: one JSON line about the app; nothing is changed.
+static int check_install(NSString *app) {
+    NSString *original = nil;
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    out[@"app"] = app ?: [NSNull null];
+    out[@"version"] = version_text();
+    BOOL translocated = is_translocated(app, &original);
+    out[@"translocated"] = @(translocated);
+    out[@"original"] = original ?: [NSNull null];
+    if (app && [NSFileManager.defaultManager fileExistsAtPath:app]) {
+        EEQuarantine q = quarantine_scan(app, NO);
+        out[@"files"] = @(q.files);
+        out[@"quarantined"] = @(q.quarantined);
+        out[@"writable"] = @(access(app.fileSystemRepresentation, W_OK) == 0);
+    }
+    NSData *json = [NSJSONSerialization dataWithJSONObject:out options:NSJSONWritingSortedKeys error:nil];
+    fwrite(json.bytes, 1, json.length, stdout);
+    fputc('\n', stdout);
+    return 0;
+}
+
+// Clears the app's quarantine, and says so in launcher.log.
+static void clear_quarantine(EEPaths *paths, NSString *app, BOOL echo) {
+    NSDate *start = NSDate.date;
+    EEQuarantine q = quarantine_scan(app, YES);
+    if (!q.quarantined)
+        return;
+    NSString *line = [NSString stringWithFormat:@"quarantine: cleared from %lu files (of %lu in the app, %.2f s)",
+                                                q.cleared, q.files, -start.timeIntervalSinceNow];
+    if (q.failed)
+        line = [line stringByAppendingFormat:@"; %lu keep it (first %s: %s)", q.failed, q.firstFailure,
+                                             strerror(q.firstErrno)];
+    launcher_log(paths, line);
+    if (echo)
+        fprintf(stderr, "launcher: %s\n", line.UTF8String);
+}
+
+// Where "Move to Applications" puts the app: /Applications, or the player's
+// own Applications folder when they may not write the system's.
+static NSString *applications_folder(void) {
+    NSString *dir = NSProcessInfo.processInfo.environment[@"EE_APPLICATIONS_DIR"];
+    if (dir.length)
+        return dir.stringByStandardizingPath;
+    if (access("/Applications", W_OK) == 0)
+        return @"/Applications";
+    dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Applications"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    return dir;
+}
+
+// Copies the app at `from` into Applications (ditto --noqtn, which still
+// copies a com.apple.quarantine the files already have; an older copy there
+// is replaced), clears the mark from the copy and returns
+// where it is now; nil and *why on failure. An app that already is in
+// Applications, but was put there without Finder (so macOS still
+// translocates it), only has its quarantine cleared.
+static NSString *move_to_applications(EEPaths *paths, NSString *from, NSString **why) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *dir = applications_folder();
+    NSString *name = from.lastPathComponent;
+    NSString *dest = [dir stringByAppendingPathComponent:name];
+    if ([from.stringByStandardizingPath isEqual:dest.stringByStandardizingPath]) {
+        EEQuarantine q = quarantine_scan(dest, YES);
+        launcher_log(paths, [NSString stringWithFormat:@"move: %@ is in Applications already; "
+                                                       @"quarantine cleared from %lu of %lu files",
+                                                       dest, q.cleared, q.quarantined]);
+        if (q.failed) {
+            *why = [NSString stringWithFormat:@"%s: %s", q.firstFailure, strerror(q.firstErrno)];
+            return nil;
+        }
+        return dest;
+    }
+    NSString *me = NSBundle.mainBundle.bundleIdentifier;
+    for (NSRunningApplication *other in [NSRunningApplication runningApplicationsWithBundleIdentifier:me ?: @""])
+        if (other.processIdentifier != getpid() &&
+            [other.bundleURL.path.stringByStandardizingPath isEqual:dest]) {
+            *why = @"Empire Earth is running from the Applications folder. Quit it, then try again.";
+            return nil;
+        }
+    NSString *fresh = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@".%@.%d.new", name, getpid()]];
+    NSString *old = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@".%@.%d.old", name, getpid()]];
+    [fm removeItemAtPath:fresh error:nil];
+    NSTask *ditto = [NSTask new];
+    ditto.executableURL = [NSURL fileURLWithPath:@"/usr/bin/ditto"];
+    ditto.arguments = @[ @"--noqtn", from, fresh ];
+    ditto.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    NSPipe *err = [NSPipe pipe];
+    ditto.standardError = err;
+    NSError *error = nil;
+    NSDate *start = NSDate.date;
+    if (![ditto launchAndReturnError:&error]) {
+        *why = error.localizedDescription;
+        return nil;
+    }
+    NSData *said = [err.fileHandleForReading readDataToEndOfFile];
+    [ditto waitUntilExit];
+    if (ditto.terminationStatus != 0) {
+        NSString *text = [[NSString alloc] initWithData:said encoding:NSUTF8StringEncoding];
+        *why = [NSString stringWithFormat:@"Copying into %@ failed: %@", dir,
+                                          text.length ? [text stringByTrimmingCharactersInSet:
+                                                                  NSCharacterSet.whitespaceAndNewlineCharacterSet]
+                                                      : @"ditto failed"];
+        [fm removeItemAtPath:fresh error:nil];
+        return nil;
+    }
+    EEQuarantine q = quarantine_scan(fresh, YES);
+    if (q.failed) {
+        *why = [NSString stringWithFormat:@"%s: %s", q.firstFailure, strerror(q.firstErrno)];
+        [fm removeItemAtPath:fresh error:nil];
+        return nil;
+    }
+    BOOL replaced = NO;
+    if ([fm fileExistsAtPath:dest]) {
+        if (rename(dest.fileSystemRepresentation, old.fileSystemRepresentation) != 0) {
+            *why = [NSString stringWithFormat:@"%@ cannot be replaced: %s", dest, strerror(errno)];
+            [fm removeItemAtPath:fresh error:nil];
+            return nil;
+        }
+        replaced = YES;
+    }
+    if (rename(fresh.fileSystemRepresentation, dest.fileSystemRepresentation) != 0) {
+        *why = [NSString stringWithFormat:@"%@: %s", dest, strerror(errno)];
+        if (replaced)
+            rename(old.fileSystemRepresentation, dest.fileSystemRepresentation);
+        [fm removeItemAtPath:fresh error:nil];
+        return nil;
+    }
+    if (replaced)
+        [fm removeItemAtPath:old error:nil];
+    // Started from Applications with any mark left, it would be assessed again.
+    unsigned long left = quarantine_scan(dest, NO).quarantined;
+    if (left) {
+        *why = [NSString stringWithFormat:@"%lu files in %@ are still quarantined.", left, dest];
+        return nil;
+    }
+    launcher_log(paths, [NSString stringWithFormat:@"move: copied %@ to %@%@ (%.1f s)", from, dest,
+                                                   replaced ? @", replacing the copy there" : @"",
+                                                   -start.timeIntervalSinceNow]);
+    return dest;
+}
+
+// Starts the app at `app` as a new instance, with `args` and this launcher's
+// EE_*, RECOMP_* and SDL_* variables; NO and *why if Launch Services does
+// not. The new instance inherits this one's environment as well, so the
+// EE_TEST_* variables are set empty for it: it is not translocated.
+static BOOL relaunch(EEPaths *paths, NSString *app, NSArray *args, NSString **why) {
+    NSWorkspaceOpenConfiguration *config = [NSWorkspaceOpenConfiguration configuration];
+    config.createsNewApplicationInstance = YES;
+    config.arguments = args ?: @[];
+    NSMutableDictionary *env = [NSMutableDictionary dictionary];
+    NSDictionary *mine = NSProcessInfo.processInfo.environment;
+    for (NSString *key in mine)
+        if ([key hasPrefix:@"EE_TEST_"])
+            env[key] = @"";
+        else if ([key hasPrefix:@"EE_"] || [key hasPrefix:@"RECOMP_"] || [key hasPrefix:@"SDL_"])
+            env[key] = mine[key];
+    config.environment = env;
+    __block NSError *error = nil;
+    __block pid_t pid = 0;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    [NSWorkspace.sharedWorkspace openApplicationAtURL:[NSURL fileURLWithPath:app]
+                                        configuration:config
+                                    completionHandler:^(NSRunningApplication *started, NSError *e) {
+                                        pid = started.processIdentifier;
+                                        error = e;
+                                        dispatch_semaphore_signal(done);
+                                    }];
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) != 0) {
+        *why = @"macOS did not start it within a minute.";
+        return NO;
+    }
+    if (error) {
+        *why = error.localizedDescription;
+        return NO;
+    }
+    launcher_log(paths, pid > 0 ? [NSString stringWithFormat:@"move: started %@ (pid %d)", app, pid]
+                                : [NSString stringWithFormat:@"move: started %@", app]);
+    return YES;
+}
+
+// The app runs translocated: ask to move it into Applications. Never returns.
+static void translocated_alert(EEPaths *paths, NSString *app, NSString *original, NSArray *args) {
+    NSString *answer = NSProcessInfo.processInfo.environment[@"EE_TEST_ALERT"];
+    if (!answer.length) {
+        NSApplication *nsapp = NSApplication.sharedApplication;
+        nsapp.activationPolicy = NSApplicationActivationPolicyRegular;
+        [nsapp activateIgnoringOtherApps:YES];
+    }
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"Move Empire Earth to Applications";
+    alert.informativeText =
+        @"Please drag EmpireEarth into your Applications folder first, then open it from there.\n\n"
+        @"Opened straight from the disk image or the Downloads folder, macOS runs it from a "
+        @"temporary, read-only place. “Move to Applications” copies it there and opens it.";
+    [alert addButtonWithTitle:@"Move to Applications"];
+    [alert addButtonWithTitle:@"Quit"];
+    BOOL move = answer.length ? [answer isEqual:@"move"] : [alert runModal] == NSAlertFirstButtonReturn;
+    launcher_log(paths, move ? @"translocated: move to Applications" : @"translocated: quit");
+    if (!move)
+        exit(0);
+    NSString *why = nil;
+    NSString *dest = move_to_applications(paths, original ?: app, &why);
+    if (dest && relaunch(paths, dest, args, &why))
+        exit(0);
+    launcher_log(paths, [NSString stringWithFormat:@"move failed: %@", why]);
+    if (!answer.length) {
+        NSAlert *failed = [NSAlert new];
+        failed.alertStyle = NSAlertStyleWarning;
+        failed.messageText = @"Empire Earth could not be moved to Applications";
+        failed.informativeText = [NSString
+            stringWithFormat:@"%@\n\nDrag EmpireEarth into your Applications folder in Finder, then "
+                             @"open it from there.",
+                             why ?: @"Something went wrong."];
+        [failed addButtonWithTitle:@"Quit"];
+        [failed runModal];
+    }
+    exit(1);
+}
+
+// Before anything nested runs: the start in launcher.log, then translocation
+// (the alert, or a note without a window) or the quarantine cleared.
+static void prepare_app(EEPaths *paths, BOOL ui, NSArray *args) {
+    NSString *app = own_bundle();
+    NSString *original = nil;
+    BOOL translocated = is_translocated(app, &original);
+    launcher_log(paths, [NSString stringWithFormat:@"launcher %@ at %@%@", version_text(),
+                                                   app ?: NSBundle.mainBundle.executablePath,
+                                                   translocated ? [NSString stringWithFormat:
+                                                       @" (translocated from %@)", original ?: @"?"] : @""]);
+    if (!app)
+        return;
+    if (translocated) {
+        if (ui)
+            translocated_alert(paths, app, original, args);
+        fprintf(stderr, "launcher: macOS runs this app translocated (from %s): move it into "
+                        "Applications\n",
+                original ? original.UTF8String : "?");
+        return;
+    }
+    clear_quarantine(paths, app, !ui);
 }
 
 // --------------------------------------------------------- firstrun.py --
@@ -493,12 +913,15 @@ static NSString *headline_for(NSString *code) {
             @"compile-failed" : @"Building the game failed.",
             @"interrupted" : @"Stopped.",
             @"internal" : @"Something unexpected went wrong.",
+            @"quarantined" : @"macOS is blocking part of this app.",
         };
     });
     return words[code] ?: @"Something went wrong.";
 }
 
 static NSString *advice_for(NSString *code) {
+    if ([code isEqual:@"quarantined"])
+        return quarantine_fix(own_bundle());
     if ([code isEqual:@"installer-tool-missing"] || [code isEqual:@"toolchain-missing"])
         return @"Download the app again and replace this copy.";
     if ([code isEqual:@"disk-space"])
@@ -609,6 +1032,7 @@ static NSString *phase_text(NSString *phase) {
 @property(strong) NSString *lastPhaseText;
 - (BOOL)acceptsDrop;
 - (void)importPath:(NSString *)path;
+- (BOOL)failIfQuarantined;
 @end
 
 @implementation EEDropView
@@ -789,6 +1213,8 @@ static NSButton *button(NSString *title, id target, SEL action) {
     }
     NSString *state = res[@"data"][@"state"];
     if (rc != 0 || !state) {
+        if (!res && [self failIfQuarantined])
+            return;
         [self fail:res[@"data"][@"code"] ?: @"internal"
               message:res[@"message"] ?: @"The first-run tools did not answer."
                  data:nil
@@ -1007,7 +1433,7 @@ static NSButton *button(NSString *title, id target, SEL action) {
             then(status, result);
         }
         error:&error];
-    if (!ok)
+    if (!ok && ![self failIfQuarantined])
         [self fail:@"toolchain-missing" message:error.localizedDescription data:nil choose:NO];
 }
 
@@ -1020,6 +1446,12 @@ static NSButton *button(NSString *title, id target, SEL action) {
         [self show:@"stopped"];
         return;
     }
+    // A tool that did not run (no result at all, or firstrun saying clang,
+    // innoextract or a translator would not start) in a still quarantined app.
+    if ((!result || [@[ @"toolchain-missing", @"installer-tool-missing", @"translate-failed",
+                        @"compile-failed", @"inputs-mismatch", @"internal" ] containsObject:code]) &&
+        [self failIfQuarantined])
+        return;
     [self fail:code ?: @"internal"
          message:result[@"message"] ?: [NSString stringWithFormat:@"The first run ended with "
                                                                   @"status %d.",
@@ -1087,11 +1519,33 @@ static NSButton *button(NSString *title, id target, SEL action) {
         return;
     }
     exec_host(self.paths, env, YES);
+    if ([self failIfQuarantined]) {
+        [self.window makeKeyAndOrderFront:nil];
+        return;
+    }
     [self fail:@"internal"
          message:[NSString stringWithFormat:@"The game could not be started (%@).", self.paths.host]
             data:nil
           choose:NO];
     [self.window makeKeyAndOrderFront:nil];
+}
+
+// Something nested did not start, or stopped before it said anything: when
+// files of the app still carry the quarantine, macOS refusing to run them is
+// the likely reason, and the window says how to clear it.
+- (BOOL)failIfQuarantined {
+    unsigned long left = quarantine_left();
+    if (!left)
+        return NO;
+    launcher_log(self.paths, [NSString stringWithFormat:@"%lu files of the app are still quarantined", left]);
+    [self fail:@"quarantined"
+         message:[NSString stringWithFormat:@"Parts of EmpireEarth (%lu files) are still marked as "
+                                            @"downloaded from the internet, and the app could not "
+                                            @"clear the mark itself, so macOS may refuse to run them.",
+                                            left]
+            data:nil
+          choose:NO];
+    return YES;
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app {
@@ -1111,7 +1565,27 @@ static NSButton *button(NSString *title, id target, SEL action) {
 
 // ----------------------------------------------------------- no window --
 
+// Without a window: after something nested failed, when files of the app are
+// still quarantined, say that macOS may be refusing them and how to fix it.
+static int explain_if_quarantined(int rc) {
+    if (rc == 0 || rc == 130)
+        return rc;
+    unsigned long left = quarantine_left();
+    if (left)
+        fprintf(stderr, "launcher: %lu files of the app are still quarantined, so macOS may refuse to "
+                        "run them. %s\n",
+                left, [quarantine_fix(own_bundle()) stringByReplacingOccurrencesOfString:@"\n\n"
+                                                                              withString:@" "].UTF8String);
+    return rc;
+}
+
+static int no_ui_steps(EEPaths *paths, NSString *importPath, BOOL play);
+
 static int no_ui(EEPaths *paths, NSString *importPath, BOOL play) {
+    return explain_if_quarantined(no_ui_steps(paths, importPath, play));
+}
+
+static int no_ui_steps(EEPaths *paths, NSString *importPath, BOOL play) {
     signal(SIGINT, forward_stop);
     signal(SIGTERM, forward_stop);
     NSString *broken = [paths missing];
@@ -1185,8 +1659,15 @@ static int no_ui(EEPaths *paths, NSString *importPath, BOOL play) {
 
 int main(int argc, const char **argv) {
     @autoreleasepool {
-        BOOL ui = YES, play = YES, statusOnly = NO;
+        BOOL ui = YES, play = YES, statusOnly = NO, move = NO;
         NSString *importPath = nil;
+        // What a relaunch from Applications gets: the arguments, less the
+        // ones only this start needed.
+        NSMutableArray *forward = [NSMutableArray array];
+        for (int i = 1; i < argc; ++i) {
+            if (strcmp(argv[i], "--move-to-applications") && strncmp(argv[i], "-psn_", 5))
+                [forward addObject:@(argv[i])];
+        }
         for (int i = 1; i < argc; ++i) {
             if (!strcmp(argv[i], "--no-ui"))
                 ui = NO;
@@ -1201,6 +1682,12 @@ int main(int argc, const char **argv) {
                     printf("in use: %s\n", busy.UTF8String);
                 return busy ? 1 : 0;
             }
+            else if (!strcmp(argv[i], "--check-install"))
+                return check_install(i + 1 < argc && argv[i + 1][0] != '-'
+                                         ? @(argv[i + 1]).stringByStandardizingPath
+                                         : own_bundle());
+            else if (!strcmp(argv[i], "--move-to-applications"))
+                move = YES;
             else if (!strcmp(argv[i], "--import") && i + 1 < argc)
                 importPath = @(argv[++i]);
             else if (!strncmp(argv[i], "-psn_", 5))
@@ -1210,12 +1697,32 @@ int main(int argc, const char **argv) {
             else {
                 fprintf(stderr,
                         "usage: %s [--no-ui] [--import PATH] [--no-play] [--status] "
-                        "[--check-ports]\n",
+                        "[--check-ports] [--check-install [APP]] [--move-to-applications]\n",
                         argv[0]);
                 return 2;
             }
         }
         EEPaths *paths = [EEPaths current];
+        if (move) {
+            // The alert's "Move to Applications", with no window.
+            NSString *app = own_bundle(), *original = nil, *why = nil;
+            if (!app) {
+                fprintf(stderr, "launcher: not inside an app\n");
+                return 2;
+            }
+            BOOL translocated = is_translocated(app, &original);
+            launcher_log(paths, [NSString stringWithFormat:@"launcher %@ at %@: move to Applications",
+                                                           version_text(), app]);
+            NSString *dest = move_to_applications(paths, translocated && original ? original : app, &why);
+            if (!dest || !relaunch(paths, dest, forward, &why)) {
+                fprintf(stderr, "launcher: %s\n", why.UTF8String);
+                return 1;
+            }
+            printf("%s\n", dest.UTF8String);
+            return 0;
+        }
+        // Before anything nested runs: translocated, or the quarantine cleared.
+        prepare_app(paths, ui && !statusOnly, forward);
         if (statusOnly) {
             NSDictionary *status = nil;
             int rc = firstrun_sync(paths, @"status", toolchain_args(paths), NO, &status);
@@ -1224,7 +1731,7 @@ int main(int argc, const char **argv) {
                 fwrite(json.bytes, 1, json.length, stdout);
                 fputc('\n', stdout);
             }
-            return rc;
+            return explain_if_quarantined(rc);
         }
         if (!ui)
             return no_ui(paths, importPath, play);
