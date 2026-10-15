@@ -26,8 +26,12 @@ LOCK = Path(tempfile.gettempdir()) / "ee-game-ports.lock"
 
 
 @contextlib.contextmanager
-def game_ports_lock(who, timeout=1800):
-    """Wait (up to timeout seconds) until no other game server runs here, then hold the ports."""
+def game_ports_lock(who, timeout=None):
+    """Wait until no other game server runs here, then hold the ports.
+
+    By default the wait blocks in the kernel (flock), so waiters are served as
+    the lock frees rather than racing a polling loop. With timeout (seconds) it
+    polls instead and raises TimeoutError when the time is up."""
     with open(LOCK, "a+") as f:
         start = time.monotonic()
         told = False
@@ -36,6 +40,12 @@ def game_ports_lock(who, timeout=1800):
                 fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
+                if timeout is None:
+                    f.seek(0)
+                    holder = f.read().strip() or "another run"
+                    print("game ports busy (%s); waiting" % holder, file=sys.stderr, flush=True)
+                    fcntl.flock(f, fcntl.LOCK_EX)
+                    break
                 if not told:
                     f.seek(0)
                     holder = f.read().strip() or "another run"

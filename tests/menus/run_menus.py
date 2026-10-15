@@ -13,6 +13,10 @@ the main menu with a fresh user directory and must
   - random-map.script must reach the game: 800x600 frames that change while
     it runs.
 
+A script's `# menus: alone` line runs it on its own (it opens the game's
+server), `# menus: env NAME=VALUE` lines set its environment, and a
+`# menus: seed ARGS` line passes ARGS to tools/boot/seed_user.py.
+
     .venv/bin/python tests/menus/run_menus.py [--kit DIR] [--no-build] [--jobs N]
                                               [SCENARIO ...]
 
@@ -52,8 +56,15 @@ def run(name, script, seconds, keep_user):
     out_dir.mkdir(parents=True)
     log = OUT / ("%s.log" % name)
     try:
-        seed_user.main(["--user", str(user)])
+        # `# menus: seed ARGS` lines: seed_user.py's options for this scenario
+        # (the in-game resolution of the parity run).
+        seed = [a for line in re.findall(r"^# menus: seed (.*)$", script.read_text(), re.M)
+                for a in line.split()]
+        seed_user.main(["--user", str(user)] + seed)
         env = dict(os.environ, RECOMP_STRICT="1")
+        # `# menus: env NAME=VALUE` lines: what the scenario runs with
+        # (RECOMP_EE_FORCE_SEED, the parity run's map).
+        env.update(re.findall(r"^# menus: env (\w+)=(\S*)", script.read_text(), re.M))
         result = subprocess.run([str(ROOT / "build/recomp/ee_boot"), "--user", str(user),
                                  "--seconds", str(seconds), "--script", str(script),
                                  "--script-out", str(out_dir)],
@@ -91,6 +102,10 @@ def run(name, script, seconds, keep_user):
             if "deadline: posting WM_CLOSE" in out or "stop: guest called ExitProcess" not in out:
                 problems.append("Exit Game did not end the game (%s)" %
                                 (re.search(r"^stop: (.*)", out, re.M) or [None, "?"])[1])
+        forced = re.search(r"^# menus: env RECOMP_EE_FORCE_SEED=(\d+)", script.read_text(), re.M)
+        if forced and not re.search(r"^\[ee\] random map: seed \d+ forced to %s$" % forced.group(1),
+                                    out, re.M):
+            problems.append("the map was not generated from seed %s" % forced.group(1))
         if name == "random-map":
             game = [d for d in dumps if d[0].startswith("in-game")]
             if not game or any((w, h) != ("800", "600") for _, w, h, _, _ in game):
