@@ -217,7 +217,7 @@ The shareable app (`tools/package_app.py`, first run from the user's Wine wrappe
 ### 9.4 The procedure
 
 - **legion**: mailbox 0040 (4C, 4D), 0041 (timing), 0042 (Direct Connect fallback), 0043 (broadcast test with `0043-bcast.py`, which only sends), 0044 (4E) and its addenda (4F, the out-of-sync). Progress in `to-mac\0040-lan-app.progress.md`.
-- **The Mac**: one game server at a time; the ports were contended with P4-C's and P3-F's runs all night, so a long session must wait for the ports in the kernel rather than poll (`main`'s `game_ports_lock` now blocks in flock by default; P3-F's polling runs still won twice tonight). A rehearsal against the computers (`analysis/lan-sessions/session4-rehearsal-*`) found items 3 and 6 and the in-game coordinates.
+- **The Mac**: one game server at a time. The player's app (`/Applications/EmpireEarth.app`, or a `build/dist` copy started by hand) takes no lock, so a person playing on this Mac and an agent's run collide: on 2026-10-15 the user's Play Random Map died on an engine assertion because a sim-parity `ee_boot` held the ports (menus.md §2, P6-C). `mac_session.py` holds the lock for the app it starts; the launcher now warns when the ports are taken. The ports were contended with P4-C's and P3-F's runs all night, so a long session must wait for the ports in the kernel rather than poll (`main`'s `game_ports_lock` now blocks in flock by default; P3-F's polling runs still won twice tonight). A rehearsal against the computers (`analysis/lan-sessions/session4-rehearsal-*`) found items 3 and 6 and the in-game coordinates.
 
 ### 9.5 Tools
 

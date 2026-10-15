@@ -25,6 +25,12 @@
 //                                       build, then the game unless --no-play;
 //                                       firstrun's JSON lines on stdout
 //   EmpireEarth --status                print firstrun's status result, exit
+//   EmpireEarth --check-ports           the game's network ports something
+//                                       else holds; exit 1 if any
+//
+// Before the game starts, the launcher checks that the game's fixed network
+// ports are free; when another copy of the game (or anything else) holds
+// them, it asks the player to close it, or to start anyway.
 //
 // $EE_FIRSTRUN_NICE lowers the build's priority (tests); $EE_PROBE_PATHS
 // (colon-separated) replaces probe's usual places.
@@ -32,9 +38,12 @@
 // docs/reference/firstrun.md §6 is the contract with firstrun.py.
 #import <AppKit/AppKit.h>
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <signal.h>
+#include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -320,6 +329,98 @@ static NSDictionary *host_environment(EEPaths *paths, NSDictionary *status, NSSt
     env[@"RECOMP_PROFILE_DIR"] = paths.home;
     env[@"RECOMP_REGISTRY"] = data[@"registry"];
     return env;
+}
+
+// ----------------------------------------------------------- game ports --
+
+// The game's fixed network ports: its server binds UDP 33334 and TCP 33335
+// (TCP Protocol.dll), the lobby's room TCP 33336 (WONLobby.cfg); netcode.md.
+// A random map, the Scenario Editor and a LAN game all open the server. When
+// another copy of the game - or anything else - holds one of them, the game's
+// own bind fails (as it would on Windows) and the engine stops on an
+// assertion moments later (packaging.md §9). $EE_GAME_PORTS ("udp:N,tcp:N")
+// replaces the list, for the tests.
+typedef struct {
+    int type, port;
+} EEGamePort;
+
+static NSArray<NSValue *> *game_ports(void) {
+    NSMutableArray *out = [NSMutableArray array];
+    NSString *spec = NSProcessInfo.processInfo.environment[@"EE_GAME_PORTS"];
+    if (!spec.length)
+        spec = @"udp:33334,tcp:33335,tcp:33336";
+    for (NSString *one in [spec componentsSeparatedByString:@","]) {
+        NSArray *parts = [one componentsSeparatedByString:@":"];
+        if (parts.count != 2)
+            continue;
+        EEGamePort p = {[parts[0] isEqual:@"udp"] ? SOCK_DGRAM : SOCK_STREAM, [parts[1] intValue]};
+        if (p.port > 0 && p.port < 65536)
+            [out addObject:[NSValue valueWithBytes:&p objCType:@encode(EEGamePort)]];
+    }
+    return out;
+}
+
+// The ports that cannot be bound now ("UDP 33334, TCP 33335"), or nil. Each is
+// bound on every address, as the game binds it, and closed at once. A TCP
+// socket gets SO_REUSEADDR, as the game's sockets get it on the host (kit
+// runtime/winsock.cpp), so a previous run's connections in TIME_WAIT do not
+// count; a listener does.
+static NSString *busy_game_ports(void) {
+    NSMutableArray *busy = [NSMutableArray array];
+    for (NSValue *v in game_ports()) {
+        EEGamePort p;
+        [v getValue:&p];
+        int fd = socket(AF_INET, p.type, 0);
+        if (fd < 0)
+            continue;
+        if (p.type == SOCK_STREAM) {
+            int on = 1;
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
+        }
+        struct sockaddr_in a;
+        memset(&a, 0, sizeof a);
+        a.sin_len = sizeof a;
+        a.sin_family = AF_INET;
+        a.sin_port = htons((uint16_t)p.port);
+        a.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (bind(fd, (struct sockaddr *)&a, sizeof a) != 0 && errno == EADDRINUSE)
+            [busy addObject:[NSString stringWithFormat:@"%@ %d", p.type == SOCK_DGRAM ? @"UDP" : @"TCP",
+                                                       p.port]];
+        close(fd);
+    }
+    return busy.count ? [busy componentsJoinedByString:@", "] : nil;
+}
+
+// Before the game starts: YES to start it. With its ports taken it would stop
+// on an engine assertion as soon as a game opened its server, so the player is
+// told and chooses; without a window the launcher says so and starts.
+static BOOL game_ports_free_or_accepted(EEPaths *paths, BOOL ui) {
+    NSString *busy = busy_game_ports();
+    if (!busy)
+        return YES;
+    launcher_log(paths, [NSString stringWithFormat:@"game ports in use: %@", busy]);
+    if (!ui) {
+        fprintf(stderr, "launcher: the game's network ports are in use (%s); starting anyway\n",
+                busy.UTF8String);
+        return YES;
+    }
+    NSApplication *app = NSApplication.sharedApplication;
+    if (app.activationPolicy != NSApplicationActivationPolicyRegular)
+        app.activationPolicy = NSApplicationActivationPolicyRegular;
+    [app activateIgnoringOtherApps:YES];
+    NSAlert *alert = [NSAlert new];
+    alert.alertStyle = NSAlertStyleWarning;
+    alert.messageText = @"Empire Earth's network ports are in use";
+    alert.informativeText =
+        [NSString stringWithFormat:@"Another copy of Empire Earth, or another program, is using the "
+                                   @"game's network ports (33334–33336). Close it, then start the "
+                                   @"game again.\n\nIn use: %@.",
+                                   busy];
+    [alert addButtonWithTitle:@"Quit"];
+    [alert addButtonWithTitle:@"Start Anyway"];
+    const BOOL start = [alert runModal] == NSAlertSecondButtonReturn;
+    launcher_log(paths, start ? @"game ports in use: started anyway" : @"game ports in use: quit");
+    return start;
 }
 
 // Replaces this process with the game host. Only returns on failure.
@@ -981,6 +1082,10 @@ static NSButton *button(NSString *title, id target, SEL action) {
         return;
     }
     [self.window orderOut:nil];
+    if (!game_ports_free_or_accepted(self.paths, YES)) {
+        [NSApp terminate:nil];
+        return;
+    }
     exec_host(self.paths, env, YES);
     [self fail:@"internal"
          message:[NSString stringWithFormat:@"The game could not be started (%@).", self.paths.host]
@@ -1073,6 +1178,7 @@ static int no_ui(EEPaths *paths, NSString *importPath, BOOL play) {
         fprintf(stderr, "launcher: ready (--no-play)\n");
         return 0;
     }
+    game_ports_free_or_accepted(paths, NO);
     exec_host(paths, env, NO);
     return 1;
 }
@@ -1088,6 +1194,13 @@ int main(int argc, const char **argv) {
                 play = NO;
             else if (!strcmp(argv[i], "--status"))
                 statusOnly = YES;
+            else if (!strcmp(argv[i], "--check-ports")) {
+                // The ports a game needs that something holds: one line, exit 1.
+                NSString *busy = busy_game_ports();
+                if (busy)
+                    printf("in use: %s\n", busy.UTF8String);
+                return busy ? 1 : 0;
+            }
             else if (!strcmp(argv[i], "--import") && i + 1 < argc)
                 importPath = @(argv[++i]);
             else if (!strncmp(argv[i], "-psn_", 5))
@@ -1095,7 +1208,9 @@ int main(int argc, const char **argv) {
             else if (!strcmp(argv[i], "-NSDocumentRevisionsDebugMode") && i + 1 < argc)
                 ++i; // what Xcode adds
             else {
-                fprintf(stderr, "usage: %s [--no-ui] [--import PATH] [--no-play] [--status]\n",
+                fprintf(stderr,
+                        "usage: %s [--no-ui] [--import PATH] [--no-play] [--status] "
+                        "[--check-ports]\n",
                         argv[0]);
                 return 2;
             }
@@ -1123,6 +1238,8 @@ int main(int argc, const char **argv) {
             if (rc == 0 && [state isEqual:@"ready"]) {
                 NSString *why = nil;
                 NSDictionary *env = host_environment(paths, status, &why);
+                if (env && !game_ports_free_or_accepted(paths, YES))
+                    return 0;
                 if (env)
                     exec_host(paths, env, YES);
                 else

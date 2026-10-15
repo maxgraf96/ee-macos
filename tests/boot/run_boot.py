@@ -10,6 +10,8 @@ and boot it headless, in strict mode, with a fresh user directory, and require
   - frames presented through the kit's DirectDraw 7 (software renderer); the
     last one is kept as build/boot/main-menu.ppm, the main menu at 1024x768,
   - a clean exit on WM_CLOSE (exit code 0),
+  - the engine's assertion (ESVerify) hooked, so a failure names itself, and
+    none failing (app/ee_assertions.cpp),
   - no strict-mode stop, and no import called without an implementation except
     the ones boot.md §5 lists as known (sockets, Phase 5),
   - the game folder untouched: everything the run writes is in the user
@@ -90,6 +92,13 @@ def main():
         missing = sorted(set(range(MILESTONES)) - reached)
         if missing:
             problems.append("milestones not reached: %s" % missing)
+        # The engine's assertion is reported by name (app/ee_assertions.cpp), in
+        # every host: the hook must be in place before the entry point.
+        if not re.search(r"^\[ee\] assertions: a failed ESVerify \(Low-Level Engine\.dll\+1c43e\) "
+                         r"is reported$", out, re.M):
+            problems.append("ESVerify is not hooked (no \"[ee] assertions:\" line)")
+        if "[ee] ESVerify failed:" in out:
+            problems.append(re.search(r"\[ee\] ESVerify failed:.*", out).group(0))
         if "[recomp] strict:" in out:
             problems.append("a strict-mode stop: %s" % re.search(r"\[recomp\] strict:.*", out).group(0))
         called = set(re.findall(r"^\s+(\S+!\S+)\s+CALLED$", out, re.M))
