@@ -1,6 +1,6 @@
 # Single-player simulation parity: the checksum-stream oracle (P4-C)
 
-Status: Phase 4, workstream P4-C, 2026-10-15. Static RE done; Mac tracer, scenario and comparison tool implemented; Mac↔Mac and Mac↔Windows results in §7. Owner: P4-C (simparity).
+Status: Phase 4, workstream P4-C, 2026-10-15. Static RE done; the Mac tracer, its Windows twin, the scenario and the comparison tool work; Mac↔Mac, Windows↔Windows and Mac↔Windows results in §7; the first simulation difference (PT 24301) is narrowed to the computer player's hidden state, open in §8. Owner: P4-C (simparity).
 Code:
 - [`mods/simparity/simparity.c`](../../mods/simparity/simparity.c): the Mac tracer, a kit mod plugin (public `pop_mod_api.h` only);
 - [`windows/frida/checksum_trace.js`](../../windows/frida/checksum_trace.js): its Windows twin (legion 0027);
@@ -26,6 +26,7 @@ Addresses are EXE VAs (fixed base 0x400000) or engine VAs (`Low-Level Engine.dll
 | **Seeds** | One number: `srand(TMGetTime()); rand()` at Start Game, carried by `EEMStartLoading` (+0x14). Its execute (0x4bee57) makes it the **world RNG state** (`EEPhysics+0x18`) and the map seed; a Random starting epoch is drawn from it too. Forcing it there fixes all three [static]. |
 | **Time in the simulation** | Three paths, each fixable: the PT rate (PTs per second, hence the **step size**) is tuned from measured tick times; the statistics report fires on a wall-clock timer; and a message the simulation sends lands in whichever CT the server's timer thread emits next (§4) [static]. |
 | **The oracle** | The tracer calls 0x545ebf after every PT and writes `pt, ct, checksum, rng, inputs, objects`; per-object rows on request. Same rows on both platforms; `compare.py` finds the first PT that differs [measured]. |
+| **Results** | Each platform reproduces itself. **Mac = Windows for 24,300 PTs** (15 game minutes, 210 units) without the civilization timer: checksum, RNG, every unit's float position, the OOS dump. With lockstep the civilization pause and click match as well. The first real difference is at PT 24301: the Mac's computer player reviews its strategy and Windows' does not, on hidden AI state (§7, §8) [measured]. |
 
 ## 2. The world checksum (0x545ebf)
 
