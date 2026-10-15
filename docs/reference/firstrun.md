@@ -1,6 +1,6 @@
 # First run: import, verify, translate, compile
 
-Status: Phase 6, workstream P6-B2 (importer), 2026-10-15. This is the driver between "the player points the app at their GOG files" and "the bundles are cached and the game can start" (PLAN D10, §5.8; [packaging.md](packaging.md) §1). P6-B1 bundles the toolchain (Python with capstone and pefile, clang, ld64.lld). **P6-B3 built the app and its first-run window on the contract in §6** (§6.1 has the app's side as built; [packaging.md](packaging.md) §8 the app).
+Status: Phase 6, workstream P6-B2 (importer), 2026-10-15. This is the driver between "the player points the app at their GOG files" and "the bundles are cached and the game can start" (PLAN D10, §5.8; [packaging.md](packaging.md) §1). P6-B1 bundles the toolchain (Python with capstone and pefile, clang, ld64.lld). **P6-B3 built the app and its first-run window on the contract in §6** (§6.1 has the app's side as built; [packaging.md](packaging.md) §8 the app). **GOG's real offline installer imports end to end** (§3.4, 2026-10-15): Inno Setup 5.6.2, read by the shipped innoextract.
 
 Labels: **[measured]** = run on this Mac (M4 Max, 16 cores, macOS 15.5), with other agents' builds loading the CPU (load average 40–70); **[static]** = read from files or code; **[inferred]** = reasoning, not run.
 
@@ -97,7 +97,7 @@ The user's wrapper is a real example of the `wrapper` kind: `/Applications/Empir
 | `innosetup-6.7.3.exe` | 6.7.0 | **fails** ("Could not determine setup data version") | extracts; one warning (it cannot read back a multi-part file to checksum it) |
 | `innosetup-7.1.0-x64.exe` | 7.0.0.3 | **fails** (same) | extracts; the same warning |
 
-**What GOG uses:** the user's GOG install (March 2026) has an uninstaller built by **Inno Setup 5.6.2 (u)**: `unins000.exe` holds "Inno Setup Setup Data (5.6.2) (u)" [static]. GOG's installer for this build is therefore 5.6.2, which master reads.
+**What GOG uses:** the user's GOG install (March 2026) has an uninstaller built by **Inno Setup 5.6.2 (u)**: `unins000.exe` holds "Inno Setup Setup Data (5.6.2) (u)" [static]. **GOG's offline installer itself is Inno Setup 5.6.2 (unicode)**, which upstream master reads [measured, §3.4].
 
 If GOG rebuilds it with Inno Setup 6.4.2 or later, upstream innoextract cannot read it yet. `build.sh --source pr210` builds dscho/innoextract `376a13e` instead: upstream pull request #210, open, which adds 6.4.2 to 7.0.2 on top of master. It read every installer above here.
 
@@ -120,33 +120,37 @@ If GOG rebuilds it with Inno Setup 6.4.2 or later, upstream innoextract cannot r
 - Wine runs headless: a fresh prefix with the null graphics driver and no Mono or Gecko. The build took 11 s.
 - With `EE_TEST_INNO_DIR` set to its output, `tests/test_firstrun.py` imports it end to end. It checks the CD key and every file's MD5, and that the expansion and manual are not extracted. Then it removes one `.bin` (`installer-parts-missing`), damages one (`installer-unreadable`), and offers a fake `.exe` (`installer-unreadable`).
 
-### 3.4 Still to test: GOG's real installer (needs the user)
+### 3.4 GOG's real installer [measured, 2026-10-15]
 
-There is no GOG installer on this Mac or on legion. In the morning:
+The user downloaded GOG's offline backup installer (Windows, English) on this Mac, with Brave, so it carries `com.apple.quarantine`.
 
-1. On gog.com → Account → Games → **Empire Earth Gold** → *Download offline backup game installers* → Windows, English: download `setup_empire_earth_gold_<version>.exe` **and** every `setup_empire_earth_gold_<version>-N.bin` beside it, into `~/Downloads`.
-2. Run, in `/Users/max/Code/ee-macos-wt/importer` (or the main checkout once merged):
+| | |
+|---|---|
+| File | `~/Downloads/setup_empire_earth_gold_2.0.0.2974_gog_v3_(78415).exe`, **667 MB, one file**: no `.bin` parts |
+| Format | **Inno Setup 5.6.2 (unicode)**: the shipped upstream innoextract (`6e9e34e`) reads it; `--source pr210` is **not** needed |
+| Command | `EE_HOME=<scratch> EmpireEarth.app/Contents/MacOS/EmpireEarth --no-ui --import <installer> --no-play` (the packaged app) |
+| Extract | 298 files: the base game and GOG's metadata (§3.3's `--include`) |
+| Verify | all nine modules' SHA-256; all 294 files against `db/gog-files.json` |
+| Import | 294 files, 413 MB, into `Game/Empire Earth`; registry seeded from GOG's script (`"registry": {"source": "script", "cd_key": true}`) |
+| Total, import + build | **154 s** |
+| Cache key | **`d5f87aa3ce3fafa4`**, the same as an import of the user's Wine wrapper with the same app, so the bundles are the same |
 
-   ```sh
-   IE=/Users/max/Code/ee-build-cache/innoextract/innoextract-6e9e34e-boost1.87.0-xz5.8.4-bz1.0.8-macos13.0/bin/innoextract
-   $IE -i ~/Downloads/setup_empire_earth_gold_*.exe | head -3          # the Inno Setup version
-   T=/tmp/ee-firstrun-test
-   EE_INNOEXTRACT=$IE .venv/bin/python -I tools/firstrun/firstrun.py --home $T import ~/Downloads/setup_empire_earth_gold_*.exe
-   .venv/bin/python -I tools/firstrun/firstrun.py --home $T build
-   .venv/bin/python -I tools/firstrun/firstrun.py --home $T status
-   ```
-3. **Expected:**
-   - the import ends with `{"event": "result", "ok": true, ...}`, with `"source": {"kind": "installer"}` and `"registry": {"source": "script", "cd_key": true}`, in about 15–30 s;
-   - `build` prints the same cache key as an import from the wrapper (`4fe2bf83292861c0` with today's kit and Homebrew LLVM), so the bundles are identical;
-   - `diff -r "$T/Game/Empire Earth" "/Applications/Empire Earth.app/Contents/SharedSupport/prefix/drive_c/GOG Games/Empire Earth Gold/Empire Earth"` shows only `0_Error.log`.
-4. **If innoextract fails** with "Unexpected setup data version" or "Could not determine setup data version":
-   - the installer is Inno Setup 6.4.2 or later: build the other variant and repeat with it:
+- The release app (0.7, packaging.md §8.1) repeated the same import and build (§8.1 there).
+- **Decision (§3.2) confirmed:** the app ships the upstream innoextract build; `pr210` stays in the cache, unused.
+- **The importer's `.bin` handling stays**, for older GOG installers that come in parts and for any later one (tested on the synthetic installer, §3.3).
+- Scratch homes hold a copy of the game and the CD key: delete them after a test.
 
-     ```sh
-     tools/firstrun/innoextract/build.sh --source pr210
-     ```
-   - The binary lands in `ee-build-cache/innoextract/innoextract-376a13e-…`.
-5. Delete `/tmp/ee-firstrun-test` afterwards: it holds a copy of the game and the CD key.
+To repeat it with another installer:
+
+```sh
+IE=/Users/max/Code/ee-build-cache/innoextract/innoextract-6e9e34e-boost1.87.0-xz5.8.4-bz1.0.8-macos13.0/bin/innoextract
+$IE -i ~/Downloads/setup_empire_earth_gold_*.exe | head -3          # the Inno Setup version
+T=<scratch home>
+EE_HOME=$T build/dist/EmpireEarth.app/Contents/MacOS/EmpireEarth --no-ui --import ~/Downloads/setup_empire_earth_gold_*.exe --no-play
+rm -rf $T                                                           # the game and the CD key
+```
+
+If innoextract fails with "Unexpected setup data version" or "Could not determine setup data version", the installer is Inno Setup 6.4.2 or later. Then build `tools/firstrun/innoextract/build.sh --source pr210` and package with `--innoextract` pointing at it.
 
 ## 4. Import (`tools/firstrun/importer.py`)
 
@@ -336,6 +340,10 @@ Nothing else from the kit: no `tools/build.py`, no CMake.
 ### 6.1 The app's side, as built (P6-B3)
 
 `Contents/MacOS/EmpireEarth` (`app/launcher/launcher.m`, AppKit, Objective-C) drives `firstrun.py` with this contract:
+- **Before anything** (P6-D, [packaging.md](packaging.md) §5.1): the launcher logs its version and where it runs from.
+  - Translocated, it asks to be moved into Applications. With *Move to Applications* it copies itself there and starts the copy; with *Quit* it quits.
+  - Otherwise it clears `com.apple.quarantine` from its app's files. That happens before `status`, so before any Python, clang, lld or innoextract, and before the host's `exec`.
+  - A nested start that fails while files stay quarantined becomes the error *"macOS is blocking part of this app."*, with the `xattr -cr` line.
 - **Invocation:** `toolchain/python/bin/python3 -I -B ee/tools/firstrun/firstrun.py --home <home> --quiet …`.
   - `status` and `build` get `--cc`, `--lld` and `--kit`, all inside the app; `import` gets `--innoextract`.
   - The environment is the launcher's, with `PATH=/usr/bin:/bin:/usr/sbin:/sbin` and no `PYTHON*`, `RECOMP_*`, `SDKROOT`, `CPATH` or similar.
@@ -359,7 +367,14 @@ Nothing else from the kit: no `tools/build.py`, no CMake.
   - `EmpireEarth --no-ui [--import PATH] [--no-play]` (with no `--import`, the first usable candidate `probe` finds). It prints firstrun's JSON lines on stdout and the host's environment on stderr, and passes SIGINT and SIGTERM on to firstrun;
   - `EmpireEarth --status` prints the `status` result;
   - `EmpireEarth --import PATH` opens the window and starts importing at once;
+  - `EmpireEarth --check-install [APP]` prints where the app runs from, whether it is translocated (and from where), and how many of its files are quarantined; it changes nothing. `EmpireEarth --move-to-applications [ARGS…]` is the alert's button, with no window;
   - `$EE_PROBE_PATHS` (colon-separated) replaces probe's usual places, `$EE_FIRSTRUN_NICE` lowers the build's priority and `$EE_FIRSTRUN_JOBS` sets its jobs.
+  - For tests only:
+    - `$EE_TEST_APP` makes another app the one whose quarantine is cleared;
+    - `$EE_TEST_TRANSLOCATED_FROM` makes the launcher behave as if translocated;
+    - `$EE_TEST_ALERT` answers the translocation alert without showing it;
+    - `$EE_APPLICATIONS_DIR` replaces `/Applications`.
+  - **`--no-ui` with no `--import` imports the first usable candidate `probe` finds**, the player's Wine app or Downloads included (read only). In a test, pass `--import`, or `EE_PROBE_PATHS` pointing at nothing.
 
 **The home as built** (§4.1, plus `Logs/`):
 
@@ -394,7 +409,7 @@ Nothing else from the kit: no `tools/build.py`, no CMake.
   - Until that is merged, the importer's preflight refuses a stub `nm` (`toolchain-missing`) rather than letting it pop up; P6-B1 could ship `llvm-nm` instead.
 - ~~**`symbols.json` lookup.**~~ Resolved in P6-B3 (§6).
 - **Homebrew clang reads `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/SDKSettings.json`** even with `-nostdinc` (in every object's depfile) [measured]. On a Mac without the CLT the file is absent, which P6-B1's bundled clang must tolerate; packaging.md measured the official LLVM release working.
-- **Inno Setup ≥ 6.4.2:** §3.2; settled by the morning test.
+- ~~**Inno Setup ≥ 6.4.2:**~~ Settled: GOG's installer is 5.6.2 (§3.4). `pr210` is only needed if GOG rebuilds it with Inno Setup 6.4.2 or later.
 - **Defaults to decide for players:** the resolution (1920×1080, legion's) and the player name (the account's first name).
 - **A different GOG build** (data files changed by GOG) fails the manifest. The hashdb comparison then names it. Re-run `manifest.py` on it, and check the modules still match `game.toml`.
 
