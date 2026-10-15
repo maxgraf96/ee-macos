@@ -15,8 +15,18 @@ Writes, under OUTDIR (keep it in an ignored directory: listings are derived from
 Which DB functions are exported: every function whose tag is not "drm". Import thunks,
 EH stubs, unwind funclets, catch handlers and their continuations are all exported: the
 kit needs each as an entry (the runtime's MSVC EH implementation calls the funclets).
+
+This is the development path (`tools/setup.py --ghidra`). The default inputs come from
+tools/inputs/export.py, which writes the same files from the DB and the binaries with no
+Ghidra: functions.tsv and funcdb.json are made by the same code (tools/inputs/sidecar.py),
+and `export.py --compare DIR` checks its listings against an export from here.
 """
 import json
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "inputs"))
+import sidecar  # noqa: E402
 
 
 def export(program, slug, db_path, out, decompile=False):
@@ -25,7 +35,6 @@ def export(program, slug, db_path, out, decompile=False):
     from ghidra.util.task import TaskMonitor
 
     db = json.loads(db_path.read_text())
-    base = int(db["module"]["image_base"], 16)
     space = program.getAddressFactory().getDefaultAddressSpace()
     fm = program.getFunctionManager()
     listing = program.getListing()
@@ -36,14 +45,13 @@ def export(program, slug, db_path, out, decompile=False):
         decomp = DecompInterface()
         decomp.openProgram(program)
 
-    stats = {"exported": 0, "skipped_drm": 0, "created_here": 0, "missing": []}
+    keep = sidecar.translated(db)
+    stats = {"exported": 0, "skipped_drm": len(db["functions"]) - len(keep), "created_here": 0,
+             "missing": []}
     rows = []
     tx = program.startTransaction("kit export (not saved)")
     try:
-        for r in db["functions"]:
-            if r["tag"] == "drm":
-                stats["skipped_drm"] += 1
-                continue
+        for r in keep:
             va = int(r["va"], 16)
             a = space.getAddress(va)
             f = fm.getFunctionAt(a)
@@ -57,9 +65,6 @@ def export(program, slug, db_path, out, decompile=False):
                     stats["missing"].append(r["va"])
                     continue
                 stats["created_here"] += 1
-            # the DB's best name (export, import thunk, FID, community) names the
-            # translated function in the kit's symbols.json and profiler
-            name = " ".join((r.get("name") or "").split()) or "fn_%08x" % va
             lines = []
             it = listing.getInstructions(f.getBody(), True)
             while it.hasNext():
@@ -71,42 +76,14 @@ def export(program, slug, db_path, out, decompile=False):
                 if res.decompileCompleted():
                     (out / "functions" / ("%08x.c" % va)).write_text(
                         "/* analysis pseudocode, not buildable source */\n" + res.getDecompiledFunction().getC())
-            rows.append("%08x\t%s\t%d\tlisting\t" % (va, name, int(f.getBody().getNumAddresses())))
+            # the DB's best name names the translated function in the kit's symbols.json
+            rows.append((va, sidecar.listing_name(r), int(f.getBody().getNumAddresses())))
             stats["exported"] += 1
     finally:
         program.endTransaction(tx, False)       # never persist: the saved project is the record
         if decomp is not None:
             decomp.dispose()
-    (out / "functions.tsv").write_text("address\tname\tbytes\tstatus\tmessage\n" + "\n".join(rows) + "\n")
-
-    code = [s for s in db["module"]["sections"] if s["code"]]
-    sidecar = {
-        # the function-DB input recomp-kit's translator reads ([translate] function_db;
-        # kit/tools/recomp/translate.py FunctionDB). Addresses are at image_base, the
-        # module's preferred base; the translator moves them to the base it translates for.
-        "schema": "recomp-funcdb/1",
-        "module": db["module"]["name"], "sha256": db["module"]["sha256"], "image_base": hex(base),
-        # replaces section-flag code classification (EXE sections are all 0xc0000040)
-        "code_ranges": [[hex(base + int(s["rva"], 16)), hex(base + int(s["rva"], 16) + int(s["vsize"], 16)),
-                         s["name"]] for s in code],
-        # never translate or scan: DRM residue and the SizeOfHeaders/.text overlap
-        "excluded_ranges": ([[hex(base + int(s["rva"], 16)), hex(base + int(s["rva"], 16) + int(s["vsize"], 16)),
-                              s["name"]] for s in db["module"]["sections"] if s["name"] in (".cms_t", ".cms_d")]
-                            + ([[hex(base), hex(base + int(db["module"]["size_of_headers"], 16)), "headers"]])),
-        # every function start the DB knows, with the evidence that makes it reachable
-        "entry_points": [[r["va"], r["kind"], sorted((r.get("xref") or {}).keys())]
-                         for r in db["functions"] if r["tag"] != "drm"],
-        # interior addresses that data or EH tables name (alternate entries): each is an
-        # instruction boundary inside a DB function, with the evidence that names it
-        "alternate_entries": [[va, kinds] for r in db["functions"] if r["tag"] != "drm"
-                              for va, kinds in sorted((r.get("alt_vas") or {}).items(),
-                                                      key=lambda kv: int(kv[0], 16))],
-        # bytes inside code sections that are data (jump/index tables, constants)
-        "data_in_code": [[hex(base + int(d[0], 16)), d[1], d[2]] for d in db["data_in_code"]],
-        "jump_tables": [[r["va"], hex(base + int(t[0], 16)), t[1], t[2]]
-                        for r in db["functions"] for t in r.get("switch", ())],
-        "excluded_functions": [r["va"] for r in db["functions"] if r["tag"] == "drm"],
-    }
-    (out / "funcdb.json").write_text(json.dumps(sidecar, indent=0) + "\n")
+    (out / "functions.tsv").write_text(sidecar.functions_tsv(rows))
+    (out / "funcdb.json").write_text(sidecar.funcdb_text(db))
     stats["missing"] = stats["missing"][:50]
     return stats
