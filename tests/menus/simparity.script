@@ -1,0 +1,41 @@
+# The single-player checksum-stream scenario (P4-C, docs/reference/simparity.md):
+# Main menu -> Single Player -> Play Random Map -> Start Game with the
+# registry's settings (tools/simparity/run.py seeds them: Continental, Small,
+# one computer player, PTs per second pinned), then the game with nobody at the
+# controls but for one click: OK on the civilization screen the game opens by
+# itself. See settings.script for the pointer.
+# menus: manual (tools/simparity/run.py; not part of --menus)
+# menus: alone (Start Game opens the game server: one at a time)
+timeout 4000000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+
+click 511 268                 # Single Player
+wait change within 15000
+wait 1000
+click 748 145                 # Play Random Map
+wait change within 20000
+wait 1500
+dump game-setup
+
+click 644 730                 # Start Game
+wait size 800 600 within 60000
+wait pixel 300 560 948a7b tol 24 within 240000
+dump in-game-start
+# At 5 game minutes (PT 8000 at 40 PT/s and the standard speed's 37.5 ms per
+# PT) the civilization timer opens "Choose Civilization" with Ancient Greece
+# preselected, and in single player that pauses the game. OK, once, keeps the
+# preselected civilization (legion 0030/0033 does the same click).
+# simparity: civ begin (run.py --no-civ-timer leaves this out)
+wait pixel 330 520 5e5746 tol 12 within 1200000
+wait 3000
+dump civ-screen
+click 400 520                 # OK
+wait 2000
+# simparity: civ end
+wait 600000                   # simparity: duration (run.py --minutes rewrites it)
+dump in-game-end
+quit

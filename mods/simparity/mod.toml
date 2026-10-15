@@ -1,0 +1,13 @@
+# The single-player checksum-stream oracle (P4-C): docs/reference/simparity.md.
+# Loaded only when RECOMP_EE_CHECKSUM_TRACE is set (app/ee_standins.cpp points
+# RECOMP_MODS_DIR at build/recomp/ee-mods then). It can change the game: the
+# forced seed and the skipped statistics report.
+id = "ee.simparity"
+name = "Single-player checksum stream"
+version = "1.0.0"
+api = 1
+game = "957e35d75ba80309d094cbfb7367f7c6d61c5fd19fc5f7ca3f2e1cf636a065ab"
+affects_simulation = true
+
+[plugin]
+path = "simparity.dylib"

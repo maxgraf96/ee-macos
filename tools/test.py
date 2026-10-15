@@ -10,6 +10,10 @@
                                                    # a game, headless (tests/menus/, docs/reference/menus.md)
     .venv/bin/python tools/test.py --lobby [SCENARIO...] # the Multiplayer lobby (WONAPI's GDI window over
                                                    # the game's frame), headless (tests/lobby/, docs/reference/lobby.md)
+    .venv/bin/python tools/test.py --simparity [OPTIONS]  # the single-player checksum stream, run
+                                                   # twice on the Mac; both must agree (default:
+                                                   # 3 minutes, no civ timer; tools/simparity/,
+                                                   # docs/reference/simparity.md)
     .venv/bin/python tools/test.py --m1-replay [PACKS...]  # the Mac M1 replay (tests/m1/replay/):
                                                    # self-tests, or replay packs with both builds
     .venv/bin/python tools/test.py --native ...    # any other option: kit/tools/test.py's, for this game
@@ -42,6 +46,12 @@ def main(argv):
     if "--lobby" in argv:
         argv = [a for a in argv if a != "--lobby"]
         return subprocess.call([sys.executable, str(kitpath.ROOT / "tests/lobby/run_lobby.py")] + argv)
+    if "--simparity" in argv:
+        argv = [a for a in argv if a != "--simparity"]
+        # Without options: the Mac's own determinism, cheaply - two 3-minute games
+        # with no civilization timer, so nothing but the simulation feeds them.
+        argv = argv or ["--no-civ-timer", "--minutes", "3"]
+        return subprocess.call([sys.executable, str(kitpath.ROOT / "tools/simparity/run.py")] + argv)
     if "--eh" in argv:
         argv = [a for a in argv if a != "--eh"]
         return subprocess.call([sys.executable, str(kitpath.ROOT / "tests/eh/run_eh.py")] + argv)

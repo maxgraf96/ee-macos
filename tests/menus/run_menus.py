@@ -116,6 +116,10 @@ def main():
     scripts = sorted(HERE.glob("*.script"))
     if args.scenarios:
         scripts = [s for s in scripts if s.stem in args.scenarios]
+    else:
+        # `# menus: manual` scenarios have a runner of their own
+        # (simparity.script: tools/simparity/run.py).
+        scripts = [s for s in scripts if not re.search(r"^# menus: manual", s.read_text(), re.M)]
         missing = set(args.scenarios) - {s.stem for s in scripts}
         if missing:
             sys.exit("no such scenario: %s" % ", ".join(sorted(missing)))

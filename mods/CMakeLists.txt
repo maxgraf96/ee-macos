@@ -5,3 +5,18 @@ include(${CMAKE_CURRENT_LIST_DIR}/../tests/m1/replay/CMakeLists.txt)
 include(${CMAKE_CURRENT_LIST_DIR}/../tests/eh/CMakeLists.txt)
 include(${CMAKE_CURRENT_LIST_DIR}/../tests/lan/plugin/CMakeLists.txt)
 include(${CMAKE_CURRENT_LIST_DIR}/../app/CMakeLists.txt)
+
+# The single-player checksum-stream oracle (P4-C, docs/reference/simparity.md):
+# a mod plugin with its manifest in build/recomp/ee-mods/simparity/, which
+# app/ee_standins.cpp names as the mod root when RECOMP_EE_CHECKSUM_TRACE is
+# set. Built with ee_boot.
+if(APPLE AND COMMAND pop_add_plugin)
+  pop_add_plugin(ee_simparity SOURCE ${CMAKE_CURRENT_LIST_DIR}/simparity/simparity.c
+                 OUTPUT_DIR ${POP_OUT}/ee-mods/simparity OUTPUT_NAME simparity
+                 WARNINGS ${POP_WARN_HOST} OPTIONS -g)
+  configure_file(${CMAKE_CURRENT_LIST_DIR}/simparity/mod.toml
+                 ${POP_OUT}/ee-mods/simparity/mod.toml COPYONLY)
+  if(TARGET ee_boot)
+    add_dependencies(ee_boot ee_simparity)
+  endif()
+endif()
