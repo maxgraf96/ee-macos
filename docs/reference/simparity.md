@@ -117,12 +117,17 @@ A kit mod plugin, built with `ee_boot` into `build/recomp/ee-mods/simparity/` (`
 | `RECOMP_EE_CHECKSUM_TRACE=FILE` | the stream (§5.3) |
 | `RECOMP_EE_SIMPARITY_SEED=N` | force the game seed at 0x4bee57 (§4.2) |
 | `RECOMP_EE_SIMPARITY_NO_REPORTS=1` | skip the wall-clock statistics report (0x547365, a plain `RET`) |
-| `RECOMP_EE_SIMPARITY_LOCKSTEP=1` | the server builds a CT only once the simulation has run every PT it was sent (§4.3, §7) |
+| `RECOMP_EE_SIMPARITY_LOCKSTEP=1` | the server builds a CT only once the simulation has run every PT it was sent (at most 60 s), so a message the simulation sends during CT n runs in CT n+1 (§4.3, §7) |
+| `RECOMP_EE_SIMPARITY_NO_CIV_TIMER=1` | skip the civilization timer (0x54778a, a plain `RET`): no `EEMCivTimerExpired`, no "Choose Civilization" screen, no pause |
 | `RECOMP_EE_CHECKSUM_UNITS=PT,…` / `_UNITS_EVERY=N` | per-object rows after these PTs |
 | `RECOMP_EE_CHECKSUM_OOSDUMP=PT` | the game's own OOS dump after that PT |
 | `RECOMP_EE_CHECKSUM_FLAGS=N` / `_MAX_PT=N` | the second checksum column's flags (default 1); stop after PT N |
 
-Hooks: after 0x546c63 (a row per PT), before 0x4bee57 (the seed), before 0x683bc8 (messages to the server), and on request before 0x547365 and 0x4c3703 (`EEServer` vtable +0x28, which `SendCommunicationsTick` asks once per running CT on the server's send thread). Every hook is on an EXE entry: the kit's mod hooks reach the main image's entries only, so engine functions are reached through the EXE's thunks and vtables.
+Hooks:
+- always: after 0x546c63 (a row per PT), before 0x4bee57 (the seed), before 0x683bc8 (messages to the server), before and after 0x545ebf (the game's own calls, `W` rows; the tracer's own calls are not counted);
+- on request: before 0x547365 and 0x54778a (skipped), before 0x4c3703 only when `SendCommunicationsTick` calls it (`EEServer` vtable +0x28, asked once per running CT on the server's send thread; the return address engine 0x10054c6b), and with lockstep the civilization screen's timeline (0x4b4f9c, 0x662f64; §7.4).
+
+Every hook is on an EXE entry: the kit's mod hooks reach the main image's entries only, so engine functions are reached through the EXE's thunks and vtables. **Multiplayer:** with only `RECOMP_EE_CHECKSUM_TRACE` set (no seed, no skipped timers, no lockstep) the tracer changes nothing in the game, and a Mac host's `W` rows are its own per-CT checksums, which are never on the wire (P5-E).
 
 ### 5.2 The Windows twin (`windows/frida/checksum_trace.js`)
 The same hooks with Frida (`Interceptor.attach`/`replace`; `NativeFunction(…, 'thiscall')` for 0x545ebf and the per-object `+0x4c`), the same rows written with Frida's `File`. Run with `windows/frida/run.py` attached at the main menu (legion request 0027).
@@ -136,10 +141,55 @@ T,pt,ct,cs,cs2,rng,inputs,units            after each PT: checksum (flags 1), se
 S,pt,ct,type,slot                          a message handed to the server (type = message byte +8)
 U,pt,i,vtable,id,x,y,hp,cs,cs2             one object: vtable, id (+0x24), tile x/y (+0x1c/+0x20),
                                            hit points (+0x3c), its +0x4c(1)
+W,ct,pt,dump,flags,cs                      the game's own checksum call (multiplayer, once per CT)
 ```
+`#` lines are comments: the options, the PT-rate settings the server got, lockstep waits, the civilization screen's timeline.
 Pointers never appear in a row (heap addresses differ between platforms); the object id and vtable identify an object.
 
 ### 5.4 The scenario (`tests/menus/simparity.script`) and the runner
-- Main menu → Single Player → Play Random Map → Start Game with the setup screen's defaults, then nobody at the controls until the deadline. `# menus: manual`: the menu test skips it.
+- Main menu → Single Player → Play Random Map → Start Game with the setup screen's defaults (Continental, Small, one computer player, the standard speed: ×1.5, 37.5 game ms per PT at 40 PT/s), then nobody at the controls but for one click: 5 game minutes in (PT 8000) the civilization timer opens "Choose Civilization" with Ancient Greece preselected, which pauses a single-player game, and the script clicks OK (400, 520) once. `--minutes` counts from there. `# menus: manual`: the menu test skips it.
+- With `--no-civ-timer` the runner leaves the civilization block out of the script, and the game has no screen, no pause and no click.
 - `tools/simparity/run.py` (`tools/test.py --simparity`): a fresh user directory per run, `seed_user.py`'s registry (legion's options, 800×600) with **Min = Max PTs per Second = 40**, seed 1000, the reports skipped; `ee_boot` in strict mode under `tools/game_ports.py`'s lock; the mod copied per run (a rebuild cannot touch a running game); streams to `analysis/simparity/mac/` (ignored). With two runs or more it compares them.
 - `tools/simparity/compare.py A B`: the first PT whose row differs and which fields, rows around it, the CT schedule's first difference, the message types sent up to there, and the objects that differ at the latest common per-object snapshot (matched by vtable and id). `tests/test_simparity.py` checks it on synthetic streams, and that both tracers and the comparer declare the same rows.
+
+## 6. The Windows side (legion)
+| Request | Runs | Output (`C:\EEPort\captures\simparity\`) |
+|---|---|---|
+| 0027 | `win-1`, `win-2`: seed 1000, no input in game, to the civilization pause (PT 8022); `win-2` with the OOS dump at PT 4000 | `stream.csv`, screenshots, `OOS … .log` |
+| 0030 → 0033 | `win-ok-1`, `win-ok-2`: the same, then OK once on the civilization screen, 10 minutes more (to PT 24187/24183) | the same |
+| 0034 | `win-nc-1`, `win-nc-2`: no civilization timer, 12 minutes; `win-ls-1`: the OK variant with lockstep | the same |
+
+Streams are fetched to `analysis/simparity/win/` (ignored) with `scp`. Legion's Frida run writes CRLF line ends, which `compare.py` ignores.
+
+## 7. Results
+
+### 7.1 The setup [measured]
+- **PT rate:** without the pin, the Mac's first single-player games ran at 44 PT/s falling to 14 as the measured tick time grew (TuneForSlowCPU), legion's at 40–44. With Min = Max = 40 both run 40 PT/s, 14 PTs per CT, dt `0x42160000` (37.5 game ms), speed `0x3fc00000` (×1.5, the "Standard" game speed), from the first CT to the last.
+- **Seed:** the games drew 1510 (Mac) and 26343 (legion) themselves; forced to 1000 at 0x4bee57 both play the same map, epoch and AI from PT 1.
+- **Loading** takes 30–70 CTs on the Mac and about 110 on legion before PT 1; `compare.py` counts CTs from the first that brings PTs.
+
+### 7.2 Mac vs Windows [measured]
+| Comparison | Common PTs | Result |
+|---|---|---|
+| Mac (no lockstep) vs `win-1` | 8022 | identical but for three 14-PT windows (PT 6413–6426, 7211–7224, 8009–8022): the civilization timer's message (sent at PT 6400, 7200, 8000) runs in the next CT on Windows and two CTs later on the Mac. The world RNG never differs; from PT 6427, 7225 on the streams are equal again |
+| Mac with lockstep vs `win-1`, `win-2` | 8022 | **identical**: checksum, world RNG, executed inputs, objects, CT schedule |
+| per-object rows, Mac vs `win-1` | 8 snapshots (PT 1000…8000), 88–129 objects | **identical** (every object's id, tile, hit points and checksum) |
+| the game's OOS dump at PT 4000, Mac vs `win-2` | 10,643 lines | **identical** but for "Number of Messages in Server Queue" (0 vs 1: whether the next CT is already queued) |
+
+So the translated simulation, x87 included, evolves bit for bit as Windows' for at least 8022 PTs (5 game minutes, 129 units, the AI building and gathering, about 200 seconds) [measured].
+
+### 7.3 Each platform against itself [measured]
+| Comparison | Common PTs | Result |
+|---|---|---|
+| Mac vs Mac, no lockstep (to the pause) | 8064 | identical |
+| Mac vs Mac, lockstep, through the civilization pause and the OK click | 15,787 | identical |
+| `win-1` vs `win-2` (to the pause) | 8022 | identical |
+| `win-ok-1` vs `win-ok-2` (through the pause and the click) | 24,183 | identical |
+
+With the PT rate pinned, the seed forced and the wall-clock report skipped, each platform reproduces itself exactly. Without the pin no two runs could agree (§4.1).
+
+### 7.4 What still differs between the platforms: where a pause lands
+- After the civilization timer expires (its message runs at PT 8009 on both), Windows pauses after PT 8022 in all four runs, the end of that CT; the OK click's message (type 0x71) then runs at PT 8023.
+- The Mac pauses later: after PT 8064 without lockstep (the server three CTs ahead) and after PT 8036 with lockstep. With lockstep the simulation stalls at PT 8012, mid-CT, until the gate gives up, so the pause is asked for while CT 604 is already on its way.
+- The pause comes from the UI thread (0x662f64 opens the screen and calls `NESynchronousServer::PauseGame`, which applies from the server's next CT), so where it lands depends on how fast the UI reacts compared with the simulation. That is thread timing, not simulation.
+- Consequence: the OK-variant streams agree up to PT 8022 and differ from 8023, the CT the click runs in.

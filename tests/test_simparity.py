@@ -77,10 +77,10 @@ def test_units_matched_by_vtable_and_id(tmp_path):
 
 def test_tracers_write_the_same_rows():
     """Both tracers declare the same row kinds with the same fields."""
-    rows = re.compile(r"^\s*(?://|\*)?\s*([GCTSUW]),([a-z_0-9,]+)", re.M)
+    rows = re.compile(r"^\s*(?://|\*)?\s*([GCTSUWR]),([a-z_0-9,]+)", re.M)
     mac = dict(rows.findall((ROOT / "mods/simparity/simparity.c").read_text()))
     win = dict(rows.findall((ROOT / "windows/frida/checksum_trace.js").read_text()))
     doc = dict(rows.findall(compare.__doc__))
-    assert set(mac) == set(win) == set(doc) == set("GCTSUW")
-    for kind in "GCTSUW":
+    assert set(mac) == set(win) == set(doc) == set("GCTSUWR")
+    for kind in "GCTSUWR":
         assert mac[kind].split() == win[kind].split() == doc[kind].split()

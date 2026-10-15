@@ -13,6 +13,8 @@ windows/frida/checksum_trace.js (Windows) writes, one row per line:
   U,pt,i,vtable,id,x,y,hp,cs,cs2             one object of the checksum list
   W,ct,pt,dump,flags,cs                      the game's own checksum call (a multiplayer CT;
                                              the host's value never goes on the wire)
+  R,pt,fn,caller,rng_in,rng_out              a call of a function that draws random numbers,
+                                             in the PT window the tracer was asked for
 
 The streams agree when every PT both of them reached has the same row: the
 game's checksum (cs, flags 1), the second checksum (cs2), the world RNG state,
@@ -111,6 +113,14 @@ def load(path):
     return s
 
 
+def flags2(s):
+    """The second checksum column's flags, from the stream's first line."""
+    for h in s.header:
+        if "flags2=" in h:
+            return h.split("flags2=")[1].split()[0]
+    return "0x1"
+
+
 def describe(s):
     if not s.ticks:
         return "no ticks"
@@ -121,7 +131,7 @@ def describe(s):
         seed, last, len(s.cts), s.ct0, ptps, len(s.sends), s.ticks[last]["cs"], last)
 
 
-def diff_units(a, b):
+def diff_units(a, b, with_cs2=True):
     """Objects that differ between two U snapshots, matched by (vtable, id)."""
     def key(u):
         return (u["vtable"], u["id"])
@@ -133,7 +143,7 @@ def diff_units(a, b):
         if ua is None or ub is None:
             out.append({"vtable": k[0], "id": k[1], "only_in": "A" if ub is None else "B"})
             continue
-        fields = [f for f in ("x", "y", "hp", "cs", "cs2") if ua[f] != ub[f]]
+        fields = [f for f in ("x", "y", "hp", "cs", "cs2") if ua[f] != ub[f] and (with_cs2 or f != "cs2")]
         if fields:
             out.append({"vtable": k[0], "id": k[1], "fields": {f: (ua[f], ub[f]) for f in fields}})
     order = [u["i"] for u in a] == [ka[key(u)]["i"] for u in a] and \
@@ -144,13 +154,15 @@ def diff_units(a, b):
 def compare(a, b, context=5):
     rep = {"a": str(a.path), "b": str(b.path), "agree": True}
     common = sorted(set(a.ticks) & set(b.ticks))
+    fields = T_FIELDS if flags2(a) == flags2(b) else tuple(f for f in T_FIELDS if f != "cs2")
+    rep["fields_compared"] = list(fields)
     rep["common_pts"] = len(common)
     rep["last_common_pt"] = common[-1] if common else None
     rep["seed"] = (a.game and a.game["seed"], b.game and b.game["seed"])
     first = None
     for pt in common:
         ta, tb = a.ticks[pt], b.ticks[pt]
-        bad = [f for f in T_FIELDS if ta[f] != tb[f]]
+        bad = [f for f in fields if ta[f] != tb[f]]
         if bad:
             first = (pt, bad)
             break
@@ -190,7 +202,7 @@ def compare(a, b, context=5):
     snap = [p for p in sorted(set(a.units) & set(b.units)) if p <= pt]
     if snap:
         p = snap[-1]
-        diffs, same_order = diff_units(a.units[p], b.units[p])
+        diffs, same_order = diff_units(a.units[p], b.units[p], "cs2" in fields)
         rep["units"] = {"pt": p, "differ": diffs[:200], "count": len(diffs),
                         "objects": (len(a.units[p]), len(b.units[p])), "same_order": same_order}
     rep["summary"] = "first difference at PT %d (%s); %d earlier PTs agree" % (

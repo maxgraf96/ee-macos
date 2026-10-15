@@ -3,7 +3,7 @@
 
     .venv/bin/python tools/simparity/run.py [--runs N] [--minutes M] [--seed S]
         [--ptps P] [--reports] [--units PT,PT...] [--units-every N]
-        [--oosdump PT] [--max-pt N] [--lockstep] [--no-civ-timer] [--out DIR]
+        [--oosdump PT] [--max-pt N] [--draws A-B] [--lockstep] [--no-civ-timer] [--out DIR]
         [--no-build] [--kit DIR]
         [--insert-dylib PATH]
 
@@ -101,7 +101,8 @@ def run_one(k, args, out):
                          ("RECOMP_EE_CHECKSUM_UNITS_EVERY", args.units_every),
                          ("RECOMP_EE_CHECKSUM_OOSDUMP", args.oosdump),
                          ("RECOMP_EE_CHECKSUM_MAX_PT", args.max_pt),
-                         ("RECOMP_EE_CHECKSUM_FLAGS", args.flags)):
+                         ("RECOMP_EE_CHECKSUM_FLAGS", args.flags),
+                         ("RECOMP_EE_CHECKSUM_DRAWS", args.draws)):
             if val is not None:
                 env[key] = str(val)
         command = [str(ROOT / "build/recomp/ee_boot"), "--user", str(user), "--seconds", str(seconds),
@@ -155,6 +156,8 @@ def main():
     parser.add_argument("--oosdump", type=int, default=None, help="the game's OOS dump after this PT")
     parser.add_argument("--max-pt", type=int, default=None)
     parser.add_argument("--flags", default=None, help="flags of the second checksum column")
+    parser.add_argument("--draws", default=None, metavar="A-B",
+                        help="R rows: every call of a random-drawing function in PTs A..B")
     parser.add_argument("--out", type=Path, default=ROOT / "analysis/simparity/mac")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--kit", default=None)

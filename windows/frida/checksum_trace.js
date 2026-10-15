@@ -31,15 +31,21 @@
 //   U,pt,i,vtable,id,x,y,hp,cs,cs2             one object of the checksum list
 //   W,ct,pt,dump,flags,cs                      the game's own checksum call (a multiplayer CT; the
 //                                              host's value never goes on the wire)
+//   R,pt,fn,caller,rng_in,rng_out              a call of a function that draws random numbers, in
+//                                              the PT window of PARAMS.draws
 //
 // PARAMS:
 //   out=<path>          the stream file (required)
 //   seed=<int>          force the game seed (default: the game's own)
 //   no_reports=<bool>   skip the statistics report timer (default true)
-//   flags2=<int>        flags of the second checksum column (default 1 = the same as cs)
+//   flags2=<int>        flags of the second checksum column (default 1 = the same as cs; 3 adds each
+//                       unit's physics model: float position bits, update count, target; 0 when a
+//                       unit has no model)
 //   units=<a,b,...>     U rows after these PTs; units_every=<n> also after every nth PT
 //   oosdump=<pt>        after this PT, the game's own OOS dump (WorldChecksum with dump = 1)
 //   max_pt=<n>          stop writing rows after PT n
+//   draws=<a>-<b>       R rows for PTs a..b: every call of an EXE function that calls URandom, with
+//                       its caller and the world RNG around it
 //   lockstep=<bool>     the server builds a CT (EEServer vtable +0x28, EXE 0x4c3703, called from
 //                       SendCommunicationsTick on its send thread) only once the simulation has started every CT sent so far and run
 //                       all their PTs (waits at most 3 s), so a message the simulation sends during
@@ -101,11 +107,22 @@ function nextUnit(u) {
   return link.isNull() ? NULL : link.readPointer();
 }
 
+// Flag 2 dereferences each unit's physics model ([unit+0x30]) without a null check (EEComplexUnit
+// 0x5ec507): only ask for it when every unit has one.
+function unitsHaveModels() {
+  let i = 0;
+  for (let u = VA_UNIT_LIST.readPointer(); !u.isNull() && i < 100000; u = nextUnit(u), i++)
+    if (u.add(0x30).readPointer().isNull()) return false;
+  return true;
+}
+
 function writeUnits(pt) {
   let i = 0;
   for (let u = VA_UNIT_LIST.readPointer(); !u.isNull() && i < 100000; u = nextUnit(u), i++) {
+    const model = !u.add(0x30).readPointer().isNull() || !(flags2 & 2);
     emit(['U', pt, i, h8(u.readU32()), u.add(0x24).readU32(), u.add(0x1c).readS32(), u.add(0x20).readS32(),
-          u.add(0x3c).readS32(), h8(unitChecksum(u, 1)), h8(flags2 === 1 ? 0 : unitChecksum(u, flags2))].join(','));
+          u.add(0x3c).readS32(), h8(unitChecksum(u, 1)),
+          h8(flags2 === 1 || !model ? 0 : unitChecksum(u, flags2))].join(','));
   }
 }
 
@@ -130,7 +147,8 @@ Interceptor.attach(at(0x546c63), {
     let units = 0;
     for (let u = VA_UNIT_LIST.readPointer(); !u.isNull() && units < 100000; u = nextUnit(u)) units++;
     const cs = worldChecksum(world, 0, 1) >>> 0;
-    const cs2 = flags2 === 1 ? cs : worldChecksum(world, 0, flags2) >>> 0;
+    const models = (flags2 & 2) ? unitsHaveModels() : true;
+    const cs2 = flags2 === 1 ? cs : models ? worldChecksum(world, 0, flags2) >>> 0 : 0;
     emit(['T', pt, ct, h8(cs), h8(cs2), h8(world.add(W_RNG).readU32()), VA_INPUTS.readU32(), units].join(','));
     if ((unitsEvery && pt % unitsEvery === 0) || unitPts.has(pt)) writeUnits(pt);
     if (pt === oosdump) {
@@ -214,6 +232,42 @@ if (lockstep) Interceptor.attach(at(0x4c3703), {
     }
   },
 });
+
+// The EXE functions that call URandom::Generate, URandom::NextInSeries, URandomIntegers::Generate
+// or U2DSparseArrayPointContainer::GetRandomPoint (import slots 0x8233b0, 0x823300, 0x82370c,
+// 0x823380).
+const DRAW_FNS = [
+  0x40a0c0, 0x4115b4, 0x443d6c, 0x4446a5, 0x444fbd, 0x447342, 0x44f807, 0x44f23e, 0x45b064, 0x45a2da,
+  0x45ccc3, 0x45af8c, 0x45f4f5, 0x463340, 0x46e0b9, 0x46f4ff, 0x474e85, 0x474cc8, 0x4769f7, 0x483d97,
+  0x49400d, 0x495033, 0x49352a, 0x49ca4a, 0x49f5ef, 0x4aa0af, 0x4ab812, 0x4adb20, 0x4aef93, 0x4d42fa,
+  0x4f6838, 0x4f8c62, 0x4f8c48, 0x4f8c9c, 0x512fb0, 0x51a7ea, 0x51a9a3, 0x51a9fe, 0x51c7bd, 0x51a9bd,
+  0x523cf6, 0x524554, 0x52599b, 0x523739, 0x5272be, 0x5274a4, 0x547b6b, 0x5531a8, 0x546c63, 0x5531c2,
+  0x593a23, 0x598b7a, 0x5ecd26, 0x5ef9ff, 0x5fbba0, 0x5fff1b, 0x6083b2, 0x611946, 0x6136fc, 0x61ad41,
+  0x63323f, 0x630e9c, 0x66b921, 0x66d402, 0x66f0d5, 0x66ea64
+];
+if (P.draws) {
+  const [from, to] = String(P.draws).split('-').map(Number);
+  const last = Number.isFinite(to) ? to : from;
+  for (const fn of DRAW_FNS) {
+    Interceptor.attach(at(fn), {
+      onEnter() {
+        const world = VA_WORLD_PTR.readPointer();
+        const pt = world.isNull() ? 0 : world.add(W_PT).readU32() + 1;
+        this.on = !world.isNull() && pt >= from && pt <= last;
+        if (!this.on) return;
+        this.caller = this.returnAddress;
+        this.rng = world.add(W_RNG).readU32();
+      },
+      onLeave() {
+        if (!this.on) return;
+        const world = VA_WORLD_PTR.readPointer();
+        emit(['R', world.add(W_PT).readU32() + 1, h8(fn), h8(this.caller.toUInt32()), h8(this.rng),
+              h8(world.add(W_RNG).readU32())].join(','));
+      },
+    });
+  }
+  emit('# draws: R rows for PTs ' + from + '-' + last);
+}
 
 send({ type: 'hooked', out: P.out, seed: haveSeed ? seed : null, no_reports: skipReports, flags2, lockstep,
        no_civ_timer: noCivTimer });
