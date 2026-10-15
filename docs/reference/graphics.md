@@ -485,7 +485,7 @@ The `DDRAW.dll` exports are `DirectDrawEnumerateA`, `DirectDrawEnumerateExA` and
   - The kit's `GetDC`-on-surface (a DIB over guest memory) fits, because the targets are CPU-side textures, so no GPU readback is needed.
   - The kit is missing `ExtTextOutA`, `GetTextExtentPoint32A`, `CreateFontA` and `GetTextMetricsA` (ADR-001 gap 9).
   - Glyph metrics must match Windows, or the atlas layout and UI text widths will differ (cosmetic only).
-- **The EXE's own GDI** (`CreateDIBSection`, `BitBlt`, `Polygon`, `Ellipse`, `TextOutW`, … at EXE+0x3ba000–0x3bc000) is not on the plugin path, and nothing shows it running in the census [measured: not among the in-game hot calls]. Its purpose is left to func-db.
+- **The EXE's own GDI** (`CreateDIBSection`, `BitBlt`, `Polygon`, `Ellipse`, `TextOutW`, … at EXE+0x3ba000–0x3bc000) is not on the plugin path, and nothing shows it running in the census [measured: not among the in-game hot calls]. It is WONAPI's Win32 back end (`MSWindow`, `MSGraphics`, `MSFont`, `MSNativeImage`), used only by the Multiplayer lobby: [lobby.md](lobby.md) §4 [static].
 
 ---
 

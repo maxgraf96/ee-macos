@@ -470,7 +470,7 @@ The kit's Winsock, IP helper API and Netbios, on BSD sockets (kit `feat/winsock`
 | iphlpapi | `GetAdaptersInfo` (plugin import; the EXE's by `GetProcAddress`) | yes | `GetAdaptersAddresses`, `GetIpForwardTable`, `GetBestInterface`, `GetBestRoute`, `GetIpAddrTable`, `GetNumberOfInterfaces` |
 | netapi32 | none | `Netbios`: `NCBENUM`, `NCBRESET`, `NCBASTAT` (MAC address) | |
 
-The EXE also asks `wininet.dll` for `InternetGetConnectedState` (WONAPI) [static: EXE strings]; the kit does not serve wininet, so that `LoadLibrary` fails. Not part of P5-A; P5-B should check what the lobby does with that.
+The EXE also asks `wininet.dll` for `InternetGetConnectedState` (WONAPI) [static: EXE strings]; the kit does not serve wininet, so that `LoadLibrary` fails. The lobby then assumes "connected", as on a Windows PC with Internet, and tries the WON directory servers; that is the intended behaviour ([lobby.md](lobby.md) §8: add the m2/m3 hosts to `offline_hosts`).
 
 ### 12.2 The §7 checklist on the Mac
 | Item | Status |

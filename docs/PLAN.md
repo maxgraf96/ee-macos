@@ -116,7 +116,7 @@ Empire Earth.exe              game logic, UI, AI, (dead) WON lobby client — 4.
   - Every machine writes an OOS log; the losers are removed.
   - "Debug OOS Handling" has no runtime effect.
   - **Oracle:** `windows/frida/netcode_hooks.js` records the per-tick world checksum on each machine.
-- **Two kinds of screen:** menus and the multiplayer lobby run DirectDraw in **normal windowed mode** (`DDSCL_NORMAL`). The multiplayer lobby is a **GDI-drawn UI** from the WON toolkit statically linked into the EXE. Gameplay switches to exclusive fullscreen (`0x513`).
+- **Two kinds of screen:** menus and gameplay are DirectDraw 7 in exclusive fullscreen (`0x513`; `DDSCL_NORMAL` only with the windowed option). The multiplayer lobby is a **GDI-drawn UI** from the WON toolkit statically linked into the EXE: one owned `WS_POPUP` over the game window, shown after `FlipToGDISurface` while the render thread stops presenting; the cooperative level never changes ([lobby.md](reference/lobby.md), corrected 2026-10-15).
   - The current Wine build hangs on entering the lobby: the main thread spins in the lobby's message loop and nothing is displayed.
   - Our user32/gdi32 + DirectDraw HLE must present GDI windows and switch between the two modes cleanly (Phase 3 test case).
 - **Free metadata:** mangled C++ signatures for the whole engine API and the display-plugin interface, plus RTTI in the EXE. No PDBs, though the plugins leak build paths (`C:\SSSI Development\…`).
