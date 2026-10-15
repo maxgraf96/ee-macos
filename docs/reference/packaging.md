@@ -1,6 +1,6 @@
 # Packaging: what the first run needs on a player's Mac
 
-Status: Phase 6, 2026-10-15: P6-A's inventory, with the importer (P6-B2, §1) and the bundled toolchain (P6-B1, §2, §3, §7) built and measured, and **the app itself built and proven end to end (P6-B3, §8)**: `tools/package_app.py` makes a 191 MB `EmpireEarth.app` (86 MB zip, 78 MB DMG) holding nothing game-derived; its first run on this Mac, with no developer tools reachable, imported the user's wrapper and built the game in 131 s, and the game reached the main menu. The player-facing guide is [INSTALL.md](../INSTALL.md).
+Status: Phase 6, 2026-10-15: P6-A's inventory, with the importer (P6-B2, §1) and the bundled toolchain (P6-B1, §2, §3, §7) built and measured, and **the app itself built and proven end to end (P6-B3, §8)**: `tools/package_app.py` makes a 191 MB `EmpireEarth.app` (86 MB zip, 78 MB DMG) holding nothing game-derived; its first run on this Mac, with no developer tools reachable, imported the user's wrapper and built the game in 131 s, and the game reached the main menu. **Release 0.7 (P6-D, §5.1, §8.1)**: the launcher clears the quarantine from its own files before it starts anything nested, and asks to be moved out of App Translocation. `EmpireEarth-0.7.dmg` (74.5 MB) has a Read Me, for the first test on a clean Mac ([clean-mac-test.md](clean-mac-test.md)). The player-facing guide is [INSTALL.md](../INSTALL.md).
 
 Labels: **[measured]** = run on this Mac (M4 Max, 16 cores, macOS 15.5); **[static]** = read from files, binaries or code; **[inferred]** = reasoning, not run.
 
@@ -109,14 +109,72 @@ A re-run after an app update re-translates only when the translator or the DB ch
   - macOS 13–14: Control-click → *Open* also works.
 
   The dialog itself was not raised here: it is modal and would have stayed on screen, unattended. No Gatekeeper setting was changed.
+
+  *P6-D raised it by accident, twice* [measured, 2026-10-15 17:29, syspolicyd's log]. The launcher of a scratch copy was started from an agent's shell: every file of the copy carried `0081;…;Safari;` except `Contents/MacOS/EmpireEarth` itself.
+  - syspolicyd logged `GK evaluateScanResult: 1 … (bundle_id: dev.neoee.empireearth)`, then `Prompt shown`, and CoreServicesUIAgent presented the dialog on the user's screen. The user dismissed it (`Code evaluation completed: 2`, "Adding Gatekeeper denial breadcrumb"). The launcher was SIGKILLed (exit 137).
+  - So: **this Mac's agent processes (VS Code) have no Developer Tools exemption**, and starting the main executable of a bundle whose folder is quarantined is assessed as the bundle, even when the executable carries no mark.
+  - From then on, nothing inside a quarantined bundle was started (§5.1's tests).
+- **The quarantine and App Translocation:** §5.1.
 - **The bundles the first run builds** are made by the app's own clang and lld, signed ad hoc by lld, and never quarantined (only downloads are), so Gatekeeper never assesses them [inferred; they load, measured].
-- **App Translocation:** an app started from Downloads runs from a read-only random path. Nothing may be written inside the app: the cache, user data and registry all live in `~/Library/Application Support/EmpireEarth/`.
+- **App Translocation:** an app started from Downloads runs from a read-only random path. Since 0.7 the launcher asks to be moved into Applications first (§5.1). Nothing is written inside the app apart from clearing the quarantine mark (§5.1): the cache, user data and registry all live in `~/Library/Application Support/EmpireEarth/`.
   - A full first run left all 1,199 files of the app byte-identical (SHA-256 before and after) [measured].
   - The launcher, the first run and the game also ran from the read-only DMG volume (§8) [measured].
 - **If we get a Developer ID** (notarization requires the hardened runtime):
   - The host needs `com.apple.security.cs.disable-library-validation`, so it can load bundles that our team did not sign.
   - `clang`, `ld64.lld` and the Python executable must be signed with the Developer ID and the hardened runtime too, as nested code.
   - Python's ctypes (capstone's binding) may need `com.apple.security.cs.allow-unsigned-executable-memory` under the hardened runtime. This is untested and needed only on this path [inferred].
+
+### 5.1 Quarantine and App Translocation (P6-D)
+
+**The risk.** A DMG or zip that reaches another Mac by download or AirDrop carries `com.apple.quarantine`, and so does every file copied out of it.
+- The player approves the app once (*Open Anyway*), as the bundle.
+- What macOS then does when the approved launcher starts the ad-hoc, quarantined programs nested in it is **untested**, and on a clean Mac it may assess them one by one. Those programs are:
+  - `Contents/MacOS/EmpireEarthHost`, which the launcher `exec`s;
+  - the bundled `python3`;
+  - `clang` and `ld64.lld` (the `llvm` multicall binary);
+  - `innoextract`;
+  - FFmpeg's dylibs.
+- The user's own install on this Mac never had the mark: it came from a DMG built here.
+
+**What the launcher does** (`app/launcher/launcher.m`, `prepare_app`), first thing in `main`, before `firstrun.py status`, so before any Python, clang, lld or innoextract, and before the `exec` of the host:
+1. It logs `launcher 0.7 (<build>) at <app path>` in `Logs/launcher.log`.
+2. **Translocated?** `SecTranslocateIsTranslocatedURL` answers. The function is exported by Security.framework since macOS 10.12 but is no longer in the SDK's headers, so it is found with `dlsym`. A path containing `/AppTranslocation/` counts too. `SecTranslocateCreateOriginalPathForURL` gives where the app really is.
+   - **With a window:** an alert, *"Please drag EmpireEarth into your Applications folder first, then open it from there."*, with **Move to Applications** (the default) and **Quit**. Nothing nested has run yet.
+   - **Move** does the following:
+     1. `ditto --noqtn` from the original into `/Applications`, or into `~/Applications` if the player may not write `/Applications`. It copies into a hidden `.EmpireEarth.app.<pid>.new` first;
+     2. clears the quarantine from the copy;
+     3. renames an older `EmpireEarth.app` aside, renames the copy into place, deletes the old one;
+     4. checks that nothing in the copy is still quarantined;
+     5. starts the copy through Launch Services (`NSWorkspace openApplicationAtURL`, a new instance, the same arguments), then exits.
+   - A copy that is already in Applications but was put there without Finder, so macOS still translocates it, only has its quarantine cleared.
+   - **Without a window** (`--status`, `--no-ui`): a note on stderr, and it carries on.
+3. **Otherwise it clears the quarantine** from every file, folder and symlink of its app: `fts` without following links, `getxattr`/`removexattr` with `XATTR_NOFOLLOW`. macOS refuses to change a read-only file's extended attributes (EACCES), so a read-only file or folder of ours is made writable for that moment and its mode restored. It logs `quarantine: cleared from N files (of M in the app, T s)`, plus `K keep it (first <path>: <error>)` for files it could not clear. This runs on every start, and costs about 0.05 s for the app's 1,319 entries.
+4. **If something nested then fails while files are still quarantined,** the launcher takes it for macOS refusing quarantined code. "Fails" means the Python cannot be started, dies with no result line (a Gatekeeper kill is a SIGKILL), firstrun reports that a tool would not run, or the host's `exec` fails.
+   - The window then says *"macOS is blocking part of this app."* with the Terminal line `xattr -cr "<app>"`.
+   - Without a window, the same goes to stderr.
+   - This is the fallback for an app the player may not change, such as another user's copy.
+
+**Why this is allowed.** The launcher only runs after the player approved the app. The mark is not part of the code signature: `codesign --verify --deep --strict` passes before and after [measured]. Next time there is nothing left to assess, so the app opens with no dialog.
+
+**Measured** [2026-10-15]. Nothing inside a quarantined bundle was ever started (§5). The tests used a clean launcher with `$EE_TEST_APP` pointing at a quarantined copy.
+
+| Test | Result |
+|---|---|
+| A copy of the release app, `xattr -rw com.apple.quarantine "0081;…;Safari;"` on everything, `-s` on the 3 symlinks: 1,319 entries marked. Then a clean launcher's `--status` with `EE_TEST_APP` = the copy | `quarantine: cleared from 1319 files (of 1319 in the app, 0.04 s)`. Afterwards `xattr -lr` finds no `com.apple.quarantine`, symlinks included. `codesign --verify --deep --strict`: valid on disk, satisfies its Designated Requirement |
+| Another copy with one file `chmod 444`, one folder `chmod 555` and one file `chflags uchg` | 1,315 cleared; the read-only ones cleared and back to `r--r--r--` and `r-xr-xr-x`; `1 keep it (first …/game.toml: Operation not permitted)` |
+| `--no-ui --import <GOG installer> --no-play` with the release app (§8.1), `EE_TEST_APP` = a quarantined copy of it | the copy cleared (1,319 entries, 0.07 s); the installer imported and the game built (§8.1) |
+| `--check-install` on the app, on `/private/var/folders/…/AppTranslocation/<uuid>/d/EmpireEarth.app`, and with `EE_TEST_TRANSLOCATED_FROM` | `translocated: false`; `true` (by place); `true` with the original path |
+| Without a window, translocated, `EE_TEST_ALERT=quit` (the alert answered without being shown) | logs `translocated: quit`, exits 0, `status` never runs |
+| `--move-to-applications --status` (the button without a window), translocated from a quarantined copy, `EE_APPLICATIONS_DIR` = a scratch folder: into an empty folder, again over that copy, and from a copy already there | each 0.5–0.6 s. The copy: 0 quarantined, signature valid. A file added to the first copy is gone after the replace. The original is still quarantined (it is only read). The relaunched instance logged `launcher 0.7 … at <scratch>/Apps/EmpireEarth.app`, not translocated |
+
+- **`ditto --noqtn` still copies a `com.apple.quarantine` the files already have** (1,319 of 1,319): the option only stops ditto from adding one. So the move clears the copy itself.
+- **A real translocation cannot be made from a shell:** `SecTranslocateCreateSecureDirectoryForURL` answers EPERM for a quarantined app (only Launch Services translocates). So the alert was tested only with `$EE_TEST_TRANSLOCATED_FROM` and `$EE_TEST_ALERT`, and the detection by path; the real mount is for the clean Mac.
+- `tests/test_package_app.py` covers these on synthetic apps (a launcher built from source, a shell script as its "Python"). That includes a "Python" that SIGKILLs itself while an immutable file stays quarantined: the `xattr -cr` advice appears, and does not appear once nothing is quarantined. The move with its Launch Services relaunch runs with `EE_TEST_LAUNCH_SERVICES=1`.
+
+**Not known until the clean Mac** ([clean-mac-test.md](clean-mac-test.md)):
+- whether nested programs would have been assessed at all;
+- whether macOS's App Management protection (macOS 13+) lets the app clear its own files' extended attributes, and replace an older copy in Applications, when that copy is signed ad hoc with no team. The launcher logs `keep it (… Operation not permitted)` if not, and then falls back to the advice above;
+- what opening the DMG itself shows.
 
 ## 6. Nothing game-derived ships
 
@@ -182,14 +240,18 @@ It also **warns** when a file spells out the packager's home directory. Today th
 
 ```sh
 .venv/bin/python tools/package_app.py [--kit DIR] [--toolchain build/toolchain] [--innoextract DIR] \
-    [--toolchain-cache ~/Library/Caches/recomp-kit/toolchain] [--out build/dist] [--no-host-build] [--no-archives]
+    [--toolchain-cache ~/Library/Caches/recomp-kit/toolchain] [--out build/dist] [--no-host-build] [--no-archives] \
+    [--release DIR]
 ```
 
 The command:
 1. builds the kit's **player host** (`tools/build.py --target player`, a CMake tree with no translation at all; kit `host/README.md` "The player host");
 2. compiles the **launcher** and draws the **icon** with this Mac's Xcode clang (players need none);
 3. writes `THIRD_PARTY_NOTICES.txt`: the kit's `tools/toolchain/notices.py` with innoextract's four components;
-4. assembles, signs (§5), checks (§6), then zips (`ditto -c -k --keepParent`) and makes a DMG (`hdiutil … -format ULMO`, the app beside an `Applications` link).
+4. assembles, signs (§5), checks (§6), then zips (`ditto -c -k --keepParent`) and makes a DMG (`hdiutil … -format ULMO`: the app, an `Applications` link and `app/ReadMeFirst.txt` as **Read Me First.txt**);
+5. with `--release DIR`, copies (never moves) the zip and the DMG there as `EmpireEarth-<VERSION>.zip`/`.dmg` and writes `SHA256SUMS` (`shasum -a 256 -c` reads it).
+
+**Versions:** `CFBundleShortVersionString` is `package_app.VERSION` (0.7). `CFBundleVersion` is `<commits>.<UTC yymmddHHMM>` of the build, so no two builds share one. `EEBuild` in the Info.plist records the repository and kit commits and the build time.
 
 Everything lands under `build/` (ignored). A run with the host already built takes about 45 s.
 
@@ -197,7 +259,7 @@ Everything lands under `build/` (ignored). A run with the host already built tak
 
 ```
 EmpireEarth.app/Contents/
-  Info.plist                 CFBundleExecutable EmpireEarth, dev.neoee.empireearth, LSMinimumSystemVersion 13.0, arm64,
+  Info.plist                 CFBundleExecutable EmpireEarth, dev.neoee.empireearth, 0.7, LSMinimumSystemVersion 13.0, arm64,
                              NSLocalNetworkUsageDescription (macOS 15's Local Network prompt: lansession.md §9.2)
   MacOS/EmpireEarth          the launcher (app/launcher/launcher.m, AppKit, 0.1 MB)
   MacOS/EmpireEarthHost      the kit's player host + EE's stand-ins (app/ee_standins.cpp), 16.9 MB, debug stabs stripped
@@ -258,7 +320,36 @@ EmpireEarth.app/Contents/
   - the window showed import, then "Step 2 of 2", with one bar and the phase text;
   - the build took 150 s at `nice 10` beside a kit test build;
   - the window closed, and the same process became the game, which reached the main menu.
-- **Not measured: a Mac that never had Xcode.** The sandbox hides the developer tools from the first run, but the host and launcher were built on this Mac. A friend's Mac is the remaining check (phase6.md).
+- **Not measured: a Mac that never had Xcode.** The sandbox hides the developer tools from the first run, but the host and launcher were built on this Mac. A friend's Mac is the remaining check: [clean-mac-test.md](clean-mac-test.md).
+
+### 8.1 Release 0.7 (P6-D)
+
+```sh
+.venv/bin/python tools/package_app.py --toolchain /Users/max/Code/ee-build-cache/toolchain-stage \
+    --toolchain-cache /Users/max/Code/ee-build-cache/downloads --release /Users/max/Code/ee-build-cache/release/0.7
+```
+
+Built 2026-10-15 from ee-macos `ebb8302` and kit `614be22`, CFBundleVersion **234.2610151640**. The packaging check found nothing game-derived; its only warnings are the FFmpeg build path (§6).
+
+| `/Users/max/Code/ee-build-cache/release/0.7/` | Bytes | SHA-256 |
+|---|---|---|
+| `EmpireEarth-0.7.dmg` (the app, `Applications`, `Read Me First.txt`) | 74,509,767 | `264c9c3ea35129b29b313b960267b69cc24e241a62f5e63a7d2e71a8aafb396a` |
+| `EmpireEarth-0.7.zip` (the app) | 86,205,174 | `c6b00eb1b17f378530a5538ab69599a5db5842c7b62a22848130c9b54287145d` |
+| `SHA256SUMS` | 172 | |
+
+The app is 191.3 MB, 1,202 files (1,319 entries with folders and symlinks).
+
+**The release's own first run** [measured]. The app was copied out of the mounted DMG and run as `EmpireEarth --no-ui --import ~/Downloads/setup_empire_earth_gold_2.0.0.2974_gog_v3_(78415).exe --no-play`, with a scratch `EE_HOME`, `EE_FIRSTRUN_NICE=10`, and `EE_TEST_APP` pointing at a fully quarantined copy of itself (§5.1). The installer itself carries Brave's `com.apple.quarantine`.
+
+| | |
+|---|---|
+| the quarantined copy | cleared, 1,319 entries in 0.07 s; afterwards no mark, signature valid |
+| import from the installer | **2.9 s**: 294 files moved out of innoextract's output, 413,292,860 bytes, nine module hashes as `game.toml`; registry from GOG's script, CD key present (the installer was in the disk cache) |
+| inputs / translate / compile + link | 14.6 / 32.7 / 160.8 s, while the boot gate compiled the developer build beside it (load average about 90) |
+| **total, wall** | **215 s**; uncontended, the same import and build took 154 s (firstrun.md §3.4) |
+| result | `ready`, cache key `d5f87aa3ce3fafa4`: the same as from the Wine wrapper |
+
+The DMG mounted read-only shows `EmpireEarth.app`, `Applications → /Applications` and `Read Me First.txt`; the app inside passes `codesign --verify --deep --strict`.
 
 
 ## 9. When the game crashes on a player's Mac (P6-C)

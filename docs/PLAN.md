@@ -541,7 +541,7 @@ Details: [phase5.md](phase5.md), [lansession.md](reference/lansession.md).
 - Check Steam/retail builds for version compatibility if friends use them.
 
 ### Phase 6: Shareable app → **M5: 1.0 for friends** (≈2–4 wk)
-**Status 2026-10-15:** **the shareable `EmpireEarth.app` exists** (P6-B1–B3 merged, [phase6.md](phase6.md), [INSTALL.md](INSTALL.md)). It is 191 MB (DMG 78 MB) and holds nothing game-derived. It bundles a 76 MB clang+lld and a trimmed Python. Its first run imports the player's GOG files, then translates and compiles them in about 2–3 min on an M4 Max, with no developer tools. Open: GOG's real installer, a never-Xcode Mac, this repository's licence.
+**Status 2026-10-15:** **the shareable `EmpireEarth.app` exists** (P6-B1–B3 merged, [phase6.md](phase6.md), [INSTALL.md](INSTALL.md)). It is 191 MB (DMG 78 MB) and holds nothing game-derived. It bundles a 76 MB clang+lld and a trimmed Python. Its first run imports the player's GOG files, then translates and compiles them in about 2–3 min on an M4 Max, with no developer tools. GOG's real offline installer (Inno Setup 5.6.2, one 667 MB file) imports and builds in 154 s. **Release 0.7** (P6-D) clears the download quarantine from the app's own files after the one *Open Anyway*, and asks to be moved out of App Translocation; `EmpireEarth-0.7.dmg` is ready for the first test on a never-Xcode Mac ([clean-mac-test.md](reference/clean-mac-test.md)). Open: that test, this repository's licence.
 
 - App bundle + first-run importer: GOG offline installer (Inno) or game folder → hash check → translate + compile (one-time, cached).
 - **Bundled LLVM toolchain** (D10, §5.8): freestanding build, lld link, ad-hoc signing, cached output.

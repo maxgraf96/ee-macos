@@ -2,6 +2,8 @@
 
 This app runs **your own copy of Empire Earth Gold from GOG** natively on an Apple Silicon Mac. It contains none of the game. The first time you open it, it copies your GOG files, checks them and builds the game for your Mac, which takes a few minutes. After that it starts straight into the game.
 
+This guide is for **version 0.7** (`EmpireEarth-0.7.dmg`). The disk image has a short **Read Me First.txt** with the same steps.
+
 ## What you need
 
 - A Mac with Apple Silicon (M1 or later) and macOS 13 Ventura or later.
@@ -12,9 +14,7 @@ This app runs **your own copy of Empire Earth Gold from GOG** natively on an App
 
 1. Sign in at gog.com and open **Account → Games → Empire Earth Gold**.
 2. Under **Download offline backup game installers**, choose **Windows** and **English**.
-3. Download **all parts** into the same folder (Downloads is fine):
-   - `setup_empire_earth_gold_<version>.exe`;
-   - and every `setup_empire_earth_gold_<version>-1.bin`, `-2.bin` … beside it.
+3. Download it into Downloads (or any folder): today that is one file, `setup_empire_earth_gold_2.0.0.2974_gog_v3_(78415).exe`, 667 MB. If GOG offers more parts (`…-1.bin`, `-2.bin` …), download **all of them** into the same folder.
 
 You do not need Windows or Wine: the app unpacks the installer itself.
 
@@ -26,8 +26,12 @@ Your files are only read, never changed.
 
 ## 2. Install the app
 
-- **From `EmpireEarth.dmg`:** open it and drag **EmpireEarth** onto **Applications**.
-- **From `EmpireEarth.zip`:** open it, then drag the **EmpireEarth** app into your Applications folder.
+- **From `EmpireEarth-0.7.dmg`:** open it and drag **EmpireEarth** onto **Applications**. Then eject the disk image.
+- **From `EmpireEarth-0.7.zip`:** open it, then drag the **EmpireEarth** app into your Applications folder.
+
+**Open it from Applications.** Opened straight from the disk image or from Downloads, macOS runs it from a temporary, read-only place (App Translocation). The app then says **“Please drag EmpireEarth into your Applications folder first, then open it from there.”** and offers:
+- **Move to Applications:** it copies itself there (replacing an older copy) and opens from there;
+- **Quit**.
 
 The app is called **EmpireEarth**, with no space. So it never replaces a Wine app called “Empire Earth” that holds your game.
 
@@ -44,6 +48,18 @@ On macOS 13 and 14 you can instead **Control-click** the app in Finder, choose *
 
 **Why it is safe to allow:** the app is signed, so macOS notices if anything in it changes. It only reads the game files you choose. It writes only to its own folder (step 6) and connects to nothing on the internet.
 
+**Only once.** A downloaded app carries a "downloaded from the internet" mark on every file inside it. After you allow it, the app removes that mark from its own files. That way macOS does not ask again about the tools inside the app (its Python, its compiler, the installer unpacker, the game itself). The app's signature is not affected: the mark is not part of it.
+
+### If macOS still blocks part of the app
+
+The app cannot remove the mark if it may not change its own files, for example when another user installed it. If macOS then refuses a tool inside it, the window says **“macOS is blocking part of this app.”** The same goes for a dialog that names something other than EmpireEarth, or for **“EmpireEarth is damaged and can’t be opened”**. Fix it in Terminal (Applications → Utilities), then open the app again:
+
+```sh
+xattr -cr /Applications/EmpireEarth.app
+```
+
+If Terminal answers *Operation not permitted*, allow Terminal under **System Settings → Privacy & Security → App Management** and run it again. Alternatively, drag the app to the Bin and install it again as yourself.
+
 ## 4. The first start
 
 A small window asks for your game:
@@ -54,7 +70,7 @@ A small window asks for your game:
 
 Then one progress bar shows two steps:
 
-1. **Importing your game files.** The files are checked and copied: a few seconds from an installed game, about half a minute from the installer.
+1. **Importing your game files.** The files are checked and copied: a few seconds from an installed game, up to about a minute from the installer.
 2. **Building the game for your Mac.** This takes about 2–3 minutes on a recent Mac and up to about 10 on a base M1. The Mac's fans may spin up.
 
 You can quit at any time (**Cancel**, or ⌘Q). The next time you open the app, it carries on where it stopped. When the build is done, the game starts.
@@ -75,6 +91,7 @@ The window says what happened and what to do. The usual cases:
 | The installer cannot be read | Download it again from GOG. |
 | There is not enough free disk space | Free up the space shown, then click **Try Again**. |
 | Building the game failed | Click **Try Again**. If it keeps failing, click **Show Log** and send the log to whoever gave you the app. |
+| macOS is blocking part of this app | Run the Terminal line it shows (§3, "If macOS still blocks part of the app"), then click **Try Again**. |
 
 ## 5. Playing
 
@@ -118,9 +135,9 @@ Everything is in **`~/Library/Application Support/EmpireEarth/`**. To open it, c
 | `Build/` | The game built for your Mac, about 180 MB. |
 | `registry.json` | The game's settings and your CD key, read from your own GOG files. It never leaves your Mac. |
 | `Data/`, `Users/` | Saved games, scenarios and player profiles. |
-| `Logs/` | The app's and the game's logs, for when something goes wrong: `game.log` is the last run's, `game.previous.log` the one before. If the game stops, send `game.log`. |
+| `Logs/` | The app's and the game's logs, for when something goes wrong: `game.log` is the last run's, `game.previous.log` the one before; `launcher.log` is the app's own. If something goes wrong, send `game.log` and `launcher.log`. |
 
-Nothing is written into the app itself, and nothing outside this folder.
+Nothing is written outside this folder. The only change inside the app itself is removing the download mark from its files (§3).
 
 ## 7. Removing everything
 
