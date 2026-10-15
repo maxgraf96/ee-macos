@@ -11,8 +11,10 @@
     .venv/bin/python tools/test.py --lobby [SCENARIO...] # the Multiplayer lobby (WONAPI's GDI window over
                                                    # the game's frame), headless (tests/lobby/, docs/reference/lobby.md)
     .venv/bin/python tools/test.py --simparity [OPTIONS]  # the single-player checksum stream, run
-                                                   # twice on the Mac; both must agree (default:
-                                                   # 3 minutes, no civ timer; tools/simparity/,
+                                                   # twice on the Mac; both must agree, every
+                                                   # save must succeed (default: 3 minutes, no civ
+                                                   # timer, an autosave a minute, against legion's
+                                                   # stream if present; tools/simparity/,
                                                    # docs/reference/simparity.md)
     .venv/bin/python tools/test.py --m1-replay [PACKS...]  # the Mac M1 replay (tests/m1/replay/):
                                                    # self-tests, or replay packs with both builds
@@ -48,9 +50,16 @@ def main(argv):
         return subprocess.call([sys.executable, str(kitpath.ROOT / "tests/lobby/run_lobby.py")] + argv)
     if "--simparity" in argv:
         argv = [a for a in argv if a != "--simparity"]
-        # Without options: the Mac's own determinism, cheaply - two 3-minute games
-        # with no civilization timer, so nothing but the simulation feeds them.
-        argv = argv or ["--no-civ-timer", "--minutes", "3"]
+        # Without options: two 3-minute games with no civilization timer, so nothing
+        # but the simulation feeds them, and an autosave every minute (each save
+        # reschedules the computer player; a failed one did not, and the Mac left
+        # Windows at PT 24301: simparity.md §9). Every save must succeed, and the
+        # games must agree with each other and with legion's run of the same
+        # scenario when its stream is here (analysis/ is not in git), up to a save
+        # that landed in different CTs (thread timing, §9.3).
+        argv = argv or ["--no-civ-timer", "--minutes", "3", "--autosave-ms", "60000",
+                        "--players", "10", "--calls", "43dcf4/1,42f912/1,43ded9/0,540aca/0,42f783/2",
+                        "--against", str(kitpath.ROOT / "analysis/simparity/win/win-as-1/stream.csv")]
         return subprocess.call([sys.executable, str(kitpath.ROOT / "tools/simparity/run.py")] + argv)
     if "--eh" in argv:
         argv = [a for a in argv if a != "--eh"]

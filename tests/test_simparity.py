@@ -11,6 +11,21 @@ sys.path.insert(0, str(ROOT / "tools/simparity"))
 import compare  # noqa: E402
 
 
+def _load_runner():
+    """tools/simparity/run.py by path (tools/run.py has the same module name)."""
+    import importlib.util
+    for sub in ("tools/boot", "tools"):
+        if str(ROOT / sub) not in sys.path:
+            sys.path.append(str(ROOT / sub))
+    spec = importlib.util.spec_from_file_location("simparity_run", ROOT / "tools/simparity/run.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+run = _load_runner()
+
+
 def stream(tmp_path, name, ticks, cts=None, units=None, tail=""):
     lines = ["# ee-simparity/1 test", "G,23147,1000,1"]
     for c in cts or [(12, 14, 14), (13, 28, 14)]:
@@ -77,12 +92,12 @@ def test_units_matched_by_vtable_and_id(tmp_path):
 
 def test_tracers_write_the_same_rows():
     """Both tracers declare the same row kinds with the same fields."""
-    rows = re.compile(r"^\s*(?://|\*)?\s*([GCTSUWR]),([a-z_0-9,]+)", re.M)
+    rows = re.compile(r"^\s*(?://|\*)?\s*([GCTSUWRPK]),([a-z_0-9,.]+)", re.M)
     mac = dict(rows.findall((ROOT / "mods/simparity/simparity.c").read_text()))
     win = dict(rows.findall((ROOT / "windows/frida/checksum_trace.js").read_text()))
     doc = dict(rows.findall(compare.__doc__))
-    assert set(mac) == set(win) == set(doc) == set("GCTSUWR")
-    for kind in "GCTSUWR":
+    assert set(mac) == set(win) == set(doc) == set("GCTSUWRPK")
+    for kind in "GCTSUWRPK":
         assert mac[kind].split() == win[kind].split() == doc[kind].split()
 
 
@@ -94,3 +109,48 @@ def test_first_draw_difference(tmp_path):
     rep = compare.compare(compare.load(a), compare.load(b))
     assert rep["first_pt"] == 9 and rep["fields"] == ["rng"]
     assert rep["draws"]["index"] == 2 and rep["draws"]["b"][2]["rng_out"] == "00000999"
+
+
+def test_players_and_calls(tmp_path):
+    words = ["%08x" % w for w in range(12)]
+    pa = ["P,%d,2,%s" % (pt, ",".join(words)) for pt in (1, 2, 3)]
+    other = list(words)
+    other[4] = "000000ff"
+    garbage = ["81818181", "92866793"] + words[2:]  # words 0 and 1: never written, not compared
+    pb = ["P,1,2,%s" % ",".join(garbage), pa[1], "P,3,2,%s" % ",".join(other)]
+    ka = ["K,2,0042f783,00500000,2,00000004,0000000a,00000000,00000000",
+          "K,3,0042f783,00500000,2,00000004,0000000b,00000000,00000000"]
+    kb = [ka[0].replace(",00000000,00000000", ",12345678,9abcdef0"),  # a2, eax: not compared
+          ka[1].replace("0000000b", "0000000c")]
+    a = stream(tmp_path, "a.csv", ticks(5), tail="\n".join(pa + ka) + "\n")
+    b = stream(tmp_path, "b.csv", ticks(5), tail="\n".join(pb + kb) + "\n")
+    rep = compare.compare(compare.load(a), compare.load(b))
+    assert rep["agree"]  # the checksums do not see it...
+    d = rep["players"]["first_difference"]
+    assert d["pt"] == 3 and d["players"][0]["slot"] == 2 and d["players"][0]["words"] == [4]
+    c = rep["calls"]["first_difference"]  # ...the hidden state does
+    assert c["index"] == 1 and c["pt"] == 3 and c["b"][1]["args"][1] == "0000000c"
+
+
+def save_rows(pts, eax="00000000"):
+    return ["K,%d,00540aca,004b89b3,-1,00000000,00000000,00000000,%s" % (pt, eax) for pt in pts]
+
+
+def test_failed_and_missing_saves(tmp_path):
+    """The bug of PT 24301: the Mac's autosave failed, so it skipped the save's side effect."""
+    ok = compare.load(stream(tmp_path, "ok.csv", ticks(10), tail="\n".join(save_rows([5])) + "\n"))
+    assert run.save_problems(ok, 40) == []
+    bad = compare.load(stream(tmp_path, "bad.csv", ticks(10),
+                              tail="\n".join(save_rows([5], eax="00000001")) + "\n"))
+    assert run.save_problems(bad, 40) == ["the save at PT 5 failed (0x540aca returned 00000001)"]
+    # 10 PTs at 1 PT/s with a 2-s interval: 5 saves due, 1 seen
+    assert run.save_problems(ok, 1, autosave_ms=2000) == ["1 saves, 5 autosaves due"]
+
+
+def test_save_timing(tmp_path):
+    """A difference that follows a save which landed at different PTs is single-player timing."""
+    a = compare.load(stream(tmp_path, "a.csv", ticks(20), tail="\n".join(save_rows([5, 15])) + "\n"))
+    b = compare.load(stream(tmp_path, "b.csv", ticks(20, rng_at=17),
+                            tail="\n".join(save_rows([5, 11])) + "\n"))
+    assert run.save_timing(a, b) == (15, 11)
+    assert run.save_timing(a, a) is None
