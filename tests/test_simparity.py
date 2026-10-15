@@ -101,7 +101,8 @@ def test_players_and_calls(tmp_path):
     pa = ["P,%d,2,%s" % (pt, ",".join(words)) for pt in (1, 2, 3)]
     other = list(words)
     other[4] = "000000ff"
-    pb = pa[:2] + ["P,3,2,%s" % ",".join(other)]
+    garbage = ["81818181", "92866793"] + words[2:]  # words 0 and 1: never written, not compared
+    pb = ["P,1,2,%s" % ",".join(garbage), pa[1], "P,3,2,%s" % ",".join(other)]
     ka = ["K,2,0042f783,00500000,2,00000004,0000000a,00000000,00000000",
           "K,3,0042f783,00500000,2,00000004,0000000b,00000000,00000000"]
     kb = [ka[0].replace(",00000000,00000000", ",12345678,9abcdef0"),  # a2, eax: not compared

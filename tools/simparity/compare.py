@@ -16,7 +16,8 @@ windows/frida/checksum_trace.js (Windows) writes, one row per line:
   R,pt,fn,caller,rng_in,rng_out              a call of a function that draws random numbers,
                                              in the PT window the tracer was asked for
   P,pt,slot,w0,..,w11                        a player's resources and counters (+0xaf0), which
-                                             no checksum covers
+                                             no checksum covers; compared from w2 (w0 and w1 are
+                                             never written for some players)
   K,pt,fn,caller,self,a0,a1,a2,eax           a call of a logged function (self: the player slot
                                              ECX is, or -1); compared without a2 and eax, which
                                              are often stack garbage or a void return
@@ -202,18 +203,24 @@ def first_draw_difference(da, db):
     return None
 
 
+# P row words 0 and 1 (resources 0 and 1) are never written for the world and the human player:
+# heap garbage, different on every machine and never read by the simulation (simparity.md §8).
+P_WORDS = range(2, 12)
+
+
 def first_player_difference(pa, pb):
     """The first PT both streams have P rows for at which some player's words differ."""
+    def key(words):
+        return None if words is None else tuple(words[i] for i in P_WORDS)
     for pt in sorted(set(pa) & set(pb)):
-        if pa[pt] != pb[pt]:
-            slots = sorted(set(pa[pt]) | set(pb[pt]))
-            out = []
-            for slot in slots:
-                wa, wb = pa[pt].get(slot), pb[pt].get(slot)
-                if wa != wb:
-                    words = None if wa is None or wb is None else \
-                        [i for i in range(len(wa)) if wa[i] != wb[i]]
-                    out.append({"slot": slot, "words": words, "a": wa, "b": wb})
+        slots = sorted(set(pa[pt]) | set(pb[pt]))
+        out = []
+        for slot in slots:
+            wa, wb = pa[pt].get(slot), pb[pt].get(slot)
+            if key(wa) != key(wb):
+                words = None if wa is None or wb is None else [i for i in P_WORDS if wa[i] != wb[i]]
+                out.append({"slot": slot, "words": words, "a": wa, "b": wb})
+        if out:
             return {"pt": pt, "players": out}
     return None
 

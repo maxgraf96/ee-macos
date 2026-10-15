@@ -42,10 +42,11 @@
  *   RECOMP_EE_SIMPARITY_PLAYERS=N      P rows after every Nth PT: each player's
  *                                      resources and counters (+0xaf0, 12
  *                                      words), which no checksum covers
- *   RECOMP_EE_SIMPARITY_CALLS=F,..     K rows: every call of these EXE
+ *   RECOMP_EE_SIMPARITY_CALLS=F[/N],.. K rows: every call of these EXE
  *                                      functions, any PT (caller, the player
- *                                      slot ECX is or -1, three stack
- *                                      arguments, EAX on return)
+ *                                      slot ECX is or -1, N stack arguments
+ *                                      (default 3; the rest are 0), EAX on
+ *                                      return)
  *   RECOMP_EE_SIMPARITY_MEMFN=F,L[;..] "# memfn" lines: L bytes of ECX's object
  *                                      on every entry of EXE function F
  *   RECOMP_EE_SIMPARITY_LOCKSTEP=1     the server sends a CT only once the
@@ -285,11 +286,13 @@ static _Thread_local uint32_t g_log_depth;
 static void before_log_fn(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv, void *user) {
     (void)inv;
     if (g_log_depth < 64) {
-        g_log_stack[g_log_depth].fn = (uint32_t)(uintptr_t)user;
+        /* user: the address, and in bits 28.. the stack arguments to show */
+        uint32_t nargs = (uint32_t)(uintptr_t)user >> 28;
+        g_log_stack[g_log_depth].fn = (uint32_t)(uintptr_t)user & 0x0fffffffu;
         g_log_stack[g_log_depth].caller = rd(api, cpu->esp);
-        g_log_stack[g_log_depth].a0 = rd(api, cpu->esp + 4);
-        g_log_stack[g_log_depth].a1 = rd(api, cpu->esp + 8);
-        g_log_stack[g_log_depth].a2 = rd(api, cpu->esp + 12);
+        g_log_stack[g_log_depth].a0 = nargs > 0 ? rd(api, cpu->esp + 4) : 0;
+        g_log_stack[g_log_depth].a1 = nargs > 1 ? rd(api, cpu->esp + 8) : 0;
+        g_log_stack[g_log_depth].a2 = nargs > 2 ? rd(api, cpu->esp + 12) : 0;
         g_log_stack[g_log_depth].self = player_slot(api, cpu->ecx);
         g_log_stack[g_log_depth].pt = current_pt(api);
     }
@@ -754,11 +757,13 @@ PopModStatus pop_mod_init(const PopModApi *api) {
     const char *calls = getenv("RECOMP_EE_SIMPARITY_CALLS");
     for (const char *p = calls; st == POP_OK && p && *p;) {
         char *end = NULL;
-        uint32_t addr = (uint32_t)strtoul(p, &end, 16);
+        uint32_t addr = (uint32_t)strtoul(p, &end, 16), nargs = 3;
         if (end == p)
             break;
+        if (*end == '/')
+            nargs = (uint32_t)strtoul(end + 1, &end, 10);
         uint32_t id = 0;
-        void *fn = (void *)(uintptr_t)addr;
+        void *fn = (void *)(uintptr_t)(addr | (nargs > 3 ? 3u : nargs) << 28);
         st = api->hook_install_ex(api, addr, 0, before_log_fn, POP_HOOK_BEFORE, POP_HOOK_NO_GAME_VIEW,
                                   fn, &id);
         if (st == POP_OK)

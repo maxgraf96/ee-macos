@@ -54,8 +54,9 @@
 //                       a (hex; 91837c = player 2 of the player table)
 //   players=<n>         P rows after every nth PT: each player's resources and counters (+0xaf0,
 //                       12 words), which no checksum covers
-//   calls=<f>,<f>,...   K rows: every call of these EXE functions (hex), at any PT: caller, the
-//                       player slot ECX is (or -1), three stack arguments, EAX on return
+//   calls=<f>[/<n>],... K rows: every call of these EXE functions (hex), at any PT: caller, the
+//                       player slot ECX is (or -1), n stack arguments (default 3; the rest are 0),
+//                       EAX on return
 //   memfn=<f>,<len>[;...]  "# memfn" lines: len bytes of ECX's object on every entry of f (hex)
 //   ai_sched=<bool>     "# sched" lines: every time a computer player schedules its next strategy
 //                       review (EXE 0x43dcf4)
@@ -291,12 +292,14 @@ if (lockstep) Interceptor.attach(at(0x4c3703), {
 
 // K rows: every call of these functions, at any PT.
 for (const f of String(P.calls || '').split(',').filter((x) => x.length)) {
-  const fn = parseInt(f, 16);
+  const [name, n] = f.split('/');
+  const fn = parseInt(name, 16), nargs = n === undefined ? 3 : Math.min(3, Number(n));
   Interceptor.attach(at(fn), {
     onEnter() {
       const sp = this.context.esp;
+      const arg = (i) => h8(i < nargs ? sp.add(4 + 4 * i).readU32() : 0);
       this.row = ['K', currentPt(), h8(fn), h8(this.returnAddress.toUInt32()), playerSlot(this.context.ecx),
-                  h8(sp.add(4).readU32()), h8(sp.add(8).readU32()), h8(sp.add(12).readU32())];
+                  arg(0), arg(1), arg(2)];
     },
     onLeave(ret) {
       if (done) return;
