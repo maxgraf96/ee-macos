@@ -31,7 +31,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/boot"))
+sys.path.insert(0, str(ROOT / "tools"))
 import seed_user  # noqa: E402
+from game_ports import game_ports_lock  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 OUT = ROOT / "build/menus"
@@ -127,12 +129,18 @@ def main():
     # A scenario that opens the game's server (Play Random Map) binds UDP
     # 33334 and TCP 33335, fixed in TCP Protocol.dll: two at once collide
     # (WSAEADDRINUSE) and the loser faults in the engine. Those run one after
-    # another; the rest alongside them.
+    # another, each holding the machine-wide game-ports lock (tools/game_ports.py)
+    # so that other runs and checkouts wait for it too; the rest alongside them.
     alone = [s for s in scripts if re.search(r"^# menus: alone", s.read_text(), re.M)]
     together = [s for s in scripts if s not in alone]
     seconds = lambda s: SECONDS.get(s.stem, 240)
+
+    def run_alone(s):
+        with game_ports_lock("menus %s (%s)" % (s.stem, ROOT)):
+            return run(s.stem, s, seconds(s), args.keep_user)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        serial = pool.submit(lambda: [run(s.stem, s, seconds(s), args.keep_user) for s in alone])
+        serial = pool.submit(lambda: [run_alone(s) for s in alone])
         jobs = [pool.submit(run, s.stem, s, seconds(s), args.keep_user) for s in together]
         results = serial.result() + [job.result() for job in jobs]
         for name, problems, log, dumps in sorted(results, key=lambda r: r[0]):
