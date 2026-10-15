@@ -6,8 +6,7 @@
 #
 # The same game as legion's in-game reference (docs/reference/parity.md §3):
 # 800x600x32, the map from seed 4242 (RECOMP_EE_FORCE_SEED, as legion's
-# seed_force.js), legion's player name (with the default one the game asks
-# for a civilization first), frames at 5, 30, 60 and 90 s, the Capitol
+# seed_force.js), legion's player name, frames at 5, 30, 60 and 90 s, the Capitol
 # clicked at the view's centre at 68.8 s and the pointer parked at (745,188)
 # after it. Random Epoch comes out Renaissance on both machines.
 # tools/parity/compare.py compares the dumps with legion's.
@@ -33,6 +32,12 @@ click 644 730                 # Start Game: black, the loading screen ("Creating
 wait size 800 600 within 60000  # World...", "Loading Complete"), then the game
 wait 1000
 dump loading
+# With custom civilizations off, EE sometimes opens "Choose Civilization"
+# before the game (on the Mac in 2 of 3 runs, never in legion's; parity.md
+# §3): its OK, with the first civilization highlighted, is here. When it did
+# not open, the click lands on the map above the panel and does nothing.
+wait 12000
+click 400 520
 # The game is up when its own command panel is (bottom of the screen; the
 # loading screens have neither its colour nor its place). The panel's colour
 # depends on the epoch (948a7b wood in the Prehistoric, 939d9c stone in the
