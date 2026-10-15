@@ -4,9 +4,10 @@
     .venv/bin/python tools/simparity/run.py [--runs N] [--minutes M] [--seed S]
         [--ptps P] [--autosave-ms MS] [--reg [SUBKEY\\]NAME=N] [--reports] [--units PT,PT...] [--units-every N]
         [--oosdump PT] [--max-pt N] [--draws A-B] [--trace-fns F,..] [--mem PT,A,L;..]
-        [--players N] [--calls F,..] [--memfn F,L;..] [--ai-sched]
+        [--players N] [--calls F,..] [--memfn F,L;..] [--ai-sched] [--autosave-watch]
+        [--trace-match TEXT]
         [--lockstep] [--no-civ-timer] [--against STREAM] [--out DIR]
-        [--no-build] [--kit DIR]
+        [--load SAVE] [--keep-saves] [--no-build] [--kit DIR]
         [--insert-dylib PATH]
 
 Each run boots build/recomp/ee_boot headless with a fresh user directory,
@@ -18,6 +19,11 @@ registry is tools/boot/seed_user.py's (legion's options) with the PT rate
 pinned: Min PTs per Second = Max PTs per Second = P, so the step size does
 not follow the measured tick time. With two runs or more, the streams are
 compared (compare.py) and the exit status says whether they agree.
+
+--load SAVE starts from a saved game instead (tests/menus/simparity-load.script:
+Single Player -> Play Saved Game -> Load, with SAVE alone in the user
+directory's Data\\Saved Games); --minutes then counts from the load.
+--keep-saves copies the saves the game wrote to OUT/mac-<k>-saves/.
 
 Every run holds tools/game_ports.py's lock: a random map opens the game's
 server on fixed ports. --insert-dylib (or $SIMPARITY_INSERT_DYLIB) is put in
@@ -45,6 +51,7 @@ from game_ports import game_ports_lock  # noqa: E402
 import compare  # noqa: E402
 
 SCRIPT = ROOT / "tests/menus/simparity.script"
+LOAD_SCRIPT = ROOT / "tests/menus/simparity-load.script"
 HKCU = "HKEY_CURRENT_USER\\Software\\SSSI\\Empire Earth"
 SAVE_TO_FILE = "00540aca"  # writes a save game; 0 = done (simparity.md §8)
 # Booting, the menus, the map's creation and the civilization screen (5 game
@@ -74,13 +81,13 @@ def pin_registry(user, ptps, autosave_ms=None, extra=()):
     reg_path.write_text(json.dumps(reg, indent=1))
 
 
-def scenario(minutes, tmp, no_civ_timer=False):
-    text = SCRIPT.read_text()
+def scenario(minutes, tmp, no_civ_timer=False, load=False):
+    text = (LOAD_SCRIPT if load else SCRIPT).read_text()
     text, n = re.subn(r"^wait \d+(\s+# simparity: duration.*)$",
                       lambda m: "wait %d%s" % (int(minutes * 60000), m.group(1)), text, flags=re.M)
     if n != 1:
         sys.exit("simparity.script has no '# simparity: duration' wait")
-    if no_civ_timer:
+    if no_civ_timer and not load:
         text, n = re.subn(r"^# simparity: civ begin.*?^# simparity: civ end[^\n]*\n", "", text,
                           flags=re.M | re.S)
         if n != 1:
@@ -101,7 +108,12 @@ def run_one(k, args, out):
     try:
         seed_user.main(["--user", str(user), "--width", "800", "--height", "600"])
         pin_registry(user, args.ptps, args.autosave_ms, args.reg)
-        script = scenario(args.minutes, tmp, args.no_civ_timer)
+        if args.load:
+            # The game lists Data\\Saved Games (the overlay's writable tier is the user directory).
+            saved = user / "Data" / "Saved Games"
+            saved.mkdir(parents=True, exist_ok=True)
+            shutil.copy(args.load, saved / args.load.name)
+        script = scenario(args.minutes, tmp, args.no_civ_timer, bool(args.load))
         seconds = int(START_SECONDS + args.minutes * 60)
         # The mod is copied per run, so a rebuild cannot touch a running game's plugin.
         mods = tmp / "ee-mods"
@@ -116,6 +128,8 @@ def run_one(k, args, out):
             env["RECOMP_EE_SIMPARITY_NO_CIV_TIMER"] = "1"
         if args.ai_sched:
             env["RECOMP_EE_SIMPARITY_AI_SCHED"] = "1"
+        if args.autosave_watch:
+            env["RECOMP_EE_SIMPARITY_AUTOSAVE"] = "1"
         for key, val in (("RECOMP_EE_CHECKSUM_UNITS", args.units),
                          ("RECOMP_EE_CHECKSUM_UNITS_EVERY", args.units_every),
                          ("RECOMP_EE_CHECKSUM_OOSDUMP", args.oosdump),
@@ -131,6 +145,8 @@ def run_one(k, args, out):
                 env[key] = str(val)
         command = [str(ROOT / "build/recomp/ee_boot"), "--user", str(user), "--seconds", str(seconds),
                    "--script", str(script), "--script-out", str(frames)]
+        if args.trace_match:
+            command += ["--trace", str(out / ("mac-%d-imports.txt" % k)), "--trace-match", args.trace_match]
         prefix = ["nice", "-n", "10", "env"]
         if args.insert_dylib:
             prefix.append("DYLD_INSERT_LIBRARIES=" + args.insert_dylib)
@@ -160,7 +176,14 @@ def run_one(k, args, out):
         if stream:
             problems += save_problems(stream, args.ptps,
                                       args.autosave_ms if "540aca" in (args.calls or "") else None)
-        files = [f for f in user.rglob("*") if f.is_file() and f.parent.name.lower() == "saved games"]
+        files = [f for f in user.rglob("*") if f.is_file() and f.parent.name.lower() == "saved games"
+                 and not (args.load and f.name == args.load.name)]
+        if args.keep_saves and files:
+            kept = out / ("mac-%d-saves" % k)
+            shutil.rmtree(kept, ignore_errors=True)
+            kept.mkdir()
+            for f in files:
+                shutil.copy2(f, kept / f.name)
         if saves or files:
             print("run %d: %d saves, %d files in Saved Games" % (k, len(saves), len(files)), flush=True)
         print("run %d: %.0f s, %s; %s" % (k, took, "ok" if not problems else "; ".join(problems),
@@ -179,8 +202,9 @@ def save_problems(stream, ptps, autosave_ms=None):
     out = ["the save at PT %d failed (0x540aca returned %s)" % (c["pt"], c["eax"])
            for c in saves if c["eax"] != "00000000"]
     if stream.ticks and autosave_ms:
-        # The host counts ms per PT (1000 / PT rate) towards the interval.
-        due = max(stream.ticks) * 1000 // ptps // autosave_ms
+        # The host counts ms per PT (1000 / PT rate) towards the interval, from the
+        # game's start or from the load (the counter is not saved).
+        due = (max(stream.ticks) - min(stream.ticks) + 1) * 1000 // ptps // autosave_ms
         if len(saves) < due - 1:
             out.append("%d saves, %d autosaves due" % (len(saves), due))
     return out
@@ -234,14 +258,27 @@ def main():
                         help="'# memfn' lines: LEN bytes of ECX's object on entry of ADDR")
     parser.add_argument("--ai-sched", action="store_true",
                         help="'# sched' lines: computer players scheduling their strategy reviews")
+    parser.add_argument("--trace-match", default=None, metavar="TEXT",
+                        help="ee_boot's import trace, only the calls whose DLL!name contains TEXT "
+                             "('|' between several), to OUT/mac-<k>-imports.txt")
+    parser.add_argument("--autosave-watch", action="store_true",
+                        help="'# autosave' lines: the autosave counter passing the interval unposted, "
+                             "and restarting when the save is posted")
     parser.add_argument("--against", type=Path, action="append", default=[], metavar="STREAM",
                         help="also compare every run with this stream (e.g. a Windows one); skipped "
                              "when the file is missing")
     parser.add_argument("--out", type=Path, default=ROOT / "analysis/simparity/mac")
+    parser.add_argument("--load", type=Path, default=None, metavar="SAVE",
+                        help="start from this saved game (.ees) instead of a new random map; "
+                             "--minutes counts from the load")
+    parser.add_argument("--keep-saves", action="store_true",
+                        help="copy the saves the game wrote to OUT/mac-<k>-saves/")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--kit", default=None)
     parser.add_argument("--insert-dylib", default=os.environ.get("SIMPARITY_INSERT_DYLIB"))
     args = parser.parse_args()
+    if args.load and not args.load.is_file():
+        parser.error("--load: no such file: %s" % args.load)
     if not args.no_build:
         command = [sys.executable, str(ROOT / "tools/build.py"), "--cmake-target", "ee_boot"]
         command += ["--kit", args.kit] if args.kit else []

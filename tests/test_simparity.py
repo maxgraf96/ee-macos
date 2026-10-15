@@ -154,3 +154,42 @@ def test_save_timing(tmp_path):
                             tail="\n".join(save_rows([5, 11])) + "\n"))
     assert run.save_timing(a, b) == (15, 11)
     assert run.save_timing(a, a) is None
+
+
+def _savefile():
+    sys.path.insert(0, str(ROOT / "tools/simparity"))
+    import savefile
+    return savefile
+
+
+def test_explode_blast_vector():
+    """PKWARE DCL explode: the example in zlib's contrib/blast/blast.c."""
+    savefile = _savefile()
+    assert savefile.explode(bytes.fromhex("00048224258f807f")) == b"AIAIAIAIAIAIA"
+
+
+def test_save_sections_and_compare(tmp_path, capsys):
+    """A save's header strings and sections, and where two saves differ."""
+    import struct
+    savefile = _savefile()
+    packed = bytes.fromhex("00048224258f807f")
+
+    def save(name, when):
+        def s(text):
+            b = text.encode() + b"\0"
+            return struct.pack("<I", len(b)) + b
+        body = s(name) + s("No game description provided.") + b"\0\0\0\0" + s(when) + b"\x05\0\0\0"
+        sec = b"PK01" + struct.pack("<II", 13, 0) + packed
+        body += struct.pack("<III", 0xE7, 4, len(sec)) + sec
+        return struct.pack("<I", len(body)) + body
+
+    a, b = tmp_path / "a.ees", tmp_path / "b.ees"
+    a.write_bytes(save("AutoSave 2026.10.15 - 12h.01m.21s.ees", "Thu Oct 15 12:01:22 2026\n"))
+    b.write_bytes(save("AutoSave 2026.10.15 - 13h.40m.02s.ees", "Thu Oct 15 13:40:03 2026\n"))
+    sa, sb = savefile.Save(a), savefile.Save(b)
+    assert [t for _, t in sa.strings][:2] == ["AutoSave 2026.10.15 - 12h.01m.21s.ees",
+                                              "No game description provided."]
+    assert [(sid, body) for _, sid, _, body in sa.sections] == [(4, b"AIAIAIAIAIAIA")]
+    assert savefile.compare(sa, sb)  # only the strings differ
+    out = capsys.readouterr().out
+    assert "header string 0" in out and "section 4: the same" in out
