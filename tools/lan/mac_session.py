@@ -180,8 +180,8 @@ def run_app(args, out, script):
                     f.flush()
 
     print("session %s (app): %s" % (args.role, out), flush=True)
-    with game_ports_lock("lan session %s, app (%s)" % (args.role, out), timeout=args.wait_ports * 60,
-                         queue=True):
+    wait = args.wait_ports * 60 if args.wait_ports else None  # None: block in the kernel
+    with game_ports_lock("lan session %s, app (%s)" % (args.role, out), timeout=wait):
         sampler = threading.Thread(target=sample, daemon=True)
         sampler.start()
         try:
@@ -477,8 +477,9 @@ def main():
     r.add_argument("--home", default=None, help="with --app: its EE_HOME, first run done")
     r.add_argument("--direct", action="store_true",
                    help="with --app: start its executable as a child of this process (see run_app)")
-    r.add_argument("--wait-ports", type=float, default=30,
-                   help="minutes to wait for another game server on this Mac to end")
+    r.add_argument("--wait-ports", type=float, default=None,
+                   help="minutes to wait for another game server on this Mac to end "
+                        "(default: until it does)")
     s = sub.add_parser("say")
     s.add_argument("dir")
     s.add_argument("lines", nargs="+")
