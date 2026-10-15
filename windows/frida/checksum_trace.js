@@ -46,6 +46,8 @@
 //   max_pt=<n>          stop writing rows after PT n
 //   draws=<a>-<b>       R rows for PTs a..b: every call of an EXE function that calls URandom, with
 //                       its caller and the world RNG around it
+//   trace_fns=<f>,<f>,...  with draws: "# call>" / "# call<" lines for these EXE functions (hex):
+//                       caller, ECX, three stack arguments, EAX and the world RNG around the call
 //   mem=<pt>,<a>,<len>[;...]  after PT pt, "# mem" lines: len bytes of the object whose pointer is at
 //                       a (hex; 91837c = player 2 of the player table)
 //   ai_sched=<bool>     "# sched" lines: every time a computer player schedules its next strategy
@@ -298,6 +300,28 @@ if (P.draws) {
     });
   }
   emit('# draws: R rows for PTs ' + from + '-' + last);
+  for (const f of String(P.trace_fns || '').split(',').filter((x) => x.length)) {
+    const fn = parseInt(f, 16);
+    Interceptor.attach(at(fn), {
+      onEnter() {
+        const world = VA_WORLD_PTR.readPointer();
+        const pt = world.isNull() ? 0 : world.add(W_PT).readU32() + 1;
+        this.on = !world.isNull() && pt >= from && pt <= last;
+        if (!this.on) return;
+        const sp = this.context.esp;
+        this.rng = world.add(W_RNG).readU32();
+        emit('# call> ' + h8(fn) + ' from ' + h8(this.returnAddress.toUInt32()) + ' ecx ' +
+             h8(this.context.ecx.toUInt32()) + ' args ' + h8(sp.add(4).readU32()) + ' ' + h8(sp.add(8).readU32()) +
+             ' ' + h8(sp.add(12).readU32()));
+      },
+      onLeave(ret) {
+        if (!this.on) return;
+        const world = VA_WORLD_PTR.readPointer();
+        emit('# call< ' + h8(fn) + ' eax ' + h8(ret.toUInt32()) + ' rng ' + h8(this.rng) + ' -> ' +
+             h8(world.add(W_RNG).readU32()) + ' (PT ' + (world.add(W_PT).readU32() + 1) + ')');
+      },
+    });
+  }
 }
 
 send({ type: 'hooked', out: P.out, seed: haveSeed ? seed : null, no_reports: skipReports, flags2, lockstep,

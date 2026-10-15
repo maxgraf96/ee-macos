@@ -228,13 +228,20 @@ static void write_units(const PopModApi *api, uint32_t pt) {
 }
 
 /* After each call of the PT entry: a row when a PT ran. */
+static uint32_t g_fpu_dirty;
+
 static void after_tick(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv, void *user) {
-    (void)cpu;
     (void)inv;
     (void)user;
     uint32_t world = rd(api, VA_WORLD_PTR), comm = rd(api, VA_COMM_PTR);
     if (!world || g_done)
         return;
+    /* Nothing should be left on the x87 stack between PTs; a leak would make
+     * a later push overflow, which x87 answers with the real indefinite. */
+    if (cpu->size >= offsetof(pop_cpu_v1, fpu_tag) + sizeof(cpu->fpu_tag) && cpu->fpu_tag != 0xffff &&
+        g_fpu_dirty++ < 20)
+        fprintf(g_out, "# fpu: after PT %u top %u tag %04x cw %04x st0 %.17g\n",
+                rd(api, world + W_PT), cpu->fpu_top, cpu->fpu_tag, cpu->fpu_cw, cpu->st[0]);
     uint32_t pt = rd(api, world + W_PT), total = rd(api, world + W_TOTAL_PT);
     uint32_t ct = comm ? rd(api, comm + COMM_CT) : 0;
     if (g_last_total == 0xffffffffu && comm)
@@ -679,7 +686,8 @@ PopModStatus pop_mod_init(const PopModApi *api) {
 
 PopModStatus pop_mod_exit(void) {
     if (g_out) {
-        fprintf(g_out, "# exit (lockstep waits %u, timeouts %u)\n", g_lock_waits, g_lock_timeouts);
+        fprintf(g_out, "# exit (lockstep waits %u, timeouts %u; x87 stack not empty after %u PTs)\n",
+                g_lock_waits, g_lock_timeouts, g_fpu_dirty);
         fclose(g_out);
         g_out = NULL;
     }
