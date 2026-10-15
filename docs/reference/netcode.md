@@ -103,7 +103,7 @@ Every lobby binds UDP 8585 and broadcasts from it to `255.255.255.255:8585`. One
 | Type | Name | Body | When |
 |---|---|---|---|
 | `0x04` | LanQuery | — | Entering or refreshing the game list. Clicking refresh sends several within 1 s |
-| `0x01` | LanGameAdvert | u16 lobby TCP port (33336), u16 `0x8b49` (constant on both machines), u8 in-progress, u16 n + UTF-16 game name + u16 0, u16 players, u16 max players (8), u16 `14` (unknown), u8 0 | On game creation, on every roster change, on start (in-progress = 1), and as a unicast reply to a query |
+| `0x01` | LanGameAdvert | u16 lobby TCP port (33336), u16 `0x8b49` (constant on all machines), u8 in-progress, u16 n + UTF-16 game name + u16 0, u16 players, u16 max players (8; 7 with a computer player), u16 **starting epoch** (14 Random, 0 Prehistoric; the list's column), u8 0 | On game creation, on every roster change, on start (in-progress = 1), and as a unicast reply to a query |
 | `0x02` | LanGameKeepAlive | u16 lobby port | Every **15.0 s** while hosting |
 | `0x03` | LanGameClosed | u16 lobby port | When the host leaves or dissolves the game |
 
@@ -122,7 +122,7 @@ Every lobby binds UDP 8585 and broadcasts from it to `255.255.255.255:8585`. One
 | H→C | `0x02` | LobbyRoster | u16 status (0), u16 host id (1), u16 your id (2), u16 count, count × {u16 id, u16 n, UTF-16 name} |
 | C→H | `0x05` | LobbyChat | u16 flags (0), u16 n, UTF-16 text, u16 0 |
 | H→C | `0x06` | LobbyChatRelay | u16 flags, u16 sender id, u16 n, UTF-16 text, u16 0 |
-| C→H | `0x07` | LobbyLeave | — (seen mid-game, when the lobby connection closes) |
+| C→H | `0x07` | LobbyKeepAlive | — : 240 s after the join, then about every 120 s, in the lobby and during the game (not a leave: [lansession.md](lansession.md) §7) |
 | both | `0x08` | LobbyGameData | u8 sub + EE-specific body, below |
 
 `0x08` subtypes (EE lobby code):
@@ -130,7 +130,7 @@ Every lobby binds UDP 8585 and broadcasts from it to `255.255.255.255:8585`. One
 | Sub | Dir | Name | Body |
 |---|---|---|---|
 | `0x01` | C→H | VersionCheck | u16 `0xfffe`, u16 n, UTF-16 version (`v2.00.2974`), **u32 data checksum** (§8) |
-| `0x02` | H→C | GameSetup | 82 bytes of game settings + slot table (not decoded) |
+| `0x02` | H→C | GameSetup | 82 bytes of game settings + slot table. Body offsets [inferred from three hosts' settings]: 19 resources (0 Tournament-Low, 4 Deathmatch), 20 starting epoch (0, 14 Random), 21 ending epoch (13 Nano), 29 Use Custom Civs, 45 slot 3's type (1 Computer) |
 | `0x03` | H→C | SlotAssign | `0200 feff 0001` (client id 2, …) |
 | `0x04` / `0x05` | C→H / H→C | SetReady / ReadyState | u8 ready / u16 client id, u8 ready |
 | `0x66` / `0x65` | C→H / H→C | SetSlotAttr / SlotAttr | u8 attr, u8 value / u8 slot, u8 attr, u8 value (attr 1, values 0–2: colour/team/civ, not identified) |
@@ -441,10 +441,10 @@ Both captures decode identically: 2,687 game datagrams, 0 errors, 0 size mismatc
 ## 11. Open questions
 
 - **Lobby fields:**
-  - `0x08/0x02 GameSetup` (82 bytes);
+  - the rest of `0x08/0x02 GameSetup` (82 bytes; five fields placed in §3.2);
   - `0x08/0x03`;
   - slot attribute ids;
-  - the advert's `0x8b49` and `14`.
+  - the advert's `0x8b49`.
 
   This needs static work on `LanLogic.cpp` (EXE RVA ≈ `0x3cb220`) and the `EELobby*` code (EXE RVA `0x27xxxx`).
 - How 15 PTs / 44 PT/s are derived, and whether tuning ever moves the 350 ms interval (try a slow or lossy link).
@@ -510,8 +510,19 @@ All 34 harness checks and the 5 decoding checks pass:
 The private-game path (no `EEService` search) is used so that the harness sends nothing beyond the loopback interface.
 
 ### 12.4 Left for P5-B
-- Mac↔legion sessions: the 8585 lobby list, the 33336 room, the 33334 game and 33335 transfer, with checksum streams. `RECOMP_NET_TRACE=1` prints every socket call, every broadcast per adapter, and every lookup.
-- The EXE's WONAPI lobby has not run on the Mac yet: its `select`-based socket threads, its two `recvfrom` pollers and whether it binds the chosen adapter's address are exercised only by the kit's generic tests. `InternetGetConnectedState` (§12.1).
+- ~~Mac↔legion sessions: the 8585 lobby list, the 33336 room, the 33334 game and 33335 transfer, with checksum streams.~~ Done in §13. `RECOMP_NET_TRACE=1` prints every socket call, every broadcast per adapter, and every lookup.
+- ~~The EXE's WONAPI lobby has not run on the Mac yet.~~ It has, against Windows in both roles (§13). Whether it binds the chosen adapter's address is still untested (both sessions used the default adapter). `InternetGetConnectedState` (§12.1).
 - ZeroTier: no ZeroTier interface here; fan-out to `feth*` is tested on fake interfaces only. A limited broadcast out of a point-to-point `utun` by interface index is untested on a real tunnel (Tailscale and WireGuard drop broadcasts anyway).
 - The host's `EEService` search (`private = 0`): it broadcasts to 33334 on every adapter; not run here to keep the test bed on loopback.
 - Two instances on one Mac still cannot both bind 8585 or 33334, as on Windows (§3.5).
+
+## 13. Mac↔Windows on the LAN (P5-E, 2026-10-15)
+Two LAN games between the native Mac build (headless) and legion's unmodified GOG game, one hosted on each side: [lansession.md](lansession.md). [measured]
+- **Every channel worked in both roles:**
+  - the 8585 list: the advert, the query and its unicast reply;
+  - the 33336 room: join, roster, `VersionCheck` (`v2.00.2974`, `0x0e998b9e` on both), chat, ready, StartGame, LaunchAck;
+  - the 33334 game: `0x22`/`0x23`, loading, CTs, inputs, `0x32`;
+  - the 33335 connect.
+- **No out-of-sync.** With legion hosting and a computer player in the game, the Mac's `0x32` value equals the Windows host's own world checksum on all **1,178** ticks it sent (40–1217). The Mac as host tallied 1,246 of legion's ticks against its own without a mismatch.
+- **The CD key does not block LAN play** with the same GOG key on both machines.
+- **Corrections to this document:** record `0x07` is a keep-alive (§3.2), and the advert's last u16 is the starting epoch (§3.1). The game also slows itself to the slowest machine. The CT interval stayed at 350 ms (1,247 play CTs in 436 s), but the PTs per CT vary between 5 (the 15 PT/s floor, "Min PTs per Second") and 15, with 43 for 33 CTs in session B, and the host sends `EEMLagStatus` (0xa8) meanwhile. This answers part of §11's question on how 15/44 is derived.

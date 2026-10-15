@@ -452,7 +452,7 @@ def decode_lan_udp(b):
             o += 2  # NUL
             m["players"] = _u16(b, o)
             m["max_players"] = _u16(b, o + 2)
-            m["unknown_u16"] = _u16(b, o + 4)
+            m["starting_epoch"] = _u16(b, o + 4)  # 14 Random, 0 Prehistoric (lansession.md §7)
             m["tail_hex"] = b[o + 6:].hex()
         elif t not in (2, 3, 4):
             m["hex"] = b.hex()
@@ -464,7 +464,7 @@ def decode_lan_udp(b):
 
 # WON LAN lobby room, TCP 33336 (LobbyPort): records [u16 len incl. itself][u8 type][body].
 LAN_TCP = {1: "LobbyJoin", 2: "LobbyRoster", 5: "LobbyChat", 6: "LobbyChatRelay",
-           7: "LobbyLeave", 8: "LobbyGameData"}
+           7: "LobbyKeepAlive", 8: "LobbyGameData"}
 LAN_GAME = {0x01: "VersionCheck", 0x02: "GameSetup", 0x03: "SlotAssign", 0x04: "SetReady",
             0x05: "ReadyState", 0x07: "StartGame", 0x65: "SlotAttr", 0x66: "SetSlotAttr",
             0x68: "LaunchAck", 0x69: "LaunchAckReply"}

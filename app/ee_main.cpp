@@ -33,10 +33,13 @@
 //     player takes through the menus, delivered through the kit's input state
 //     and message queue as the windowed host delivers a real device's events,
 //     with frame dumps as PNG. tests/menus/ holds the scenarios.
-//   - --lan-pcap: every UDP datagram the game sends or receives through
-//     Winsock, as the game sees it (its own buffers, before the kit's sockets),
-//     written as a raw-IP pcap that tools/lan/eelan.py decodes - the LAN
-//     lobby's adverts on UDP 8585 without a packet capture's privileges.
+//   - --lan-pcap: every UDP datagram and every TCP connection's bytes the
+//     game sends or receives through Winsock, as the game sees them (its own
+//     buffers, before the kit's sockets), written as a raw-IP pcap with
+//     wall-clock times that tools/lan/eelan.py decodes - the LAN lobby's
+//     adverts on UDP 8585, its room on TCP 33336 and the game's datagrams on
+//     UDP 33334 without a packet capture's privileges. The file is flushed
+//     per packet, so it can be decoded while the game runs.
 //   - A boot report: the milestones reached, the threads the game started and
 //     the x87 control word each ran at, and every import that was called with
 //     no implementation behind it. --trace writes every import call.
@@ -133,15 +136,25 @@ double g_last_movie_close = -1;
 uint32_t g_menu_flips = 0, g_menu_peeks = 0;
 
 // --- --lan-pcap -------------------------------------------------------------------
-// The game's own UDP traffic as raw IPv4 (LINKTYPE_RAW). A socket's address is
-// what it was bound to (0.0.0.0 for INADDR_ANY); the IP and UDP checksums are
-// left 0 except the IP header's, which readers check.
+// The game's own traffic as raw IPv4 (LINKTYPE_RAW): every UDP datagram, and
+// the bytes of every TCP connection (the lobby room on 33336, the transfer
+// port) as data segments with running sequence numbers - no handshake, no
+// acknowledgements, a FIN when the game closes the socket. A socket's address
+// is what it was bound to (0.0.0.0 for INADDR_ANY); a connected socket that
+// was never bound gets its handle as its port, so two connections stay two
+// streams. The IP header's checksum is right (readers check it); the UDP and
+// TCP checksums are 0.
 FILE *g_pcap = nullptr;
-std::map<uint32_t, std::pair<uint32_t, uint16_t>> g_bound; // socket -> (ip, port), network order
+using Endpoint = std::pair<uint32_t, uint16_t>;  // (ip, port), network order
+std::map<uint32_t, Endpoint> g_bound;            // socket -> its address
+std::map<uint32_t, Endpoint> g_peer;             // TCP socket -> the other end
+std::map<uint32_t, std::pair<uint32_t, uint32_t>> g_seq; // TCP socket -> (sent, received) bytes
 struct PendingRecv {
-    uint32_t socket = 0, buf = 0, len = 0, from = 0;
+    uint32_t socket = 0, buf = 0, len = 0, from = 0, flags = 0;
+    bool tcp = false; // recv/send rather than recvfrom
+    bool send = false;
 };
-std::map<uint32_t, PendingRecv> g_recv; // by guest thread: a recvfrom in flight
+std::map<uint32_t, PendingRecv> g_recv; // by guest thread: a recvfrom/recv/send/accept in flight
 
 void pcap_open(const char *path) {
     if (!(g_pcap = fopen(path, "wb")))
@@ -150,17 +163,18 @@ void pcap_open(const char *path) {
     fwrite(header, 1, sizeof header, g_pcap);
     fflush(g_pcap);
 }
-// `src`/`dst` are a sockaddr_in's address and port words, in network order.
-void pcap_udp(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip, uint16_t dst_port,
-              const uint8_t *data, uint32_t len) {
+// One IPv4 packet: the 20-byte IP header, then `l4` (the UDP or TCP header),
+// then the data. `src`/`dst` are a sockaddr_in's address words.
+void pcap_ip(uint8_t proto, uint32_t src_ip, uint32_t dst_ip, const uint8_t *l4, uint32_t l4_len,
+             const uint8_t *data, uint32_t len) {
     if (!g_pcap || len > 65000)
         return;
-    uint8_t h[28] = {0x45, 0};
-    const uint16_t total = uint16_t(28 + len);
+    uint8_t h[20] = {0x45, 0};
+    const uint16_t total = uint16_t(20 + l4_len + len);
     h[2] = uint8_t(total >> 8);
     h[3] = uint8_t(total);
     h[8] = 64;
-    h[9] = 17; // UDP
+    h[9] = proto;
     memcpy(h + 12, &src_ip, 4);
     memcpy(h + 16, &dst_ip, 4);
     uint32_t sum = 0;
@@ -170,28 +184,100 @@ void pcap_udp(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip, uint16_t dst_
         sum = (sum & 0xffff) + (sum >> 16);
     h[10] = uint8_t(~sum >> 8);
     h[11] = uint8_t(~sum);
-    memcpy(h + 20, &src_port, 2);
-    memcpy(h + 22, &dst_port, 2);
-    const uint16_t udp_len = uint16_t(8 + len);
-    h[24] = uint8_t(udp_len >> 8);
-    h[25] = uint8_t(udp_len);
-    const uint64_t ns = os_monotonic_ns(); // the run's own clock: only spacing matters
-    const uint32_t rec[4] = {uint32_t(ns / 1000000000u), uint32_t(ns / 1000u % 1000000u),
-                             28u + len, 28u + len};
+    // The wall clock, so the capture lines up with the other machine's.
+    const uint64_t us = os_wall_time_us();
+    const uint32_t rec[4] = {uint32_t(us / 1000000u), uint32_t(us % 1000000u), uint32_t(total),
+                             uint32_t(total)};
     fwrite(rec, 1, sizeof rec, g_pcap);
     fwrite(h, 1, sizeof h, g_pcap);
-    fwrite(data, 1, len, g_pcap);
+    fwrite(l4, 1, l4_len, g_pcap);
+    if (len)
+        fwrite(data, 1, len, g_pcap);
     fflush(g_pcap);
+}
+// Ports are a sockaddr_in's port words, in network order.
+void pcap_udp(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip, uint16_t dst_port,
+              const uint8_t *data, uint32_t len) {
+    uint8_t u[8] = {0};
+    memcpy(u, &src_port, 2);
+    memcpy(u + 2, &dst_port, 2);
+    const uint16_t udp_len = uint16_t(8 + len);
+    u[4] = uint8_t(udp_len >> 8);
+    u[5] = uint8_t(udp_len);
+    pcap_ip(17, src_ip, dst_ip, u, sizeof u, data, len);
+}
+void pcap_tcp(const Endpoint &src, const Endpoint &dst, uint32_t seq, uint8_t flags,
+              const uint8_t *data, uint32_t len) {
+    uint8_t t[20] = {0};
+    memcpy(t, &src.second, 2);
+    memcpy(t + 2, &dst.second, 2);
+    for (int i = 0; i < 4; ++i)
+        t[4 + i] = uint8_t(seq >> (24 - 8 * i));
+    t[12] = 5 << 4; // 20-byte header
+    t[13] = flags;
+    t[14] = t[15] = 0xff; // window
+    pcap_ip(6, src.first, dst.first, t, sizeof t, data, len);
+}
+// A TCP socket's own end: its bound address, or its handle as a port.
+Endpoint tcp_self(uint32_t socket) {
+    auto it = g_bound.find(socket);
+    if (it != g_bound.end() && it->second.second)
+        return it->second;
+    const uint16_t port = uint16_t((socket & 0xff) << 8 | (socket >> 8 & 0xff));
+    return {it != g_bound.end() ? it->second.first : 0, port};
+}
+// TCP data the game sent (`out`) or received on a connected socket.
+void pcap_tcp_data(uint32_t socket, bool out, const uint8_t *data, uint32_t len) {
+    auto peer = g_peer.find(socket);
+    if (peer == g_peer.end())
+        return;
+    auto &seq = g_seq[socket];
+    const Endpoint self = tcp_self(socket);
+    if (out) {
+        pcap_tcp(self, peer->second, 1 + seq.first, 0x18 /* PSH ACK */, data, len);
+        seq.first += len;
+    } else {
+        pcap_tcp(peer->second, self, 1 + seq.second, 0x18, data, len);
+        seq.second += len;
+    }
+}
+Endpoint sockaddr_at(uint32_t a) {
+    Endpoint e{0, 0};
+    if (a && gm_valid(a, 8)) {
+        memcpy(&e.second, g_mem + a + 2, 2);
+        memcpy(&e.first, g_mem + a + 4, 4);
+    }
+    return e;
 }
 void pcap_call(const char *name, const uint32_t *args, uint32_t argc, uint32_t tid) {
     if (!strcmp(name, "bind") && argc >= 3 && gm_valid(args[1], 8)) {
-        uint16_t port;
-        uint32_t ip;
-        memcpy(&port, g_mem + args[1] + 2, 2);
-        memcpy(&ip, g_mem + args[1] + 4, 4);
-        g_bound[args[0]] = {ip, port};
+        g_bound[args[0]] = sockaddr_at(args[1]);
     } else if (!strcmp(name, "closesocket") && argc >= 1) {
+        if (g_peer.count(args[0])) {
+            const auto &seq = g_seq[args[0]];
+            pcap_tcp(tcp_self(args[0]), g_peer[args[0]], 1 + seq.first, 0x11 /* FIN ACK */,
+                     nullptr, 0);
+        }
         g_bound.erase(args[0]);
+        g_peer.erase(args[0]);
+        g_seq.erase(args[0]);
+    } else if (!strcmp(name, "connect") && argc >= 3 && gm_valid(args[1], 8)) {
+        g_peer[args[0]] = sockaddr_at(args[1]);
+        g_seq.erase(args[0]);
+    } else if (!strcmp(name, "accept") && argc >= 3) {
+        PendingRecv p;
+        p.socket = args[0];
+        p.from = args[1];
+        g_recv[tid] = p;
+    } else if ((!strcmp(name, "recv") || !strcmp(name, "send")) && argc >= 4) {
+        PendingRecv p;
+        p.socket = args[0];
+        p.buf = args[1];
+        p.len = args[2];
+        p.flags = args[3];
+        p.tcp = true;
+        p.send = name[0] == 's';
+        g_recv[tid] = p;
     } else if (!strcmp(name, "sendto") && argc >= 6 && args[4] && gm_valid(args[4], 8) &&
                gm_valid(args[1], args[2])) {
         uint16_t port;
@@ -206,13 +292,33 @@ void pcap_call(const char *name, const uint32_t *args, uint32_t argc, uint32_t t
     }
 }
 void pcap_return(const char *name, uint32_t eax, uint32_t tid) {
-    if (strcmp(name, "recvfrom"))
+    const bool accepted = !strcmp(name, "accept");
+    const bool stream = !strcmp(name, "recv") || !strcmp(name, "send");
+    if (strcmp(name, "recvfrom") && !accepted && !stream)
         return;
     auto it = g_recv.find(tid);
     if (it == g_recv.end())
         return;
     const PendingRecv r = it->second;
     g_recv.erase(it);
+    if (accepted) {
+        // The new connection: its other end from the call's address, its own
+        // the listening socket's.
+        if (eax == 0xffffffffu)
+            return;
+        g_peer[eax] = sockaddr_at(r.from);
+        if (g_bound.count(r.socket))
+            g_bound[eax] = g_bound[r.socket];
+        g_seq.erase(eax);
+        return;
+    }
+    if (stream) {
+        // A peek leaves the bytes queued: they are recorded when read.
+        if (r.tcp && eax != 0xffffffffu && eax && eax <= r.len && !(r.flags & 2 /* MSG_PEEK */) &&
+            gm_valid(r.buf, eax))
+            pcap_tcp_data(r.socket, r.send, g_mem + r.buf, eax);
+        return;
+    }
     if (eax == 0xffffffffu || !eax || eax > r.len || !r.from || !gm_valid(r.from, 8) ||
         !gm_valid(r.buf, eax))
         return;
@@ -503,7 +609,7 @@ int usage(const char *argv0) {
         "  --frames DIR write presented frames there as PPM (every --frame-every N, default 60)\n"
         "  --script FILE scripted input (kit host/input_script.h); --script-out DIR for its\n"
         "               frames (default FILE without its extension, plus -frames)\n"
-        "  --lan-pcap FILE the game's UDP datagrams as a raw-IP pcap (tools/lan/eelan.py)\n",
+        "  --lan-pcap FILE the game's UDP and TCP traffic as a raw-IP pcap (tools/lan/eelan.py)\n",
         argv0);
     return 2;
 }
