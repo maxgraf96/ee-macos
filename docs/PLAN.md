@@ -480,7 +480,7 @@ Rough focused-engineering weeks for one developer with AI agents; Phases 0–1 r
 Thread roles come from these censuses, not the static DB.
 
 ### Phase 2: Translation core → **M1: native random-map generator** (≈7–12 wk, per ADR-001 gaps 1–7)
-**Status 2026-10-15, 04:45: M1 met.** All kit workstreams are merged (loader, DB translation, freestanding bundles, CRT, exact x87, EH). **51 random-map cases (459 calls) are byte-identical to Windows** on both Mac builds: 7 scripts × 6 sizes, 5 seeds, 3 epochs. Groups B (player counts) and E (editor) remain as extra coverage. Details in [phase2.md](phase2.md).
+**Status 2026-10-15, 04:45: M1 met.** All kit workstreams are merged (loader, DB translation, freestanding bundles, CRT, exact x87, EH). **All 61 matrix cases (549 calls) are byte-identical to Windows** on both Mac builds: 7 scripts × 6 sizes, 5 seeds, 3 epochs, 3–8 players (group B), the Scenario Editor with typed seeds (group E). Details in [phase2.md](phase2.md).
 
 - **Gate passed:** [ADR-002](decisions/002-exact-x87.md) is accepted, with the design validated on legion hardware. Implement it within ~3.5–4.5 weeks; if the fork's x87 layer can't meet §5.2 within ~6 weeks, replace that layer only.
 - **Gap 2 (EXE hygiene)** is reduced to ~2–3 days of kit changes: make the DB authoritative in `game_config.py`, take code ranges from the DB, disable the data-pointer scan, feed `data_in_code` into the jump-table ranges, exclude DRM (function-db.md §7.4).
@@ -519,7 +519,21 @@ Against legion's unmodified GOG game ([lansession.md](reference/lansession.md)):
 - **Legion hosted, with a computer player:** the Mac's world checksum equalled the Windows host's on all 1,178 ticks.
 - **Both sides used the same GOG CD key** without complaint.
 
-Still open for M4: a game played to its end, the Metal app in a LAN game, long games, ZeroTier (not installed on either machine yet), Mac↔Mac ([phase5.md](phase5.md)).
+**Later the same day:**
+- The shareable app on Metal played a Mac-hosted game to its end.
+- A **24-minute game stayed in sync past two autosaves**: 4,152/4,152 checksums equal.
+- A single-player game matches Windows for 30 game minutes.
+
+The out-of-sync seen first was the Mac's failing autosave: `CreateFile` with no access rights and `CREATE_NEW`. Saving resets the computer player's review schedule, so a failed save desynchronised it ([simparity.md](reference/simparity.md) §9).
+
+Still open for M4:
+- ZeroTier (not installed on either machine yet);
+- Mac↔Mac;
+- Direct Connect: "Invalid CDKey" with GOG copies; joining from the LAN list works;
+- long soak games;
+- the macOS Local Network permission prompt, which players must allow.
+
+Details: [phase5.md](phase5.md), [lansession.md](reference/lansession.md).
 
 - Winsock/iphlpapi HLE; `TCP Protocol.dll`; adapter selection incl. VPN tunnels.
 - Mac↔Mac, then Mac↔`legion` and Mac↔Wine build; soak.
