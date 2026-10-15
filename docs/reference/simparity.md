@@ -27,7 +27,7 @@ Addresses are EXE VAs (fixed base 0x400000) or engine VAs (`Low-Level Engine.dll
 | **Time in the simulation** | Three paths, each fixable: the PT rate (PTs per second, hence the **step size**) is tuned from measured tick times; the statistics report fires on a wall-clock timer; and a message the simulation sends lands in whichever CT the server's timer thread emits next (§4) [static]. |
 | **The oracle** | The tracer calls 0x545ebf after every PT and writes `pt, ct, checksum, rng, inputs, objects`; per-object rows on request. Same rows on both platforms; `compare.py` finds the first PT that differs [measured]. |
 | **Results** | Each platform reproduces itself. **Mac = Windows for 24,300 PTs** (15 game minutes, 210 units) without the civilization timer: checksum, RNG, every unit's float position, the OOS dump. With lockstep the civilization pause and click match as well. The first real difference is at PT 24301: the Mac's computer player reviews its strategy and Windows' does not, on hidden AI state (§7, §8) [measured]. |
-| **The autosave** | Saving a game has a side effect on the simulation: the computer player's serializer (0x43ded9) clears its "review scheduled" flag (+0xef6), so at its next update it reschedules its strategy review 30 s later. The 10-minute autosave failed on the Mac (`CreateFileA` with no access, kit), the Mac's computer player kept its old schedule and reviewed at PT 24301 when Windows' did not. Fixed in the kit (`ee` 35912bd); the same mechanism caused the LAN out-of-sync of session 4E (§9) [measured]. |
+| **The autosave** | Saving a game has a side effect on the simulation: the computer player's serializer (0x43ded9) clears its "review scheduled" flag (+0xef6), so at its next update it reschedules its strategy review 30 s later. The 10-minute autosave failed on the Mac (`CreateFileA` with no access, kit), the Mac's computer player kept its old schedule and reviewed at PT 24301 when Windows' did not. Fixed in the kit (`ee` 35912bd): the Mac then equals Windows to the end of the game (29,827 PTs), and a LAN game like session 4E, whose out-of-sync had the same cause, stays in sync past two autosaves (38,112 PTs; §9) [measured]. |
 
 ## 2. The world checksum (0x545ebf)
 
@@ -246,7 +246,9 @@ So in the oracle's game:
 - Windows saved at the end of a CT near PT 24010 (`win-long-1`: after PT 24010) and rescheduled at PT 24031 (`now` 901162 → next 931162, i.e. PT 24841);
 - the Mac kept the review due at 910912 and ran it at PT 24301.
 
-The review's `random_shuffle`s are the 75 extra draws of §7.6. Nothing else differed: `P` rows (all players' resources), `K` rows (every resource deposit) and the computer player's object at every review (`memfn`, compared as a value bijection to ignore pointers) agree through PT 24300 [measured, `win-ai-1` vs `mac/ai1`].
+The review's `random_shuffle`s are the 75 extra draws of §7.6. Nothing else differed [measured, `win-ai-1` vs `mac/ai1`]:
+- `P` rows (all players' resources, every PT) and `K` rows (every resource deposit) agree through PT 24300;
+- the computer player's object (`memfn`) agrees at all 30 reviews up to PT 23491. It was compared word by word, a word passing when its Mac and Windows values map one to one across the reviews, which lets pointers through; the words that failed are all heap pointers.
 
 ### 9.2 The fix
 - **Kit** `ee` 35912bd (P5-F's f4f711c, `runtime/kernel32.cpp`): `CREATE_NEW`, `CREATE_ALWAYS` and `TRUNCATE_EXISTING` create or truncate whatever the access asked for, as on Windows. `loader_tests` covers it.
