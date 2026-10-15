@@ -54,7 +54,7 @@ No game bytes, generated C, captures or Ghidra databases in either repo. The kit
 
 **Mac side complete.** M1 now waits only on legion: 0007 (rebased capture copy) → 0006 (S00 capture + Windows replay) → the 60-case matrix → `tools/m1/run_matrix.py` on the Mac.
 
-## First M1 results (2026-10-15, ~00:40)
+## First M1 results (2026-10-15, ~00:35 BST)
 - **Windows** (legion, rebased capture copy + `base_guard.js`): 7/9 calls of each case replay byte-identically against the real DLLs (S00b, A01).
 - **Mac** (translated DLLs, bundles and linked): **14/18 packs pass** for S00b and A01, the same 7 calls per case byte-identical: positions, flat, **height map**, shallows, **resources**, **trees**.
 - **The 2 failing calls per case are capture-tooling issues, not translation errors:**
@@ -63,6 +63,6 @@ No game bytes, generated C, captures or Ghidra databases in either repo. The kit
 
   Both are in progress (`phase2/m1-fix`).
 - The legion operator is running the 49-case matrix unattended. Groups B and E need setup-screen input and come after.
-- **02:00:** with the ctx-block capture fix (`ca06a0f`), the `__dllonexit` replay shim (`54ee9cf`, Mac `2bd107b`) and narrow documented compare masks (`fee5bff`), **case A06 is 9/9 on the Mac (bundles + linked), identical to Windows.** Pre-fix cases S00b and A01–A05 match Windows failure for failure and are being re-captured. Watch item: an exit-only EXE object in A05 `GenerateResources`.
-- **03:00:** Mac replay of the post-fix cases **A06–A11 (Continental Gigantic; Highlands Tiny…Huge): 6 cases, 54/54 packs pass, 0 mismatch**, on both builds, identical to Windows (9/9 each). M1 needs ≥ 50 cases; the legion matrix continues from A12, then groups B/E and the re-captures of S00b and A01–A05.
-- **03:30:** Mac replay of **A12–A21: 89/90 packs pass**. The one mismatch is A15 `GenerateResources`, identical to Windows (a block that existed before the call but was unreachable at entry; capture fixed from A17 by `9503aa6`, so A15 gets re-captured). **15 post-fix cases fully byte-identical so far:** A06–A14 and A16–A21 (Continental, Highlands, Large Islands, Mediterranean; Tiny…Gigantic).
+- **00:45:** with the ctx-block capture fix (`ca06a0f`), the `__dllonexit` replay shim (`54ee9cf`, Mac `2bd107b`) and narrow documented compare masks (`fee5bff`), **case A06 is 9/9 on the Mac (bundles + linked), identical to Windows.** Pre-fix cases S00b and A01–A05 match Windows failure for failure and are being re-captured. Watch item: an exit-only EXE object in A05 `GenerateResources`.
+- **00:55:** Mac replay of the post-fix cases **A06–A11 (Continental Gigantic; Highlands Tiny…Huge): 6 cases, 54/54 packs pass, 0 mismatch**, on both builds, identical to Windows (9/9 each). M1 needs ≥ 50 cases; the legion matrix continues from A12, then groups B/E and the re-captures of S00b and A01–A05.
+- **01:20:** Mac replay of **A12–A21: 89/90 packs pass**. The one mismatch is A15 `GenerateResources`, identical to Windows (a block that existed before the call but was unreachable at entry; capture fixed from A17 by `9503aa6`, so A15 gets re-captured). **15 post-fix cases fully byte-identical so far:** A06–A14 and A16–A21 (Continental, Highlands, Large Islands, Mediterranean; Tiny…Gigantic).
