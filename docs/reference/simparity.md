@@ -344,7 +344,8 @@ So a save carries the game between platforms both ways, and the translated load 
   - `mac-as1` 3/3 and `mac-as2` 2/2;
   - `mac-load-48007` 1/1;
   - P5-G's Mac-hosted LAN soak 5/5;
-  - about 30 so far in `repro-1` (Small Islands, a 30-second autosave, `isl1`'s exact hooks).
+  - **62/62** in `repro-1` (Small Islands, a 30-second autosave, `isl1`'s exact hooks, stopped at PT 74,709).
+  - **73 consecutive autosaves with no miss**, against `isl1`'s 1 in 31.
 - **What each traced save showed:** the counter restart, then `PostThreadMessageA(0x50a)`, then the kit's queue posting and retrieving it, then the registry writes, then the save itself (0x540aca).
 - **Ruled out statically:** the trigger is deterministic (`IsServer`, the counter at +0xcc, the game-over flags at 0x546f13).
 - **The suspect:** the path between the kit's `PostThreadMessageA` and `TSThread::Receive`. Reading the kit's queue found no way to lose a message.
