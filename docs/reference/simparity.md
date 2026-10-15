@@ -239,7 +239,7 @@ With the PT rate pinned, the seed forced and the wall-clock report skipped, each
 4. **Coverage:** one map (Continental, Small), one computer player, standard speed, about 15 game minutes. Next: more players, other scripts and epochs, a faster speed, and the LAN path, where the CT stream is the host's and the `W` rows carry every machine's per-CT checksum (P5-E).
 5. **A regression test.** `tools/test.py --simparity` now plays two 3-minute Mac games with an autosave every minute: every save must succeed, and they must agree with each other and, with legion's `win-as-1` stream present, with Windows, up to a save that landed in a different CT (§5.4, §9.3). The stream is game state and stays out of git.
 6. **Saving changes the simulation.** Besides the review flag (§9.1), each save shifts the computer player's update phase by a few PTs (§9.3). That is the game's behaviour on every machine, harmless while every machine saves at the same PT, which the host's CT stream guarantees in multiplayer. A machine whose save fails, or a mod that saves on its own, goes out of sync.
-7. **A Mac autosave that did not happen** [measured, cause open]. In `isl1` the Mac's second autosave (due after PT 48000) never ran: no save message, no CT pause, no file, while Windows saved at that point and two more traced Mac runs of the same game (`isl2`, `isl3`) did.
+7. **A Mac autosave that did not happen** [measured, cause open; parked, §10.5]. In `isl1` the Mac's second autosave (due after PT 48000) never ran: no save message, no CT pause, no file, while Windows saved at that point and two more traced Mac runs of the same game (`isl2`, `isl3`) did.
    - That run logged neither the post (0x547676) nor its handler (0x545b79), so it is not known which step was skipped. Every other autosave the Mac was due to make in these runs ran: 30 of 31 in all. The 23 traced end to end (`isl2`, `isl3`, `as30`) were each posted, handled on the simulation thread (message 0x50a through `TSThread::Receive`, i.e. the kit's `PeekMessageA`), executed and written.
    - Suspects: the post, which goes through the kit's `PostThreadMessageA`; and the blocking flags at 0x546f13 (`[0x918ea0]`, `[[0x918e24]+0x237]`), whose writers 0x5a1cda, 0x5a45ca and 0x4ffdd9 never ran in the traced runs.
    - **No out-of-sync can follow from it in multiplayer:** only the host posts the autosave, so a host that skips one skips it for every machine. In single player the oracle shows it as a difference after PT 48000. `run.py` counts saves against those due, but tolerates one missing at the end.
@@ -319,3 +319,38 @@ So a save carries the game between platforms both ways, and the translated load 
 
 - **Consequence:** in single player a Mac game and a Windows game agree until a save lands in different CTs and the computer player's next review falls at a different PT (§9.3). In multiplayer the host's CT carries the save, so every machine saves at the same PT.
 - [inferred] The Mac's server runs further ahead of its simulation than Windows' does. That is thread timing in the kit's cooperative scheduler, not simulation.
+
+### 10.4 The save files themselves
+- **A byte-identical save is impossible, even on Windows alone** [measured: `win-as-2`…`win-as-5`, four runs of one game saved after the same PT 2409].
+  - The four files are 81,414, 81,458, 81,424 and 81,441 bytes.
+  - All four SHA-256s differ.
+  - The first one-minute save itself landed at PT 2423 in `win-as-1` but at 2409 in the four later runs, with identical streams.
+- **What differs between two saves of the same state** (`tools/simparity/savefile.py` decompresses the PKWARE DCL sections):
+
+  | Field | Contents | Differs Mac vs Mac | Differs Windows vs Windows |
+  |---|---|---|---|
+  | header strings | file name, `ctime` text | yes | yes |
+  | header 0x345 | `timeGetTime()` | yes | yes |
+  | section 8 | `timeGetTime` stamps, UI and frame counters | yes | yes |
+  | section 4 | about 4,000 per-tile record bytes from msvcrt `rand()`, not the world RNG; the simulation does not read them, since the streams agree | yes | yes |
+  | header word 0x363 | uninitialised [inferred] | no | yes |
+  | section 12, last u32 | uninitialised [inferred] | no (0) | yes |
+  | section 5 (the world, about 220 KB) | | no | 9–14 bytes, uninitialised [inferred] |
+
+- **So the test of compatibility is the load, not the file.** §10.2 shows that the same save, loaded on the Mac and on Windows, runs identically in both directions. No Mac/Windows pair of the same state was compared byte for byte; it would show only the fields above.
+
+### 10.5 The autosave that did not run (§8 item 7): parked
+- **Not reproduced.** After `isl1`'s missed save, every Mac autosave ran:
+  - `mac-as1` 3/3 and `mac-as2` 2/2;
+  - `mac-load-48007` 1/1;
+  - P5-G's Mac-hosted LAN soak 5/5;
+  - about 30 so far in `repro-1` (Small Islands, a 30-second autosave, `isl1`'s exact hooks).
+- **What each traced save showed:** the counter restart, then `PostThreadMessageA(0x50a)`, then the kit's queue posting and retrieving it, then the registry writes, then the save itself (0x540aca).
+- **Ruled out statically:** the trigger is deterministic (`IsServer`, the counter at +0xcc, the game-over flags at 0x546f13).
+- **The suspect:** the path between the kit's `PostThreadMessageA` and `TSThread::Receive`. Reading the kit's queue found no way to lose a message.
+- **Parked on 2026-10-15** at the user's request: the repro runs were stopped so the user could play. In multiplayer only the host posts saves, so a missed post could not desynchronise a LAN game; nobody would save.
+- **To resume:**
+  - `tools/simparity/run.py --autosave-watch` fails a run in which a posted save never ran or a due one was never posted;
+  - `RECOMP_EE_SIMPARITY_AUTOSAVE` logs the counter;
+  - a kit diagnostic that printed thread-message posts and retrievals (`[msgq]`, behind `RECOMP_DIAG_THREAD_MESSAGES`) was used and reverted. It would need re-adding.
+
