@@ -84,11 +84,17 @@ We chose (a), for these reasons [static, `kit/tools/recomp/translate.py`]:
 | generated C (`translate.py` for the EXE and all 8 DLLs, kit `ee` 1220f89) | 271 files, 268 MB: **identical** (`diff -r`); the reports differ only in input paths and timings |
 
 - **Reference.** Eight modules were compared against the Ghidra exports in the main checkout's `analysis/kit/`.
+  - The comparison was repeated end to end after the refactor: `tools/setup.py --ghidra` (38 s) exported all nine modules again, with the shared `sidecar.py` and Default.dll's regenerated project.
+  - `export.py --compare analysis/kit` then reported all nine modules identical.
 - **Default.dll was compared against a fresh export.** The main checkout's Default.dll listings came from a Ghidra project older than the regenerated Default DB (§4 "Fixed: Default.dll+0x6caa"). Its +0x6c9a listing stops at 17 bytes, where the DB has 37.
   - Translated, that stale listing gives a listing gap and a recovered block `fn_10306caa` instead of one 37-byte body: different C, the same behaviour.
   - Regenerating Default.dll from scratch (`regen.py default`) reproduced the tracked DB byte for byte, and its Ghidra export equals the Ghidra-free inputs exactly.
   - **A checkout whose `analysis/kit/default` predates the DB fix should re-run `tools/setup.py`.**
 - The same comparison passes with a trimmed python-build-standalone runtime ([packaging.md](packaging.md)).
+- **The Ghidra-free build behaves the same [measured].** It was set up with `FUNCDB_WORK` and `GHIDRA_HOME` pointing nowhere and no `analysis/func-db/`.
+  - `tools/setup.py`: 14 s. Then `tools/run.py --no-open` and `tools/test.py --boot`: the boot test passes (11 milestones, 14 threads, render thread at 007f, clean exit).
+  - `--m1-replay`: the self-tests pass. On the post-fix cases A06–A21 (144 packs per build), 143 pass on both builds. The one mismatch, A15 `GenerateResources`, is the same failure line for line as in the matrix run on Ghidra-made inputs (`analysis/m1-captures/report.md`).
+  - `tools/run.py` with `analysis/kit/` deleted rewrites the inputs, translates and builds.
 
 **Development:**
 
