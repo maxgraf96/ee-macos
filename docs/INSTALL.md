@@ -81,7 +81,25 @@ The window says what happened and what to do. The usual cases:
 - **The mouse:** click in the window to capture it. Hold **Escape** to release it.
 - **The intro movies:** press **Escape** to skip them.
 - **Quitting:** ⌘Q, or Exit Game in the menu.
-- **Multiplayer:** the game's own LAN play. The first time, macOS asks whether the app may accept incoming connections. Click **Allow**. For games over the internet, use a VPN such as ZeroTier or Tailscale, as with the Windows version.
+- **Multiplayer:** the game's own LAN play, with other Macs and with Windows players who have the GOG game (§5.1). For games over the internet, use a VPN such as ZeroTier or Tailscale, as with the Windows version.
+
+### 5.1 Playing with Windows players on a LAN
+
+The Mac plays the unmodified Windows GOG game: either side can host. Tested on a home Wi-Fi with one Mac and one Windows 11 PC, a game each way.
+
+1. **Same network.** Both computers on the same home network (Wi-Fi or cable). Everyone needs the **GOG** Empire Earth Gold: the game compares its files and refuses a different version.
+2. **Firewalls.**
+   - **Mac:** the first time you host or join, macOS may ask whether EmpireEarth may accept incoming connections. Click **Allow**.
+   - **Windows:** Windows asks the same the first time; tick **Private networks** and click **Allow**. The Wi-Fi must be a *Private* network in Windows' settings.
+3. **Windows players: leave Network Adapter Options at its default** (or the first entry). Choosing another adapter crashes the original game when the match starts. If the Windows PC has VMware, VirtualBox, Hyper-V or VPN adapters, the game may announce itself on one of those, and nobody sees it: disable the adapters you don't need while playing.
+4. **Host:** Multiplayer → **Other Multiplayer** → **Host Game**, type a name, **Create Game**. Leave the options as they are or change them; only the host can.
+5. **Join:** Multiplayer → **Other Multiplayer**. The game appears in the list within a few seconds (click **Refresh List** if not). Select it, **Join Game**.
+   - If it never appears, the host's address can be added by hand under **Direct Connect** (not yet tested from the Mac).
+6. **In the room:** chat in the line under the history. Every player who joined clicks **Ready**; then the host's **Start Game** becomes clickable.
+7. **In the game:** **F10** opens the game menu (Resign, Quit this Game). About three minutes in, the game asks each player to choose a civilization; the game goes on meanwhile, so choose one and click **OK**. After the game, the statistics screen leads back to the lobby.
+8. **Speed:** the game runs at the speed of the slowest computer. A snail icon at the top right means someone is lagging.
+
+Everyone may use the same GOG CD key: the game does not refuse it on a LAN.
 
 ## 6. Where your files are
 

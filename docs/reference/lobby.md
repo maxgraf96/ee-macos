@@ -251,7 +251,7 @@ What the code does (§2) [static]: in fullscreen mode the lobby is a **separate 
   3. tells the lobby a game is running (0x74daf0) and **hides** it (*HideLobby*): DirectInput resumes, the render thread presents again;
   4. returns from the button handler, and the game loads through the usual path: the menu → game switch that sets the in-game mode (1920×1080 in legion's registry; legion.md §5.1 saw DirectDraw and D3D9 re-created there) and keeps the cooperative level 0x513.
 
-  The lobby stays alive while the game runs (byte 0x943844 = 1; its LAN socket stays open, which is why `LobbyLeave` was captured mid-game, netcode.md §3.2).
+  The lobby stays alive while the game runs (byte 0x943844 = 1; its LAN socket stays open: the client's keep-alive record goes on mid-game, netcode.md §3.2).
 - **After the game**, the UI returns to form 0x1e; its open event (0x67dbb8) disables the form's 18 controls and on its second call, with the lobby active, re-shows the lobby (0x67e6dd): *ShowLobby(1)* again (another `FlipToGDISurface`), `UIManager::Pop` if form 0x1e is on top, and the run loop again.
 - **Quit** (result 3): shutdown, then `PostQuitMessage(0)`. A `WM_CLOSE`/`WM_DESTROY` of the game window while the lobby is active but hidden (during a game) also shuts the lobby down first (0x6622dd → 0x67c58f). **While the lobby is shown**, the game window's `WM_CLOSE` goes to `DefWindowProcA`: on Windows that is `DestroyWindow` of the game window (which destroys the owned lobby too) and no `WM_QUIT`, so the lobby's loop would go on with no windows. A host quit that reaches the game window as `WM_CLOSE` (the headless deadline does, boot.md §1) must not be sent there while the lobby is shown (§9.1, K4).
 

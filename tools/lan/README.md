@@ -62,7 +62,7 @@ Ports, confirmed by the session-2 captures. Use `udp port 8585 or port 33336 or 
 - **UDP 8585:** the lobby's LAN game list, decoded as `LanQuery`, `LanGameAdvert`, `LanGameKeepAlive`
   (every 15 s) and `LanGameClosed`.
 - **TCP 33336:** the lobby room on the host, decoded as `LobbyJoin`, `LobbyRoster`, `LobbyChat`/`ChatRelay`,
-  `LobbyLeave` and `LobbyGameData.*` (VersionCheck with the data checksum, GameSetup, SlotAssign,
+  `LobbyKeepAlive` and `LobbyGameData.*` (VersionCheck with the data checksum, GameSetup, SlotAssign,
   SetReady/ReadyState, SetSlotAttr/SlotAttr, **StartGame**, LaunchAck). UDP 33336 is shown raw
   if it ever appears; none has been seen.
 - **UDP 33334:** all in-game traffic from `TCP Protocol.dll`. The host also sends one `EEService` search

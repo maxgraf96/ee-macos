@@ -1,0 +1,23 @@
+# A LAN session, the Mac joining (tools/lan/mac_session.py run join):
+# main menu -> Multiplayer -> Other Multiplayer -> the LAN page and its game
+# list, then the steps appended to the live file (@LIVE@ is replaced by its
+# path): pick the other machine's game, Join Game, chat, Ready, the game.
+timeout 3600000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+
+click 511 371                 # Multiplayer
+wait change within 30000
+wait 2000
+dump won
+
+pointer system
+click 618 644                 # Other Multiplayer
+wait change within 20000
+wait 3000
+dump lan                      # the game list
+log at the LAN page; following the live file
+follow @LIVE@
