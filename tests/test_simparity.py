@@ -11,6 +11,21 @@ sys.path.insert(0, str(ROOT / "tools/simparity"))
 import compare  # noqa: E402
 
 
+def _load_runner():
+    """tools/simparity/run.py by path (tools/run.py has the same module name)."""
+    import importlib.util
+    for sub in ("tools/boot", "tools"):
+        if str(ROOT / sub) not in sys.path:
+            sys.path.append(str(ROOT / sub))
+    spec = importlib.util.spec_from_file_location("simparity_run", ROOT / "tools/simparity/run.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+run = _load_runner()
+
+
 def stream(tmp_path, name, ticks, cts=None, units=None, tail=""):
     lines = ["# ee-simparity/1 test", "G,23147,1000,1"]
     for c in cts or [(12, 14, 14), (13, 28, 14)]:
@@ -115,3 +130,27 @@ def test_players_and_calls(tmp_path):
     assert d["pt"] == 3 and d["players"][0]["slot"] == 2 and d["players"][0]["words"] == [4]
     c = rep["calls"]["first_difference"]  # ...the hidden state does
     assert c["index"] == 1 and c["pt"] == 3 and c["b"][1]["args"][1] == "0000000c"
+
+
+def save_rows(pts, eax="00000000"):
+    return ["K,%d,00540aca,004b89b3,-1,00000000,00000000,00000000,%s" % (pt, eax) for pt in pts]
+
+
+def test_failed_and_missing_saves(tmp_path):
+    """The bug of PT 24301: the Mac's autosave failed, so it skipped the save's side effect."""
+    ok = compare.load(stream(tmp_path, "ok.csv", ticks(10), tail="\n".join(save_rows([5])) + "\n"))
+    assert run.save_problems(ok, 40) == []
+    bad = compare.load(stream(tmp_path, "bad.csv", ticks(10),
+                              tail="\n".join(save_rows([5], eax="00000001")) + "\n"))
+    assert run.save_problems(bad, 40) == ["the save at PT 5 failed (0x540aca returned 00000001)"]
+    # 10 PTs at 1 PT/s with a 2-s interval: 5 saves due, 1 seen
+    assert run.save_problems(ok, 1, autosave_ms=2000) == ["1 saves, 5 autosaves due"]
+
+
+def test_save_timing(tmp_path):
+    """A difference that follows a save which landed at different PTs is single-player timing."""
+    a = compare.load(stream(tmp_path, "a.csv", ticks(20), tail="\n".join(save_rows([5, 15])) + "\n"))
+    b = compare.load(stream(tmp_path, "b.csv", ticks(20, rng_at=17),
+                            tail="\n".join(save_rows([5, 11])) + "\n"))
+    assert run.save_timing(a, b) == (15, 11)
+    assert run.save_timing(a, a) is None

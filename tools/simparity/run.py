@@ -156,18 +156,10 @@ def run_one(k, args, out):
             for dump in user.rglob("OOS *.log"):
                 shutil.copy(dump, out / ("mac-%d-%s" % (k, dump.name.replace(" ", "_"))))
         stream = compare.load(trace) if trace.exists() else None
-        # A save the game could not write skips its side effects on the simulation (the
-        # computer players' serializer reschedules their strategy review): every save must
-        # succeed, as on Windows. K rows of the save-to-file function (0x540aca) say so.
         saves = [c for c in (stream.calls if stream else []) if c["fn"] == SAVE_TO_FILE]
-        for c in saves:
-            if c["eax"] != "00000000":
-                problems.append("the save at PT %d failed (0x540aca returned %s)" % (c["pt"], c["eax"]))
-        if stream and stream.ticks and args.autosave_ms and "540aca" in (args.calls or ""):
-            # The host counts ms per PT (1000 / PT rate) towards the interval.
-            due = max(stream.ticks) * 1000 // args.ptps // args.autosave_ms
-            if len(saves) < due - 1:
-                problems.append("%d saves, %d autosaves due" % (len(saves), due))
+        if stream:
+            problems += save_problems(stream, args.ptps,
+                                      args.autosave_ms if "540aca" in (args.calls or "") else None)
         files = [f for f in user.rglob("*") if f.is_file() and f.parent.name.lower() == "saved games"]
         if saves or files:
             print("run %d: %d saves, %d files in Saved Games" % (k, len(saves), len(files)), flush=True)
@@ -176,6 +168,22 @@ def run_one(k, args, out):
         return trace, problems
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def save_problems(stream, ptps, autosave_ms=None):
+    """A save the game could not write skips its side effects on the simulation (the computer
+    players' serializer reschedules their strategy review): every save must succeed, as on
+    Windows. K rows of the save-to-file function (0x540aca) say so; with the autosave
+    interval known, fewer saves than were due is a problem too."""
+    saves = [c for c in stream.calls if c["fn"] == SAVE_TO_FILE]
+    out = ["the save at PT %d failed (0x540aca returned %s)" % (c["pt"], c["eax"])
+           for c in saves if c["eax"] != "00000000"]
+    if stream.ticks and autosave_ms:
+        # The host counts ms per PT (1000 / PT rate) towards the interval.
+        due = max(stream.ticks) * 1000 // ptps // autosave_ms
+        if len(saves) < due - 1:
+            out.append("%d saves, %d autosaves due" % (len(saves), due))
+    return out
 
 
 def save_timing(a, b):
