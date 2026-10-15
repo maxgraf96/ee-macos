@@ -480,7 +480,7 @@ Rough focused-engineering weeks for one developer with AI agents; Phases 0–1 r
 Thread roles come from these censuses, not the static DB.
 
 ### Phase 2: Translation core → **M1: native random-map generator** (≈7–12 wk, per ADR-001 gaps 1–7)
-**Status 2026-10-15, 04:30:** all kit workstreams are merged (loader, DB translation, freestanding bundles, CRT, exact x87, EH). **38 random-map cases are byte-identical to Windows** (scripts × sizes × seeds, 9 calls each, both Mac builds). M1 needs ≥ 50: the re-captures and groups B/E are running on legion. Details in [phase2.md](phase2.md).
+**Status 2026-10-15, 04:45: M1 met.** All kit workstreams are merged (loader, DB translation, freestanding bundles, CRT, exact x87, EH). **51 random-map cases (459 calls) are byte-identical to Windows** on both Mac builds: 7 scripts × 6 sizes, 5 seeds, 3 epochs. Groups B (player counts) and E (editor) remain as extra coverage. Details in [phase2.md](phase2.md).
 
 - **Gate passed:** [ADR-002](decisions/002-exact-x87.md) is accepted, with the design validated on legion hardware. Implement it within ~3.5–4.5 weeks; if the fork's x87 layer can't meet §5.2 within ~6 weeks, replace that layer only.
 - **Gap 2 (EXE hygiene)** is reduced to ~2–3 days of kit changes: make the DB authoritative in `game_config.py`, take code ranges from the DB, disable the data-pointer scan, feed `data_in_code` into the jump-table ranges, exclude DRM (function-db.md §7.4).
