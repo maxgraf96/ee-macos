@@ -1,8 +1,19 @@
 # Main menu -> Single Player -> Play Random Map -> Start Game with the
-# registry's defaults (Small, Continental, one computer player), then the game
+# registry's options (tools/boot/seed_user.py: legion's, Small Continental,
+# one computer player, Tournament, Deathmatch, Random Epoch), then the game
 # itself for 90 seconds: the first frames of a game rendered natively. See
 # settings.script for the pointer.
+#
+# The same game as legion's in-game reference (docs/reference/parity.md §3):
+# 800x600x32, the map from seed 4242 (RECOMP_EE_FORCE_SEED, as legion's
+# seed_force.js), legion's player name (with the default one the game asks
+# for a civilization first), frames at 5, 30, 60 and 90 s, the Capitol
+# clicked at the view's centre at 68.8 s and the pointer parked at (745,188)
+# after it. Random Epoch comes out Renaissance on both machines.
+# tools/parity/compare.py compares the dumps with legion's.
 # menus: alone (Start Game opens the game server: one at a time)
+# menus: env RECOMP_EE_FORCE_SEED=4242
+# menus: seed --width 800 --height 600 --player-name Unknown1634
 timeout 400000
 pointer f32 [0x9197a8]+4 [0x9197a8]+8
 hold 250
@@ -20,25 +31,27 @@ dump game-setup
 
 click 644 730                 # Start Game: black, the loading screen ("Creating
 wait size 800 600 within 60000  # World...", "Loading Complete"), then the game
-wait 2500
+wait 1000
 dump loading
 # The game is up when its own command panel is (bottom of the screen; the
-# loading screens have neither its colour nor its place).
-wait pixel 300 560 948a7b tol 24 within 240000
+# loading screens have neither its colour nor its place). The panel's colour
+# depends on the epoch (948a7b wood in the Prehistoric, 939d9c stone in the
+# Renaissance); the loading screen there is 5e4d3b. T = this moment.
+wait pixel 300 560 948a7b tol 40 within 240000
 wait 5000
 dump in-game-05s
 wait 25000
 dump in-game-30s
-
-# The camera starts on the player's town center, in the middle of the view:
-# selecting it fills the panel at the bottom with its commands.
-click 350 290
-wait change 0.02 within 10000
-wait 1000
-dump town-center-selected
-
 wait 30000
 dump in-game-60s
-wait 30000
+
+# The camera starts on the player's town center, in the middle of the view:
+# selecting it fills the panel at the bottom with its commands (T+68.8 s).
+wait 8800
+click 400 225
+wait 2300
+dump town-center-selected
+move 745 188                  # where legion parked its pointer
+wait 16000
 dump in-game-90s
 quit

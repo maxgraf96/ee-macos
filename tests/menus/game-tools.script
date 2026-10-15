@@ -1,6 +1,6 @@
 # Main menu -> Game Tools -> Civilization Builder (exit) -> Game Tools ->
-# Scenario Editor (exit, "No" to saving) -> Game Tools. See settings.script
-# for the pointer.
+# Scenario Editor (its radio group: Random, Seed, Blank; exit, "No" to saving)
+# -> Game Tools. See settings.script for the pointer.
 #
 # The run ends at Game Tools: its "Main Menu" button lies exactly where the
 # main menu's Exit Game is, and EE's UIButton::MouseLButtonUp (engine+0x65322)
@@ -37,6 +37,23 @@ wait size 800 600 within 60000  # World...", "Loading Complete"), then the edito
 wait pixel 300 500 efd7a5 tol 24 within 240000
 wait 3000
 dump scenario-editor
+
+# The first screen's radio group: Blank, Random, Seed. Each selects on its
+# first click, as on Windows (legion's editor-radio-1..3, parity.md §4); the
+# seed field under the group says which is selected (none for Blank, greyed
+# for Random, black for Seed), so a click that does not select fails here.
+click 34 477                  # Random: Map Size and Map Type, the greyed seed field
+wait pixel 85 515 8c7963 tol 24 within 5000
+wait 500
+dump editor-random
+click 34 497                  # Seed: the seed field is enabled
+wait pixel 85 515 000000 tol 24 within 5000
+wait 500
+dump editor-seed
+click 34 457                  # Blank: Map Width/Height, Default Terrain, Elevation File
+wait pixel 85 515 e6caa5 tol 24 within 5000
+wait 500
+dump editor-blank
 
 click 603 580                 # its exit (the door, bottom right)
 wait pixel 400 290 e6dbbd tol 24 within 15000  # the dialog's parchment

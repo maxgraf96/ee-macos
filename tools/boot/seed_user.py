@@ -2,7 +2,7 @@
 """Seed the player's data directory for the native build: the emulated registry.
 
     .venv/bin/python tools/boot/seed_user.py [--user DIR] [--gog-script FILE]
-                                             [--width W --height H] [--reset]
+                                             [--width W --height H] [--player-name NAME] [--reset]
 
 Writes <user>/registry.json (the kit's registry store, runtime/misc.cpp), the
 values a GOG install of the base game leaves on Windows:
@@ -44,7 +44,7 @@ HKCU_SSSI = "HKEY_CURRENT_USER\\Software\\SSSI\\Empire Earth"
 REG_SZ, REG_BINARY, REG_DWORD = 1, 3, 4
 
 
-def sssi_values(width, height):
+def sssi_values(width, height, player_name="Max the Conqueror"):
     """windows/setup.ps1's $Sssi, with the guest's install location."""
     d = {
         "Ambient Sounds": 1, "Animation Smoothing": 1, "AutoSave In Milliseconds": 0x927c0,
@@ -59,7 +59,7 @@ def sssi_values(width, height):
         "Max Number Of Sounds (percent)": 100, "Max PTs per Second": 0x7d, "Min PTs per Second": 0x0f,
         "MIP Levels to Drop": 0, "Model Detail": 2, "Mouse Sensitivity": 0x1f, "Music Enabled": 1,
         "Music Volume": 0x3e, "Network Adapter": 0, "Number Of AutoSaves": 10,
-        "Player Name": "Max the Conqueror", "PT Rate Tuning Threshold (percent)": 0x1e,
+        "Player Name": player_name, "PT Rate Tuning Threshold (percent)": 0x1e,
         "Rasterizer Name": "Direct3D", "Reverb Enabled": 1, "Right Hand Mouse Orientation": 1,
         "Screen ID": 0, "Show Auto Waypoints": 0, "Show Blood": 1, "Side Scroll Speed": 0xc8,
         "Sierra.com Game Name": "Unknown", "Sierra.com User ID": "Unknown", "Sound Volume": 100,
@@ -116,8 +116,8 @@ def parents(key):
     return ["\\".join(parts[:i]) for i in range(2, len(parts))]
 
 
-def defaults(width, height, script):
-    reg = {HKCU_SSSI: {k: value(v) for k, v in sssi_values(width, height).items()},
+def defaults(width, height, script, player_name="Max the Conqueror"):
+    reg = {HKCU_SSSI: {k: value(v) for k, v in sssi_values(width, height, player_name).items()},
            HKCU_SSSI + "\\Game Options": {k: value(v) for k, v in GAME_OPTIONS.items()}}
     if script:
         reg.update(hklm_from_script(script))
@@ -158,13 +158,17 @@ def main(argv=None):
     parser.add_argument("--gog-script", default=None, help="the player's %s" % SCRIPT)
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
+    # legion's own profile is "Unknown1634" (the game named it); with the
+    # default name EE asks for a civilization at the start of a random map,
+    # with legion's it does not (docs/reference/parity.md §3).
+    parser.add_argument("--player-name", default="Max the Conqueror")
     parser.add_argument("--reset", action="store_true", help="discard the existing registry")
     args = parser.parse_args(argv)
 
     script = find_script(args.gog_script)
     if script is not None and not script.is_file():
         sys.exit("no GOG install script at %s" % script)
-    seed = defaults(args.width, args.height, script)
+    seed = defaults(args.width, args.height, script, args.player_name)
     args.user.mkdir(parents=True, exist_ok=True)
     path = args.user / "registry.json"
     existing = {}
