@@ -9,7 +9,9 @@
 //   - The player's data: RECOMP_PROFILE_DIR (the file overlay's writable tier)
 //     and RECOMP_REGISTRY default to ~/Library/Application Support/EmpireEarth
 //     and its registry.json, seeded by tools/boot/seed_user.py. A developer
-//     build would otherwise keep both under build/recomp/.
+//     build would otherwise keep both under build/recomp/. A host with a user
+//     directory of its own (ee_boot --user) replaces these defaults, but not a
+//     RECOMP_REGISTRY the caller set: ee_registry_from_environment() says which.
 //
 // Nothing else is a stand-in now: Miles (mss32) and DirectMusic are the kit's
 // (Phase 4), and so is destroying a thread's windows when it ends (P3-E).
@@ -21,7 +23,10 @@
 
 namespace {
 
+bool g_registry_from_environment = false;
+
 __attribute__((constructor)) void ee_standins_init() {
+    g_registry_from_environment = getenv("RECOMP_REGISTRY") != nullptr;
     if (!getenv("RECOMP_PROFILE_DIR")) {
         char dir[4096];
         if (os_user_data_dir("EmpireEarth", dir, sizeof dir) == 0) {
@@ -35,3 +40,9 @@ __attribute__((constructor)) void ee_standins_init() {
 }
 
 } // namespace
+
+// Whether RECOMP_REGISTRY came from the process's environment rather than
+// from the default above.
+bool ee_registry_from_environment() {
+    return g_registry_from_environment;
+}
