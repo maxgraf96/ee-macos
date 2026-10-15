@@ -510,7 +510,16 @@ Thread roles come from these censuses, not the static DB.
 - **M3:** full playthroughs; checksum streams match Windows on the scenario corpus.
 
 ### Phase 5: LAN → **M4: Mac↔Windows LAN game, no OOS** (≈2–4 wk)
-**Status 2026-10-15:** Winsock/iphlpapi merged (P5-A). The Multiplayer lobby is specified from static analysis and Windows traces ([lobby.md](reference/lobby.md)): one custom-drawn WONAPI popup over a frozen DirectDraw frame. Its presentation (P5-C) and text/fonts/cursor (P5-D) are in progress ([phase5.md](phase5.md)).
+**Status 2026-10-15, 05:50: the first Mac↔Windows LAN games ran, with no out-of-sync.** Merged:
+- Winsock/iphlpapi (P5-A);
+- the Multiplayer lobby on the Mac (P5-C/D, [lobby.md](reference/lobby.md)).
+
+Against legion's unmodified GOG game ([lansession.md](reference/lansession.md)):
+- **The Mac hosted:** legion joined from its LAN list, they chatted, and the Mac compared 1,246 of legion's checksums with no flag.
+- **Legion hosted, with a computer player:** the Mac's world checksum equalled the Windows host's on all 1,178 ticks.
+- **Both sides used the same GOG CD key** without complaint.
+
+Still open for M4: a game played to its end, the Metal app in a LAN game, long games, ZeroTier (not installed on either machine yet), Mac↔Mac ([phase5.md](phase5.md)).
 
 - Winsock/iphlpapi HLE; `TCP Protocol.dll`; adapter selection incl. VPN tunnels.
 - Mac↔Mac, then Mac↔`legion` and Mac↔Wine build; soak.
