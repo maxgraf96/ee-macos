@@ -1,0 +1,108 @@
+# The main menu's cursor at 16 bits per pixel, the GOG installer's default:
+# sweeps across the buttons, rests on one until its tooltip shows, and comes
+# back to where it started. The menu draws its own cursor (RTSMouse) with a
+# save-under per flip-chain buffer: each frame restores, on the buffer it draws
+# to, what it saved there two frames before. Unless Flip exchanges the buffers
+# as Windows does, every restore lands a frame late and copies of the cursor
+# stay behind (the trail a player saw on the main menu).
+#
+# run_menus.py checks the menu ran at 1024x768x16, and that `rest-before` and
+# `rest-after` show the same picture apart from the cursor itself. `wait still`
+# fails when the two buffers disagree (a picture that flickers between them).
+# menus: seed --bit-depth 16
+# menus: mode 1024x768x16
+# menus: same rest-before rest-after
+timeout 300000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+move 150 700
+wait still 8 within 10000
+dump rest-before
+
+# Across Single Player, Multiplayer and Game Tools, a frame or two per step.
+move 280 268
+wait frames 2
+move 330 268
+wait frames 2
+move 380 268
+wait frames 2
+move 430 268
+wait frames 2
+move 480 268
+wait frames 2
+move 530 268
+wait frames 2
+move 580 268
+wait frames 2
+move 630 268
+wait frames 2
+move 680 268
+wait frames 2
+move 730 268
+wait frames 2
+move 710 300
+wait frames 2
+move 690 330
+wait frames 2
+move 670 371
+wait frames 2
+move 620 371
+wait frames 2
+move 570 371
+wait frames 2
+move 520 371
+wait frames 2
+move 470 371
+wait frames 2
+move 420 371
+wait frames 2
+move 370 371
+wait frames 2
+move 320 371
+wait frames 2
+move 300 420
+wait frames 2
+move 290 474
+wait frames 2
+move 340 474
+wait frames 2
+move 390 474
+wait frames 2
+move 440 474
+wait frames 2
+move 490 474
+wait frames 2
+move 540 474
+wait frames 2
+move 590 474
+wait frames 2
+move 640 474
+wait frames 2
+move 690 474
+wait frames 2
+move 740 474
+wait frames 2
+dump sweep
+
+# Over the title, down to Single Player, and rest there for its tooltip.
+move 700 150
+wait frames 2
+move 640 170
+wait frames 2
+move 580 190
+wait frames 2
+move 520 210
+wait frames 2
+move 480 240
+wait frames 2
+move 460 268
+wait 2500
+dump tooltip
+
+move 150 700
+wait still 8 within 10000
+dump rest-after
+quit

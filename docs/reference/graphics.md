@@ -67,7 +67,7 @@ This is the reference for the Direct3D 7 / DirectDraw 7 shim (ADR-001 gap 8), th
    - **Effort:** about **4.5–6 focused weeks** for DD7 + D3D7 + the renderer extensions, including screenshot diffs against `legion` (§10.4). That fits inside ADR-001's 5–7 weeks. GDI text (gap 9) and DirectInput fixes add about 1–1.5 weeks.
 6. **Measured on `legion`** (§11.3–11.5):
    - **Coverage:** no game call fell outside the static lists.
-   - **Frame cost:** about 850 COM calls and about 1,800 triangles per frame in game, at 79 fps. The menu issues **no draws at all**, only 3 cursor Blts per frame, so `Flip` must keep the back buffer's contents.
+   - **Frame cost:** about 850 COM calls and about 1,800 triangles per frame in game, at 79 fps. The menu issues **no draws at all**, only 3 cursor Blts per frame, with a save-under per flip-chain buffer, so `Flip` must exchange the buffers as Windows does (corrected in §11.6; this said "keep the back buffer's contents" until P3-G).
    - **Lighting:** LIGHTING is on for one span per frame, with one directional light.
    - **Textures:** A8R8G8B8 with full mip chains, plus a per-frame A4R4G4B4 64×64 texture.
    - **GDI:** surface `GetDC` = 0 per frame.
@@ -626,7 +626,7 @@ Source: the survey of `spikes/ee-recomp/kit/` at `eb32cc4`. File:line detail is 
 - [ ] Release, AddAttachedSurface(z), DeleteAttachedSurface.
 - [ ] Blt: `COLORFILL` (0x400); copy or stretch with `DONOTWAIT` (0x8000000) and optional `KEYSRC` (0x8000); flags 0 for the windowed present to the primary.
   - Measured: 3–4 per frame, all copies between video-memory surfaces (the cursor save/restore and a 64×64 texture). Do them **on the GPU**, without a CPU readback.
-- [ ] Flip(NULL, 0x20 / 0x28). **The back buffer must keep its contents across Flip** (copy-style present) [measured: the menu draws nothing per frame].
+- [x] Flip(NULL, 0x20 / 0x28). **Flip exchanges the front and back buffers**, as Windows does: after a Flip the back buffer holds the frame shown before. The menu's cursor keeps one save surface per buffer (§11.6). (This said "the back buffer must keep its contents" until P3-G: a copy-style present left a cursor trail.)
 - [ ] GetAttachedSurface.
 - [ ] GetDC / ReleaseDC: a DIB over the surface (32- and 16-bit).
 - [ ] Lock(NULL, desc, 0, NULL) / Unlock(NULL): return `lpSurface` and `lPitch`.
@@ -808,10 +808,12 @@ Geometry per frame is about 1,800 triangles: 1,420 indexed plus 380 non-indexed.
 - **3 Blts**;
 - EndScene and Flip.
 
-There were **zero draw calls and zero texture changes.** The menu image is drawn once and kept in the back buffer. The 3 Blts are the software cursor, all through `CopyTo` (HR+0xe1d1), on a 32×32 rectangle at the cursor:
+There were **zero draw calls and zero texture changes.** The menu image is drawn once into each buffer of the flip chain and then kept. The 3 Blts are the software cursor, all through `CopyTo` (HR+0xe1d1), on a 32×32 rectangle at the cursor:
 1. restore the saved background to the back buffer;
 2. save the back buffer under the cursor to a temporary surface;
 3. draw the cursor with `KEYSRC|DONOTWAIT`.
+
+There are **two** temporary surfaces, used in alternate frames, one per buffer of the two-buffer chain (§11.6).
 
 In game, a fourth Blt per frame copies a 64×64 surface into another 64×64 surface (below).
 
@@ -896,7 +898,7 @@ In game, a fourth Blt per frame copies a 64×64 surface into another 64×64 surf
 | Rates (§2.4) | **confirmed**: SetTexture about 64/frame (measured 67) |
 
 ### 11.5 Changes to the shim checklist (§10) from the measurements
-1. **Flip must keep the back buffer's contents.** Present by copy, or by a contents-preserving swap. The menu is drawn once and then only patched by the cursor Blts, so a discard-style present would show an empty menu. **[new requirement]**
+1. **Flip must keep each buffer's contents** (no discard), and it must **exchange** the buffers rather than copy: corrected in §11.6. The menu is drawn once into each buffer and then only patched by the cursor Blts, so a discard-style present would show an empty menu. **[new requirement]**
 2. **Blt between video-memory surfaces should be a GPU copy, not a CPU readback.** That covers back buffer ↔ cursor-save surface, cursor → back buffer with `KEYSRC`, and the 64×64 per-frame copy. Three or four per frame. **[new]**
 3. **Viewport with MinZ = MaxZ** (0..0 and 1..1) must work. Metal accepts it. **[new]**
 4. **Thread safety.** `CreateSurface`, `GetAttachedSurface` and `Lock`/`Unlock` on textures run on the texture worker thread while the render thread draws. **[new]**
@@ -906,6 +908,14 @@ In game, a fourth Blt per frame copies a 64×64 surface into another 64×64 surf
 8. **Effort is unchanged at about 4.5–6 weeks.** The overlay and point-light work shrink; Flip and Blt-on-GPU are small additions.
 
 ---
+
+### 11.6 Correction (P3-G): Flip exchanges, it does not copy [measured, headless]
+
+P3-B implemented §11.5's first item as a copy: `Flip` copied the back buffer into the front buffer, so the back buffer kept its contents. A player saw **copies of the gold cursor left all over the main menu** (fragments, more where it moved slowly), and the same trail shows headless at 16 and at 32 bpp (`tests/menus/cursor-trail-16.script`; the menu tests had never compared two frames).
+
+- **The trace** (`ee_boot --trace-match "IDirectDrawSurface7::|IDirectDraw7::"`, main menu, render thread) has, per frame: `Blt(back, save X)` (restore), `Blt(save X, back)` (save), `Blt(back, cursor, KEYSRC)`, `Flip`, with X alternating between two surfaces every frame (`0100fba0`, `0100fb90`, then `0100fba0` again; 16 and 32 bpp alike). Each save surface belongs to one buffer: a frame restores, on the buffer it draws to, what it saved there two frames before. That is right on Windows, where `Flip` exchanges the buffers' memory, so the back buffer is the buffer of two frames ago.
+- **With a copy** there is one buffer in effect: the restore of frame N puts back the background saved at frame N−2 while the cursor drawn at N−1 is still there; it goes only at N+1. A save that overlaps the cursor still on screen captures part of it, and a later restore stamps that fragment back: the trail. A rest saves a whole cursor into one surface, which comes back when the cursor leaves.
+- **The fix** (kit `feat/cursor16`): `Flip` exchanges the buffers' guest memory and backend resources (new seam call `host_d7_swap`; the GPU renderer swaps two textures, nothing is copied), and two back buffers rotate. After it, `rest-before` and `rest-after` of the scenario are the same picture (hash-identical headless), and every screen the menu tests reach is still from one frame to the next (`wait still`: both buffers hold the same picture). In game the frame is redrawn every frame, so the game itself looked the same with either Flip (800×600×16 and ×32, seeded; parity.md's SSIM unchanged).
 
 ## 12. Open questions
 **Closed by the census:**
