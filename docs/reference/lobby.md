@@ -295,6 +295,64 @@ Not needed for EE: native child controls (none exist), `ChangeDisplaySettingsA` 
 
 **Windowed mode** (the fullscreen option off) is a different path (game window hidden, the lobby a plain top-level window, no DirectDraw involvement); K1's overlay over an empty layer 0 covers it, but it is not a target.
 
+### 9.3 Status of K5–K8 (P5-D, kit `feat/lobby-text`, 2026-10-15)
+
+All four are done in the kit, game-neutral, with tests. The ground truth is Windows 11 build 26200 on legion: code page and GDI-metric captures taken over `ssh` in `C:\EEPort\p5d` [measured], and the lobby traces 0021 and 0025 [measured]. The commits are on `ee` 844917f (K6a, merged) and then `feat/lobby-text` on `ee` f4eb731: K6b 5006cb8, K5 7af4ee3, K7 b2c2d94 with its follow-up 220ac8a, K8 ae58d00. The EE menus regression check (`tests/menus` settings, single-player, game-tools, against this kit) passes 3 of 3.
+
+**K6a: code pages** (`runtime/codepages.cpp`).
+- `MultiByteToWideChar` and `WideCharToMultiByte` follow Windows' tables for 1252 (`CP_ACP`), 437 (`CP_OEMCP`), 850, 10000 (`CP_MACCP`), 20127 and 28591. That covers 0x80–0x9F, best fit, the default character, every flag and the short-buffer behaviour.
+- UTF-8 follows Windows' replacement rules, and `CP_SYMBOL` is supported. `GetCPInfo` and `IsValidCodePage` answer per code page.
+- `crt_tests` replays the whole capture: 6 tables and 226 edge cases. The capture tool is `tools/codepages`.
+- WONAPI's `MultiByteToWideChar(1252, …)` at 0x7bcdcf now turns `WM_CHAR 0xE9` into U+00E9 and 0x80 into €.
+
+**K6b: text input.**
+- The SDL host keeps text input on, so dead keys, Option characters, every layout and input methods arrive as text. A held key repeats instead of opening the accent picker.
+- A key that types is posted already translated (`HOST_KEY_TEXT_FOLLOWS`), and its `WM_CHAR` is the text that follows. Return, Tab, Backspace, Escape and Ctrl/Command keys keep their old path, as do the host's own scripted and on-screen keys (SDL keyboard id 0).
+- Text reaches an ANSI window such as `WndClass0` as `WM_CHAR` in 1252. Legion's 0025 trace confirms `é` arrives as `WM_CHAR 0xE9` with no IME messages.
+- Text that 1252 cannot spell arrives as an IME result: `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION(GCS_RESULTSTR)`, `WM_IME_ENDCOMPOSITION`. `ImmGetContext` is non-NULL and `ImmGetCompositionStringW` returns the UTF-16 text, which is the path WONAPI's 0x7bcba8 reads.
+  - The result travels with its message, so two queued results each read their own.
+  - `DefWindowProc` turns a result into `WM_IME_CHAR` and then `WM_CHAR` ('?') for a window that does not handle it.
+- **For P5-C (K9):** scripted `type TEXT` can call `host_text_input(utf8)` (`host/input_gate.h`) under the baton, which is the path SDL's text events take.
+
+**K5: cursor.**
+- The cursor shims moved to `runtime/user32_cursor.cpp` and keep each shape:
+  - stock `IDC_*` handles map to SDL system cursors (`IDC_IBEAM` to the I-beam, which is what WONAPI sets over edit fields);
+  - `CreateCursor`'s AND/XOR planes and `CreateIconIndirect`'s bitmaps become colour cursors with their hot spots. The 32×32 hand keeps its hot spot 12,4.
+- `SetCursor(NULL)` hides the pointer over the window; WON draws its own yellow arrow then (0025 §7).
+- `SetCursorPos` warps the Mac pointer through the scene mapping. *ShowLobby* calls it while the DirectInput mouse is still exclusive, so the move waits for relative mode to end and then puts the pointer where the game's cursor was.
+- Headless: `RECOMP_TRACE_CURSOR=1` logs every change (`cursor: SetCursor -> ibeam (IDC 32513, …)`), and `host_guest_cursor_state()` and `host_guest_cursor_description()` answer in-process.
+- Hiding still needs `[runtime] relative_mouse`, which EE sets.
+
+**K7: GDI.**
+- `Arc`, `Chord` and `Pie` are real elliptical arcs: the matching part of `Ellipse`'s outline. They run counterclockwise unless `SetArcDirection(AD_CLOCKWISE)`; `Chord` fills its side of the chord and `Pie` its wedge. `ArcTo` and `AngleArc` move the current position. They are tested against a reference raster written from the documented rules.
+- A soak of 200,000 pen and brush changes leaves the object table flat.
+- **Line metrics now match Windows 11.** GDI reads a VDMX table only through its Windows ANSI group (`bCharSet` 1). Tahoma's only group is for all glyphs, so its line heights come from the Windows ascent and descent: −16 is 19 px, not 21.
+  - A cell (positive) height is the TEXTMETRIC height, split by the Windows ascent.
+  - Its em is the rounded em part of the cell, one smaller while that em's scaled Windows ascent and descent overflow the cell (Tahoma 20 is a 16-pixel em). Wine has the same rule.
+  - Held by `gdi_metrics_windows11`: 169 requests over six faces, with 0 differences in face, height, ascent, descent and leadings.
+  - Held by `gdi_metrics_windows11_tahoma`: all 89 Tahoma requests also agree in every advance (U+007F apart) and every string extent.
+  - The lobby's seven Tahoma fonts match exactly in height, ascent, descent, internal leading and average width: −13/400, −13/700, −13 italic, −15/700, −16/700, −21/700, −32/700. These agree with 0025 §4.
+  - What still differs is the font version: macOS 15 ships Tahoma 5.01 and Windows 11 Tahoma 7.05. The bounding box differs, so `tmMaxCharWidth` is 28 against 32 at −13, and U+007F's width differs.
+- **"TimesRoman" is Arial on Windows 11** [measured], not Times New Roman: the mapper falls back by pitch and family, and `DEFAULT_PITCH | FF_DONTCARE` gives Arial. The kit now does the same for any unknown face (Arial, Times New Roman, Courier New, Comic Sans MS or Symbol by pitch, family and charset). With nothing installed it uses Open Sans, never the 8×16 cells (except fixed-pitch, raster, symbol and OEM requests). §3.5's guess is corrected by this.
+- **Fonts available to the kit:**
+  - Bundled: Open Sans 1.101 Regular and Semibold (Apache 2.0) and the 8×16 cells.
+  - With `[runtime] system_fonts`, the user's installed fonts are read in place, never copied. macOS 15 has Arial (and Black, Narrow), Tahoma (regular, bold), Verdana, Times New Roman, Courier New, Georgia, Trebuchet MS, Comic Sans MS, Impact, Microsoft Sans Serif, Wingdings, Webdings and Andale Mono.
+  - It does not have Segoe UI, Calibri, Consolas, Lucida Console, Palatino Linotype, or the raster faces.
+  - No Microsoft font file is in either repository.
+
+**K8: clipboard** (`runtime/user32_clipboard.cpp`).
+- Windows' rules apply, including that the same window or thread may open the clipboard again while it has it open. `CF_UNICODETEXT`, `CF_TEXT` (1252) and `CF_OEMTEXT` (437) are converted into each other.
+- `GetClipboardData`'s handle is the text itself, as 0025 §8 shows WONAPI needs: no `GlobalLock`, the bytes at the handle.
+- The SDL host bridges text to the Mac pasteboard on the main thread:
+  - a copy is published at `CloseClipboard`, with LF line ends;
+  - another application's text is read only when the game pastes, with CR LF, and never merely because the clipboard changed.
+
+**Open.**
+1. The SDL-window paths (text input, cursor shapes, the warp, the pasteboard) are built but have not been run on a screen. The headless suites cover the runtime side, and the windowed check is §10's Metal run.
+2. While an input method composes (marked text), SDL still sends key events, so Return that commits a composition also reaches the game. Western layouts are unaffected.
+3. Cursor images are shown at guest-pixel size; they are not scaled with the window.
+4. The request-0011 capture (`tools/gdi_metrics/cases.txt`, now with the lobby's sizes) would turn on the full `gdi_metrics_reference`, whose tolerances include `tmMaxCharWidth`. With macOS's older Tahoma that test would fail on the bounding box alone; `compare.py --only`/`--faces`/`--skip-chars` exist for that.
+
 ## 10. Tests
 
 **Kit (game-neutral, headless):** a synthetic program per piece in `win32_ui_tests`/`dx_tests`:
