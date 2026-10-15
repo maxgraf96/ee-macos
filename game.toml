@@ -145,6 +145,10 @@ ddraw7 = true
 # The game draws its own cursor from DirectInput mouse deltas (legion.md §5.6):
 # an exclusive DirectInput mouse gets relative motion (P3-C).
 relative_mouse = true
+# The engine's SEConductor plays the in-game music through DirectMusic
+# (audio.md §2): the kit's loader, composer and performance over GothicKit/dmusic
+# (kit dx/dmusic.cpp, P4-A).
+dmusic = true
 # Tahoma, Arial and the other faces the UI names, from the system's fonts.
 system_fonts = true
 
