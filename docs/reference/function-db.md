@@ -341,6 +341,8 @@ Code is classified by **section flags** (`Image.__init__ :874`, `is_exec :919`).
 
 The output must stay in an ignored directory (`analysis/`), because listings are derived from game code.
 
+Since Phase 6 (P6-A) this export is the development path (`tools/setup.py --ghidra`). The default, `tools/inputs/export.py`, writes the same three files from the DB and the player's binaries with no Ghidra: the same `functions.tsv` and `funcdb.json` code (`tools/inputs/sidecar.py`), and listings decoded with capstone in Ghidra's syntax. Both give byte-identical inputs and C for all nine modules ([build.md](build.md) §2.1).
+
 ### 7.3 Test with the unmodified kit [measured]
 
 Setup:
@@ -418,7 +420,13 @@ analysis/func-db/.venv/bin/python -I tools/ghidra/regen.py --db-only
 
 # kit listings for one module (ignored output)
 analysis/func-db/.venv/bin/python tools/ghidra/ghidra_run.py kit exe db/functions/empire-earth.exe.json analysis/func-db/kit/exe
+
+# after a DB change: the Ghidra-free inputs against a Ghidra export, then pin them (build.md §2.1)
+.venv/bin/python tools/setup.py --install "original/gog/Empire Earth" --ghidra
+.venv/bin/python tools/inputs/export.py --compare analysis/kit && .venv/bin/python tools/inputs/export.py --pin
 ```
+
+A DB change without new pins in `db/inputs.json` stops `tools/setup.py`: commit the pins with the DB.
 
 Environment: `EE_GAME_DIR` overrides the game folder (default `original/gog/Empire Earth`); `GHIDRA_HOME` and `JAVA_HOME` override the Homebrew paths.
 

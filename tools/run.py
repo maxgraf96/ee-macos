@@ -5,8 +5,10 @@
 
 What it does, each step only when needed:
 
-1. Checks the translation inputs of all nine modules exist (analysis/kit/,
-   from `tools/setup.py --install "/path/to/Empire Earth"`, once).
+1. Writes the translation inputs of all nine modules (analysis/kit/,
+   tools/inputs/export.py) when they are missing or older than the function
+   DB or the exporter. That needs the game linked once with
+   `tools/setup.py --install "/path/to/Empire Earth"`; no Ghidra.
 2. Seeds the player's registry in the user directory if it has none
    (tools/boot/seed_user.py: legion's options, the CD key from the player's own
    GOG install script). Default user directory: ~/Library/Application
@@ -36,18 +38,39 @@ APP = ROOT / "build/EmpireEarth.app"
 GEN = ROOT / "build/recomp/gen"
 
 
+def game():
+    return tomllib.loads((ROOT / "game.toml").read_text())
+
+
 def modules():
-    """(funcdb.json, a file the translator always writes) per module in game.toml."""
-    cfg = tomllib.loads((ROOT / "game.toml").read_text())
-    yield ROOT / cfg["translate"]["function_db"], GEN / "table.c"
+    """(module file name, its funcdb.json, a file the translator always writes)
+    per module in game.toml."""
+    cfg = game()
+    yield cfg["game"]["executable"], ROOT / cfg["translate"]["function_db"], GEN / "table.c"
     for key, module in sorted(cfg["modules"]["aux"].items()):
-        yield ROOT / module["function_db"], GEN / ("aux-" + key) / "table.c"
+        yield module["name"], ROOT / module["function_db"], GEN / ("aux-" + key) / "table.c"
+
+
+def stale_inputs():
+    """Why analysis/kit must be written again (tools/inputs/export.py), or None."""
+    exporter = max(p.stat().st_mtime for p in (ROOT / "tools/inputs").glob("*.py"))
+    for name, funcdb, _ in modules():
+        if not funcdb.is_file():
+            return "%s is missing" % funcdb.relative_to(ROOT)
+        made = funcdb.stat().st_mtime
+        db = ROOT / "db/functions" / (name.lower().replace(" ", "-") + ".json")
+        for source in (db, ROOT / "db/inputs.json"):
+            if source.stat().st_mtime > made:
+                return "%s is newer than %s" % (source.relative_to(ROOT), funcdb.relative_to(ROOT))
+        if exporter > made:
+            return "tools/inputs/ is newer than %s" % funcdb.relative_to(ROOT)
+    return None
 
 
 def stale_translation(kit):
     """Why build/recomp/gen must be translated again, or None."""
     translator = max(p.stat().st_mtime for p in (kit / "tools/recomp").glob("*.py"))
-    for db, generated in modules():
+    for _, db, generated in modules():
         if not generated.is_file():
             return "%s is missing" % generated.relative_to(ROOT)
         made = generated.stat().st_mtime
@@ -68,22 +91,25 @@ def main(argv=None):
     parser.add_argument("--jobs", default=None)
     args = parser.parse_args(argv)
 
-    missing = [db.relative_to(ROOT) for db, _ in modules() if not db.is_file()]
-    if missing:
-        sys.exit("No translation inputs %s: run once\n"
-                 "  .venv/bin/python tools/setup.py --install \"/path/to/Empire Earth\"\n"
-                 "(docs/reference/build.md §2)" % ", ".join(map(str, missing)))
+    kit_args = ["--kit", args.kit] if args.kit else []
+    why = stale_inputs()
+    if why:
+        if not (ROOT / game()["game"]["developer_exe"]).is_file():
+            sys.exit("The game is not linked: run once\n"
+                     "  .venv/bin/python tools/setup.py --install \"/path/to/Empire Earth\"\n"
+                     "(docs/reference/build.md §2)")
+        print("Writing the translation inputs (%s)" % why, flush=True)
+        subprocess.run([sys.executable, str(ROOT / "tools/inputs/export.py")] + kit_args, check=True)
     if not (args.user / "registry.json").is_file():
-        print("Seeding the registry in %s" % args.user)
+        print("Seeding the registry in %s" % args.user, flush=True)
         seed_user.main(["--user", str(args.user)])
 
     command = [sys.executable, str(ROOT / "tools/build.py"), "--target", "app"]
-    command += ["--kit", args.kit] if args.kit else []
+    command += kit_args
     command += ["--jobs", args.jobs] if args.jobs else []
-    why = "--regenerate" if args.regenerate else stale_translation(
-        kitpath.take_kit(["--kit", args.kit] if args.kit else [])[0])
+    why = "--regenerate" if args.regenerate else stale_translation(kitpath.take_kit(list(kit_args))[0])
     if why:
-        print("Translating (%s)" % why)
+        print("Translating (%s)" % why, flush=True)
         command.append("--regenerate")
     subprocess.run(command, check=True)
     if not APP.is_dir():

@@ -1,0 +1,14 @@
+{
+ "about": "SHA-256 of each module's translation inputs as tools/inputs/export.py writes them (docs/reference/build.md §2). Update with --pin, after --compare against a Ghidra export.",
+ "inputs": {
+  "DX7HRDisplay.dll": "fed4e9e941358b7d3451f42bc1653eb1ca2820dd4fe3402c41dd4ce2ea3d145e",
+  "DX7HRTnLDisplay.dll": "7dac6fd2bb71589c659bcd958f440d457fa1bba81408508c29993bec70910409",
+  "Default.dll": "7fb598a983d88359d517f77137c45d94bf05c2eaf87e8736e92f7cd5f022a898",
+  "Empire Earth.exe": "899c9741bb889ad877e79de34ba900f9f74164662ac52a3d824053ca0f111c5d",
+  "Language.dll": "8da742a1029b68d265fbe1ec29c18425b7859ec55193ad282800240cbab9bf78",
+  "Low-Level Engine.dll": "563673c57b44714f6f07cc6760b4f47d6f342b87c4f532f4e769493273cc91a6",
+  "Miles Sound System Mixer.dll": "e2fd626b3f48d7f1972803fa1f1198c6d3847390c28fea3b2b68596ddfe8466c",
+  "TCP Protocol.dll": "9c41b79dce5e1e816b9e98ae7e23b35da73ba24ff5a384ab60d979e1af5c57e5",
+  "sxlrt233.dll": "ee72a8b24c635fef5dec831427270f88cf22dd2d6f904756c3a00cc1a15d1415"
+ }
+}

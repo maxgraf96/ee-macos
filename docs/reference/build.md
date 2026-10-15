@@ -14,7 +14,7 @@ Labels: **[measured]** = output of the commands here on an M4 Max (16 cores, mac
 | Python 3.12 venv | the wrappers and the kit's tools | `uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt` (Python 3.14 cannot build the pinned numpy) |
 | Xcode Command Line Tools | the kit's hosted build (runtime, hosts, harness) | `xcode-select --install` |
 | LLVM clang + lld | freestanding bundles (§5); no CLT needed for these | `brew install llvm lld` (`/opt/homebrew/opt/llvm/bin/clang`, `/opt/homebrew/opt/lld/bin/ld64.lld`) |
-| Ghidra 12.1.4 + the func-db environment | setup only: exporting the translation inputs | [function-db.md §9](function-db.md) |
+| Ghidra 12.1.4 + the func-db environment | development only: regenerating the DB, `setup.py --ghidra`, `export.py --compare` | [function-db.md §9](function-db.md) |
 | Your GOG installation | everything game-backed | linked by `tools/setup.py`, never copied into git |
 
 Every wrapper takes `--kit DIR` (or `RECOMP_KIT_DIR=DIR`) to use another kit checkout than the `kit/` submodule, e.g. a worktree of the fork during kit work. Nothing else changes: outputs still go to this repository's ignored `build/`.
@@ -28,9 +28,83 @@ git submodule update --init kit
 
 1. The kit's `setup.py --link-only` checks `Empire Earth.exe` against `game.toml` and links the installation at `original/gog/Empire Earth` (ignored).
 2. Every module in `game.toml` is checked against its SHA-256 (PLAN §2.4).
-3. For each module, `tools/ghidra/ghidra_run.py kit` exports, from the func-db Ghidra project, exactly the DB's non-DRM functions into `analysis/kit/<module>/` (ignored): `functions.tsv` (with the DB's names), `functions/<va>.asm`, and `funcdb.json`.
+3. `tools/inputs/export.py` writes each module's translation inputs into `analysis/kit/<module>/` (ignored), from two things only: the tracked DB (`db/functions/<module>.json`) and the player's own module. **No Ghidra and no `analysis/func-db/`.** All nine modules take 15 s [measured]:
+   - `functions.tsv`: the DB's non-DRM entries, with the DB's names and body sizes;
+   - `functions/<va>.asm`: each entry's body, decoded with capstone and printed in the listing grammar;
+   - `funcdb.json`: the DB sidecar.
 
-`funcdb.json` (schema `recomp-funcdb/1`) is what `game.toml` names as `function_db`: the kit's translator then classifies code by the DB's code ranges instead of section flags, seeds every entry point and alternate entry (`alt_vas` in the DB), keeps data-in-code out of every scan, never translates the DRM, and runs **no** data-pointer scan ([function-db.md §7.4](function-db.md)). The export needs the func-db Ghidra projects: `tools/ghidra/regen.py` builds them (about 20 minutes), or point `FUNCDB_WORK` at an existing `analysis/func-db`. `--link-only` skips step 3.
+`funcdb.json` (schema `recomp-funcdb/1`) is what `game.toml` names as `function_db`. With it the kit's translator:
+- classifies code by the DB's code ranges instead of section flags;
+- seeds every entry point and alternate entry (`alt_vas` in the DB);
+- keeps data-in-code out of every scan;
+- never translates the DRM;
+- runs **no** data-pointer scan ([function-db.md §7.4](function-db.md)).
+
+`tools/run.py` re-exports by itself when the inputs are missing or older than the DB, `db/inputs.json` or `tools/inputs/`. `--link-only` skips step 3.
+
+### 2.1 Inputs without Ghidra (Phase 6, P6-A)
+
+The first-run pipeline on a player's Mac (PLAN D10, §5.8) has no Ghidra, and the app cannot ship listings, which are derived from game code. So the inputs are made on the player's machine from the DB plus the player's binaries.
+
+**Design: write the same listings, with our own decoder.** Two designs were weighed:
+- (a) generate the existing input files from the DB and the binary, with a decoder that prints Ghidra's syntax;
+- (b) give the translator a native mode that decodes the image itself, with the DB for bounds.
+
+We chose (a), for these reasons [static, `kit/tools/recomp/translate.py`]:
+- **The translator consumes listings as text, not only as instructions.**
+  - It parses the operand text (`parse_operand`).
+  - It copies every line into the generated C as a comment (`/* 00401000 PUSH EBP */`).
+  - It reads control flow from the listing's shape: a listing that ends on a `CALL` marks a callee that never returns (`noreturn_callees_from`), and the `functions.tsv` size bounds a function (`Function.end`).
+  - Byte-identical C therefore needs Ghidra's exact text on either route. (b) still needs the same renderer, only inside the kit.
+- **(b) would move EE-validated rendering into a shared, game-neutral file** that other workstreams edit. The kit's own in-image decoder (`Image.to_insn`, used for recovered blocks) prints a different spelling, and changing it would change every game's recovered code.
+- **(a) is checkable per instruction.** The Ghidra path and the Ghidra-free path write the same files, so they can be compared line by line (`export.py --compare`): a much finer check than a C diff. The kit is untouched.
+- **The cost of (a)** is 214 MB of listings written on the player's machine, in 15 s. They can be deleted after translation.
+
+**How [static, `tools/inputs/`]:**
+- `sidecar.py`: `functions.tsv` and `funcdb.json` as pure functions of the DB. `tools/ghidra/kit_export.py` uses the same code, so only the listings can differ between the two paths.
+- `listing.py`: decodes a body front to back: the DB's `chunks`, or `[va, va + size)`. The DB's bodies are Ghidra's, and Ghidra's function bodies hold only instructions. It renders each instruction from the encoding (opcode, ModRM, displacement and immediate widths), not just from capstone's operand list, because Ghidra's display depends on the encoding:
+  - an 8-bit immediate prints signed after an arithmetic opcode (`ADD EAX,-0x8`: 83 /0 /2 /3 /5 /7, 6A, 6B) and unsigned after a logical one (`OR EDX,0xffffffff`: 83 /1 /4 /6); IMUL's full-width immediate (69) prints signed;
+  - an 8-bit displacement prints signed and is left out when zero (`[EBP + -0x8]`, `[EBP]`); a 32-bit displacement prints unsigned, zero included (`[EBP + 0xffffff10]`, `[EDI*0x8 + 0x0]`);
+  - absolute addresses print as 8 digits except through a segment (`[0x00654321]`, `FS:[0x0]`); the A0–A3 forms and LEA carry no size;
+  - branch targets print as 8-digit addresses; condition codes use Ghidra's names (`JC`, `JNZ`); REP is a mnemonic suffix (`MOVSD.REP ES:EDI,ESI`);
+  - x87 register forms follow Ghidra's constructors (`FADD ST0,ST1` but `FMUL ST1`; `FCOM`, `FXCH` and `FADDP` bare for ST1); floating-point memory operands are `float`/`double ptr`.
+  - Anything outside this vocabulary is an error, not a guess. The modules are hash-pinned, so the vocabulary is fixed.
+- `export.py`: writes the three files and checks two things:
+  - every body decodes to exactly the DB's own instruction count (`insns`);
+  - each module's inputs hash to the SHA-256 that `db/inputs.json` pins.
+  
+  The pins are the inputs this repository was compared against Ghidra with, so a player's first run either reproduces them exactly or stops. A mismatch means a different capstone (the pin is 5.0.9, `kit/tools/requirements.txt`) or a DB change nobody re-pinned.
+
+**Equivalence with the Ghidra pipeline [measured, 2026-10-15]:**
+
+| | Ghidra export (`setup.py --ghidra`) vs Ghidra-free |
+|---|---|
+| `functions.tsv`, `funcdb.json` | identical in all 9 modules |
+| listings | 47,980 files, 1,931,496 instructions: **0 differences** |
+| generated C (`translate.py` for the EXE and all 8 DLLs, kit `ee` 1220f89) | 271 files, 268 MB: **identical** (`diff -r`); the reports differ only in input paths and timings |
+
+- **Reference.** Eight modules were compared against the Ghidra exports in the main checkout's `analysis/kit/`.
+  - The comparison was repeated end to end after the refactor: `tools/setup.py --ghidra` (38 s) exported all nine modules again, with the shared `sidecar.py` and Default.dll's regenerated project.
+  - `export.py --compare analysis/kit` then reported all nine modules identical.
+- **Default.dll was compared against a fresh export.** The main checkout's Default.dll listings came from a Ghidra project older than the regenerated Default DB (§4 "Fixed: Default.dll+0x6caa"). Its +0x6c9a listing stops at 17 bytes, where the DB has 37.
+  - Translated, that stale listing gives a listing gap and a recovered block `fn_10306caa` instead of one 37-byte body: different C, the same behaviour.
+  - Regenerating Default.dll from scratch (`regen.py default`) reproduced the tracked DB byte for byte, and its Ghidra export equals the Ghidra-free inputs exactly.
+  - **A checkout whose `analysis/kit/default` predates the DB fix should re-run `tools/setup.py`.**
+- The same comparison passes with a trimmed python-build-standalone runtime ([packaging.md](packaging.md)).
+- **The Ghidra-free build behaves the same [measured].** It was set up with `FUNCDB_WORK` and `GHIDRA_HOME` pointing nowhere and no `analysis/func-db/`.
+  - `tools/setup.py`: 14 s. Then `tools/run.py --no-open` and `tools/test.py --boot`: the boot test passes (11 milestones, 14 threads, render thread at 007f, clean exit).
+  - `--m1-replay`: the self-tests pass. On the post-fix cases A06–A21 (144 packs per build), 143 pass on both builds. The one mismatch, A15 `GenerateResources`, is the same failure line for line as in the matrix run on Ghidra-made inputs (`analysis/m1-captures/report.md`).
+  - `tools/run.py` with `analysis/kit/` deleted rewrites the inputs, translates and builds.
+
+**Development:**
+
+```sh
+.venv/bin/python tools/setup.py --install "/path/to/Empire Earth" --ghidra   # the Ghidra export (FUNCDB_WORK)
+.venv/bin/python tools/inputs/export.py --compare analysis/kit               # Ghidra-free vs whatever is there
+.venv/bin/python tools/inputs/export.py --pin                                # after a DB change, once compared
+```
+
+After a DB regeneration: export with `--ghidra` into `analysis/kit`, run `export.py --compare analysis/kit`, then `export.py --pin`, and commit `db/inputs.json` with the DB. `tests/test_inputs.py` checks the renderer on hand-written encodings, the sidecar against every DB and, with the game linked, the DLLs' inputs against their pins.
 
 ## 3. The base map
 
@@ -163,4 +237,4 @@ What remains for "builds without the CLT" (M1 DoD): the runtime and hosts are st
 - `tests/m1/harness/crt_pending.cpp`: stand-ins only for the msvcrt functions the kit does not have yet: the x87 control word (`_controlfp`, `_control87`, `__control87_2`; workstream C). They are registered before the kit's tables, so each one the kit gains replaces ours. MSVC exception handling is the kit's (`runtime/msvc_eh.cpp`, workstream E), and its stand-ins are gone.
 
 ## 7. Outputs and disk
-Everything is ignored: `analysis/kit/` (listings, 208 MB, EXE 163 MB), `build/` (translation ~330 MB per build root; CMake tree with SDL3 + FFmpeg; bundles ~37 MB for the DLLs) [measured]. `build/` can be deleted at any time; `analysis/kit/` is re-exported by `tools/setup.py`.
+Everything is ignored: `analysis/kit/` (listings, 214 MB, EXE 163 MB; `tools/setup.py` or `tools/run.py` rewrites it in 15 s), `build/` (translation ~330 MB per build root; CMake tree with SDL3 + FFmpeg; bundles ~37 MB for the DLLs) [measured]. `build/` and `analysis/kit/` can be deleted at any time.

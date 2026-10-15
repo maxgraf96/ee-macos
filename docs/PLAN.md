@@ -407,6 +407,11 @@ Precedents for the later C phase:
   - The app needs `com.apple.security.cs.disable-library-validation` to load a locally built, ad-hoc-signed bundle under the hardened runtime. That entitlement is compatible with notarization if we ever get a Developer ID.
 - **Build cost:** a one-time compile of ~1–2 M lines of generated C (parallel; minutes on M-series), cached in `~/Library/Application Support/EmpireEarth/`. It is keyed by module hashes and translator version.
 - **Verify early (Phase 2):** generated C compiles with `-ffreestanding` and links with `ld64.lld` alone on a machine without the CLT.
+- **No Ghidra at first run (Phase 6, P6-A, done):** the translation inputs are made from the function DB plus the player's binaries by our own decoder (`tools/inputs/`). Inputs and generated C are byte-identical to the Ghidra pipeline's for all nine modules ([build.md](reference/build.md) §2.1).
+- **Measured inventory** ([packaging.md](reference/packaging.md)):
+  - official LLVM 23.1.3 `clang` + `ld64.lld`, stripped: 303 MB (65 MB compressed), about twice the estimate above; an AArch64-only multicall build should get back to that range;
+  - a trimmed python-build-standalone runtime with capstone and pefile: 39 MB;
+  - the first run takes about 2.7 min and 0.93 GB peak disk on an M4 Max, leaving 169 MB of bundles.
 
 ### 5.7 Decompilation track
 - Any guest function can be **overridden** by C++ registered by address, using typed guest-memory views (`gptr<T>`, structs from Ghidra).
@@ -511,7 +516,7 @@ Thread roles come from these censuses, not the static DB.
 ### Phase 6: Shareable app → **M5: 1.0 for friends** (≈2–4 wk)
 - App bundle + first-run importer: GOG offline installer (Inno) or game folder → hash check → translate + compile (one-time, cached).
 - **Bundled LLVM toolchain** (D10, §5.8): freestanding build, lld link, ad-hoc signing, cached output.
-- **No Ghidra on players' Macs:** first-run translation inputs come from the repo's function DB plus the player's own binaries, decoded by our own tools. Ghidra listings are derived from game code and can't ship. Workstream P6-A, started 2026-10-15.
+- **No Ghidra on players' Macs:** first-run translation inputs come from the repo's function DB plus the player's own binaries, decoded by our own tools. Ghidra listings are derived from game code and can't ship. Workstream P6-A, **done 2026-10-15**: `tools/setup.py`/`tools/run.py` need only the repository and the game files, with inputs and generated C byte-identical to the Ghidra pipeline's ([build.md](reference/build.md) §2.1); inventory in [packaging.md](reference/packaging.md).
 - Settings UI; logs and crash reports; a friend-facing README (VPN how-to).
 - **Signing:**
   - Ad-hoc signed by default; friends use *Open Anyway* in Privacy & Security once.

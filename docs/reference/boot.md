@@ -11,11 +11,11 @@ Labels: **[measured]** = output of the commands here (M4 Max, macOS 15.5); **[st
 ```sh
 cd /Users/max/Code/neoee-macos          # this repository, with the kit at an `ee` that has feat/boot
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt   # once
-.venv/bin/python tools/setup.py --install "original/gog/Empire Earth"   # once: link + export the nine modules' listings
+.venv/bin/python tools/setup.py --install "original/gog/Empire Earth"   # once: link + write the nine modules' inputs (no Ghidra)
 .venv/bin/python tools/run.py            # seed the registry, translate (when stale, ~5 min), build, open the app
 ```
 
-`tools/run.py` builds `build/EmpireEarth.app` (the kit's SDL host, `tools/build.py --target app`) and opens it. It translates again when a module's generated code is missing or older than its `analysis/kit/` inputs or the kit's translator (a checkout that predates the five plugin DLLs needs the `setup.py` step above, then one translation); otherwise it rebuilds only what changed, and `open build/EmpireEarth.app` works too. The registry and everything the game writes live in `~/Library/Application Support/EmpireEarth` (`--user DIR` for another place); `tools/boot/seed_user.py` seeds the registry with legion's options and the CD key from your own GOG install script (it finds the Wineskin build's, or pass `--gog-script`).
+`tools/run.py` builds `build/EmpireEarth.app` (the kit's SDL host, `tools/build.py --target app`) and opens it. It rewrites a module's `analysis/kit/` inputs when they are missing or older than the DB (`tools/inputs/export.py`, [build.md](build.md) §2), and translates again when a module's generated code is missing or older than its inputs or the kit's translator; otherwise it rebuilds only what changed, and `open build/EmpireEarth.app` works too. The registry and everything the game writes live in `~/Library/Application Support/EmpireEarth` (`--user DIR` for another place); `tools/boot/seed_user.py` seeds the registry with legion's options and the CD key from your own GOG install script (it finds the Wineskin build's, or pass `--gog-script`).
 
 In the game: click in the window to capture the mouse (the game draws its own cursor from relative motion); Escape skips the intro movies (~2 minutes otherwise); hold Escape to release the mouse; Command-Q quits through the game's own exit. Display is Metal at the game's 1024×768 menu mode in a 4:3 window. **No audio yet** (Phase 4), and Multiplayer's networking is Phase 5.
 

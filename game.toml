@@ -8,9 +8,10 @@
 # loader both apply to the original file.
 #
 # Translation inputs come from the function DB (db/functions/, docs/reference/
-# function-db.md), not from Ghidra's default analysis: tools/setup.py exports
-# listings plus a funcdb.json per module into the ignored analysis/kit/, and
-# `function_db` makes that file authoritative (no data-pointer scan).
+# function-db.md) and the player's own modules, with no Ghidra: tools/setup.py
+# (tools/inputs/export.py) writes listings plus a funcdb.json per module into
+# the ignored analysis/kit/, and `function_db` makes that file authoritative
+# (no data-pointer scan). docs/reference/build.md §2.
 #
 # Paths are relative to this file. original/ and analysis/ are ignored.
 

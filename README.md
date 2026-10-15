@@ -18,7 +18,7 @@ This project ports *Empire Earth* (2001; the GOG *Empire Earth Gold* base game) 
 | `kit/` | [recomp-kit](https://codeberg.org/maxgraf/recomp-kit) fork (submodule, branch `ee`): translator, runtime, hosts |
 | `game.toml`, `globals.toml` | the kit's game configuration: module hashes, the base map, translation inputs, curated symbols |
 | `docs/` | plan, ADRs, research, reference notes |
-| `tools/` | `build.py`/`setup.py`/`test.py` (thin wrappers around the kit's) and analysis scripts (`peinfo.py`, `inventory.py`, `ghidra/`; deps in `tools/requirements.txt`) |
+| `tools/` | `build.py`/`setup.py`/`test.py`/`run.py` (thin wrappers around the kit's), `inputs/` (the translation inputs from the DB, no Ghidra) and analysis scripts (`peinfo.py`, `inventory.py`, `ghidra/`; deps in `tools/requirements.txt`) |
 | `mods/`, `tests/` | EE targets in the kit's build (the M1 harness, `tests/m1/`) and this repository's tests |
 | `db/` | function/API databases derived from analysis (names and addresses only) |
 | `windows/` | scripts for the Windows reference machine |
@@ -27,10 +27,10 @@ This project ports *Empire Earth* (2001; the GOG *Empire Earth Gold* base game) 
 ## Try it
 ```sh
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt   # once
-.venv/bin/python tools/setup.py --install "/path/to/Empire Earth"   # once: link your GOG copy, export the listings
+.venv/bin/python tools/setup.py --install "/path/to/Empire Earth"   # once: link your GOG copy, write the translation inputs
 .venv/bin/python tools/run.py      # seed the registry, translate (when stale), build and open build/EmpireEarth.app
 ```
-`setup.py` exports from the func-db Ghidra projects ([`docs/reference/function-db.md`](docs/reference/function-db.md) §9). Boots to the main menu (Metal, mouse and keyboard; no audio yet). Details, the headless boot and what is still a stand-in: [`docs/reference/boot.md`](docs/reference/boot.md).
+No Ghidra needed: `setup.py` makes the translation inputs from the function DB and your own game files in about 15 s ([`docs/reference/build.md`](docs/reference/build.md) §2). Boots to the main menu (Metal, mouse and keyboard; no audio yet). Details, the headless boot and what is still a stand-in: [`docs/reference/boot.md`](docs/reference/boot.md).
 
 ## Build
 Setup, build, tests, the freestanding/`ld64.lld` bundle build and the DLL base map: [`docs/reference/build.md`](docs/reference/build.md).
