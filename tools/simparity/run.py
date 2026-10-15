@@ -102,7 +102,8 @@ def run_one(k, args, out):
                          ("RECOMP_EE_CHECKSUM_OOSDUMP", args.oosdump),
                          ("RECOMP_EE_CHECKSUM_MAX_PT", args.max_pt),
                          ("RECOMP_EE_CHECKSUM_FLAGS", args.flags),
-                         ("RECOMP_EE_CHECKSUM_DRAWS", args.draws)):
+                         ("RECOMP_EE_CHECKSUM_DRAWS", args.draws),
+                         ("RECOMP_EE_CHECKSUM_TRACE_FNS", args.trace_fns)):
             if val is not None:
                 env[key] = str(val)
         command = [str(ROOT / "build/recomp/ee_boot"), "--user", str(user), "--seconds", str(seconds),
@@ -111,7 +112,7 @@ def run_one(k, args, out):
         if args.insert_dylib:
             prefix.append("DYLD_INSERT_LIBRARIES=" + args.insert_dylib)
         prefix += ["timeout", str(seconds + 180)]
-        with game_ports_lock("simparity run %d (%s)" % (k, ROOT)):
+        with game_ports_lock("simparity run %d (%s)" % (k, ROOT), timeout=4 * 3600):
             start = time.monotonic()
             with open(log, "w") as f:
                 result = subprocess.run(prefix + command, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT,
@@ -158,6 +159,8 @@ def main():
     parser.add_argument("--flags", default=None, help="flags of the second checksum column")
     parser.add_argument("--draws", default=None, metavar="A-B",
                         help="R rows: every call of a random-drawing function in PTs A..B")
+    parser.add_argument("--trace-fns", default=None, metavar="ADDR,...",
+                        help="with --draws: '# call' lines for these EXE functions (hex)")
     parser.add_argument("--out", type=Path, default=ROOT / "analysis/simparity/mac")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--kit", default=None)

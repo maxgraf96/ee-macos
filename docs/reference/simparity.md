@@ -157,7 +157,8 @@ Pointers never appear in a row (heap addresses differ between platforms); the ob
 |---|---|---|
 | 0027 | `win-1`, `win-2`: seed 1000, no input in game, to the civilization pause (PT 8022); `win-2` with the OOS dump at PT 4000 | `stream.csv`, screenshots, `OOS … .log` |
 | 0030 → 0033 | `win-ok-1`, `win-ok-2`: the same, then OK once on the civilization screen, 10 minutes more (to PT 24187/24183) | the same |
-| 0034 | `win-nc-1`, `win-nc-2`: no civilization timer, 12 minutes; `win-ls-1`: the OK variant with lockstep | the same |
+| 0034 | `win-nc-1`, `win-nc-2`: no civilization timer, 12 minutes (to PT 28863/28851); `win-ls-1`: the OK variant with lockstep (to PT 32163) | the same |
+| 0035 + 0036 | `win-ph-1`, `win-ph-2`: no civilization timer, `flags2=3`, per-object rows around PT 24301, the OOS dump at PT 24300, `R` rows for PTs 24290–24305 | the same |
 
 Streams are fetched to `analysis/simparity/win/` (ignored) with `scp`. Legion's Frida run writes CRLF line ends, which `compare.py` ignores.
 
@@ -188,8 +189,21 @@ So the translated simulation, x87 included, evolves bit for bit as Windows' for 
 
 With the PT rate pinned, the seed forced and the wall-clock report skipped, each platform reproduces itself exactly. Without the pin no two runs could agree (§4.1).
 
-### 7.4 What still differs between the platforms: where a pause lands
+### 7.4 The pause with lockstep, on both platforms [measured]
+- With lockstep, Windows (`win-ls-1`) behaves exactly as the Mac: the simulation stops in the middle of the CT whose first PT runs the civilization expiry (13 PTs left on Windows, 10–11 on the Mac), the gate waits its full 60 s, then the CT goes out, the simulation finishes it and the next, and the pause lands after PT 8036; the OK click runs at PT 8037.
+- **Mac (lockstep, OK) vs `win-ls-1`: all 15,946 common PTs agree**, and so do the 15 per-object snapshots up to PT 15000 (171 objects).
+- Without lockstep the platforms differ only in where the pause lands: Windows after PT 8022 (four runs out of four), the Mac after 8064.
+
+### 7.5 What still differs between the platforms: where a pause lands without lockstep
 - After the civilization timer expires (its message runs at PT 8009 on both), Windows pauses after PT 8022 in all four runs, the end of that CT; the OK click's message (type 0x71) then runs at PT 8023.
 - The Mac pauses later: after PT 8064 without lockstep (the server three CTs ahead) and after PT 8036 with lockstep. With lockstep the simulation stalls at PT 8012, mid-CT, until the gate gives up, so the pause is asked for while CT 604 is already on its way.
 - The pause comes from the UI thread (0x662f64 opens the screen and calls `NESynchronousServer::PauseGame`, which applies from the server's next CT), so where it lands depends on how fast the UI reacts compared with the simulation. That is thread timing, not simulation.
 - Consequence: the OK-variant streams agree up to PT 8022 and differ from 8023, the CT the click runs in.
+
+### 7.6 The first simulation difference: PT 24301 [measured]
+- **Setup:** with no civilization timer the game sends no messages at all. Windows (`win-nc-1`, `win-nc-2`) and the Mac (two runs each) then each reproduce themselves for the whole 12 minutes (28,851 and 28,617 PTs). **Mac vs Windows agree for 24,300 PTs** (15 game minutes, 210 units).
+- **At PT 24301** both create two units (210 → 212). The objects' part of the checksum is the same on both sides (checksum − RNG = `0x16053`), but the world RNG is not: from the same state, Windows draws 30 numbers in that PT and the Mac 105 (LCG steps counted). A typical PT draws about 20.
+- **The Mac's draw trace** (`R` rows) puts the 75 extra draws in one place: 75 calls of `RTSPhysics::RandomInt` (0x5531c2, an integer from the world RNG) from 0x42f2cc, `random index below n`, the generator of the game's three `std::random_shuffle` instantiations (0x42f275, 0x47956d, 0x44e16e; element sizes 8, 4, 8). So in PT 24301 the Mac shuffles a 76-element sequence that Windows does not shuffle, or shuffles with one element at most.
+- **No float drifted before it:** in `win-ph-1` and the Mac's run with the physics column (`flags2=3`: every unit's model, i.e. float position bits, update count and target), the second checksum agrees through PT 24300, and every object still agrees at PT 24301 (212 objects, both columns). Only the world RNG differs at the end of PT 24301.
+- **Both draw traces** (`R` rows, PTs 24290–24305) are identical but for one insertion. In PT 24301, after the same two float draws, the Mac runs seven `random_shuffle`s (75 draws) before the AI's draws at 0x46370e (`EECPAttackSubGroupUnit` vtable slot 8), which both platforms then make with the same values shifted. The Mac's call trace names them: one from 0x42f912 (a computer player's strategy review: it lists candidate strategies from conditions and shuffles them), then six from 0x4874f6.
+- **Why the Mac reviews and Windows does not:** the computer player's update (0x43f91a, every PT, `now` = game ms) calls the review only when `now >= this[0xedc]`, the time scheduled at the previous review by 0x43dcf4: `next = (int)(float)(now + this[0xc5c] * 1000)` (an `FIADD`, an `FSTP m32` and a nearest-even `FISTP`, all exact in the kit's x87 model). So the scheduled time or its inputs (the review interval at +0xc5c, which comes from a global table at 0x8d0990, or the time of the previous review) differ, and none of those is in any checksum. Where they first differ is the next step (§8).

@@ -46,6 +46,7 @@ class Stream:
         self.sends = []   # S rows
         self.units = {}   # pt -> list of dicts
         self.checks = {}  # W rows by CT
+        self.draws = []   # R rows in order
 
 
 def load(path):
@@ -54,7 +55,7 @@ def load(path):
     cur = None
 
     def new_game(g):
-        return {"G": g, "ticks": {}, "cts": [], "sends": [], "units": {}, "checks": []}
+        return {"G": g, "ticks": {}, "cts": [], "sends": [], "units": {}, "checks": [], "draws": []}
 
     for line in Path(path).read_text(errors="replace").splitlines():
         line = line.strip()
@@ -85,6 +86,9 @@ def load(path):
             elif kind == "W":
                 cur["checks"].append({"ct": int(f[1]), "pt": int(f[2]), "dump": int(f[3]),
                                       "flags": int(f[4]), "cs": f[5].lower()})
+            elif kind == "R":
+                cur["draws"].append({"pt": int(f[1]), "fn": f[2].lower(), "caller": f[3].lower(),
+                                     "rng_in": f[4].lower(), "rng_out": f[5].lower()})
             elif kind == "U":
                 cur["units"].setdefault(int(f[1]), []).append(
                     {"i": int(f[2]), "vtable": f[3].lower(), "id": int(f[4]), "x": int(f[5]),
@@ -110,6 +114,7 @@ def load(path):
     for x in s.sends:
         x["ct"] -= s.ct0
     s.checks = {w["ct"]: w for w in g["checks"]}
+    s.draws = g["draws"]
     return s
 
 
@@ -149,6 +154,32 @@ def diff_units(a, b, with_cs2=True):
     order = [u["i"] for u in a] == [ka[key(u)]["i"] for u in a] and \
         [key(u) for u in a] == [key(u) for u in b]
     return out, order
+
+
+# The PT entry itself is in the draw list; RTSPhysics::Main calls it from one of two
+# sites depending on whether it is catching up, which is timing, not simulation.
+TIMING_CALLERS = {"00546c63"}
+
+
+def same_draw(ra, rb):
+    if ra["fn"] in TIMING_CALLERS:
+        return {k: v for k, v in ra.items() if k != "caller"} == {k: v for k, v in rb.items() if k != "caller"}
+    return ra == rb
+
+
+def first_draw_difference(da, db):
+    """The first R row (in order) that differs, with the rows around it; only PTs both traced."""
+    pts = set(r["pt"] for r in da) & set(r["pt"] for r in db)
+    da = [r for r in da if r["pt"] in pts]
+    db = [r for r in db if r["pt"] in pts]
+    for i, (ra, rb) in enumerate(zip(da, db)):
+        if not same_draw(ra, rb):
+            return {"index": i, "pt": ra["pt"], "a": da[max(0, i - 3):i + 6], "b": db[max(0, i - 3):i + 6]}
+    if len(da) != len(db):
+        i = min(len(da), len(db))
+        return {"index": i, "pt": (da or db)[i - 1]["pt"] if i else None, "a": da[i - 3:i + 6],
+                "b": db[i - 3:i + 6]}
+    return None
 
 
 def compare(a, b, context=5):
@@ -205,6 +236,8 @@ def compare(a, b, context=5):
         diffs, same_order = diff_units(a.units[p], b.units[p], "cs2" in fields)
         rep["units"] = {"pt": p, "differ": diffs[:200], "count": len(diffs),
                         "objects": (len(a.units[p]), len(b.units[p])), "same_order": same_order}
+    if a.draws and b.draws:
+        rep["draws"] = first_draw_difference(a.draws, b.draws)
     rep["summary"] = "first difference at PT %d (%s); %d earlier PTs agree" % (
         pt, ", ".join(bad), common.index(pt))
     return rep
@@ -241,6 +274,13 @@ def main():
             print("            B %s" % r["b"])
         s = rep["sends_up_to_first"]
         print("messages sent up to there: A %s / B %s" % (s["types_a"], s["types_b"]))
+        if rep.get("draws"):
+            d = rep["draws"]
+            print("draws (R rows) first differ at row %d, PT %s:" % (d["index"], d["pt"]))
+            for side in ("a", "b"):
+                for r in d[side]:
+                    print("  %s PT %d %s from %s rng %s -> %s" % (side.upper(), r["pt"], r["fn"], r["caller"],
+                                                               r["rng_in"], r["rng_out"]))
         if "units" in rep:
             u = rep["units"]
             print("objects at PT %d: %d / %d, same order: %s; %d differ" % (

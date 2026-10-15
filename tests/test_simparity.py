@@ -84,3 +84,13 @@ def test_tracers_write_the_same_rows():
     assert set(mac) == set(win) == set(doc) == set("GCTSUWR")
     for kind in "GCTSUWR":
         assert mac[kind].split() == win[kind].split() == doc[kind].split()
+
+
+def test_first_draw_difference(tmp_path):
+    rows = ["R,9,%08x,00450000,%08x,%08x" % (0x45b064 + i, 0x100 + i, 0x101 + i) for i in range(5)]
+    a = stream(tmp_path, "a.csv", ticks(10), tail="\n".join(rows) + "\n")
+    rows[2] = "R,9,0045b066,00450000,00000102,00000999"
+    b = stream(tmp_path, "b.csv", ticks(10, rng_at=9), tail="\n".join(rows) + "\n")
+    rep = compare.compare(compare.load(a), compare.load(b))
+    assert rep["first_pt"] == 9 and rep["fields"] == ["rng"]
+    assert rep["draws"]["index"] == 2 and rep["draws"]["b"][2]["rng_out"] == "00000999"

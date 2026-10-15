@@ -30,6 +30,15 @@
  *   RECOMP_EE_CHECKSUM_DRAWS=A-B       R rows for PTs A..B: every call of an
  *                                      EXE function that calls URandom, with
  *                                      its caller and the world RNG around it
+ *   RECOMP_EE_CHECKSUM_TRACE_FNS=F,..  with DRAWS: "# call" lines for these EXE
+ *                                      functions too (caller, ECX, three stack
+ *                                      arguments, the world RNG around it)
+ *   RECOMP_EE_CHECKSUM_MEM=P,A,L[;..]  after PT P, "# mem" lines: L bytes at the
+ *                                      object whose pointer is at A (hex; e.g.
+ *                                      91837c, player 2 of the player table)
+ *   RECOMP_EE_SIMPARITY_AI_SCHED=1     "# sched" lines: every time a computer
+ *                                      player schedules its next strategy
+ *                                      review (EXE 0x43dcf4)
  *   RECOMP_EE_SIMPARITY_LOCKSTEP=1     the server sends a CT only once the
  *                                      simulation has run every PT it was
  *                                      sent (waits at most 60 s), so a message
@@ -175,6 +184,29 @@ static int units_have_models(const PopModApi *api) {
     return 1;
 }
 
+#define MAX_MEM 16
+static struct {
+    uint32_t pt, ptr_at, len;
+} g_mem[MAX_MEM];
+static uint32_t g_nmem;
+
+/* "# mem PT ptr_at+off: 8 words" lines: the object behind a pointer, for
+ * diffing hidden state between platforms (heap pointers differ, values do
+ * not). */
+static void write_mem(const PopModApi *api, uint32_t pt) {
+    for (uint32_t i = 0; i < g_nmem; ++i) {
+        if (g_mem[i].pt != pt)
+            continue;
+        uint32_t base = rd(api, g_mem[i].ptr_at);
+        for (uint32_t off = 0; base && off < g_mem[i].len; off += 32) {
+            fprintf(g_out, "# mem %u %08x+%04x:", pt, g_mem[i].ptr_at, off);
+            for (uint32_t w = 0; w < 32 && off + w < g_mem[i].len; w += 4)
+                fprintf(g_out, " %08x", rd(api, base + off + w));
+            fprintf(g_out, "\n");
+        }
+    }
+}
+
 static int units_wanted(uint32_t pt) {
     if (g_units_every && pt % g_units_every == 0)
         return 1;
@@ -235,6 +267,8 @@ static void after_tick(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation 
             rd(api, VA_INPUTS), units);
     if (units_wanted(pt))
         write_units(api, pt);
+    if (g_nmem)
+        write_mem(api, pt);
     if (pt == g_oosdump_pt) {
         checksum(api, world, 1, 1);
         fprintf(g_out, "# OOS dump written after PT %u (the game's OOS *.log)\n", pt);
@@ -440,6 +474,84 @@ static void after_draw_fn(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocati
             g_draw_stack[g_draw_depth].rng, world ? rd(api, world + W_RNG) : 0);
 }
 
+/* Extra functions to trace in the draw window: comment lines, so the row
+ * format stays the Windows twin's. */
+static _Thread_local struct {
+    uint32_t fn, caller, ecx, a0, a1, a2, rng;
+} g_call_stack[64];
+static _Thread_local uint32_t g_call_depth;
+
+static void before_trace_fn(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv,
+                            void *user) {
+    (void)inv;
+    if (g_call_depth < 64) {
+        uint32_t world = rd(api, VA_WORLD_PTR);
+        int on = draws_window(api);
+        g_call_stack[g_call_depth].fn = (uint32_t)(uintptr_t)user;
+        g_call_stack[g_call_depth].caller = on ? rd(api, cpu->esp) : 0;
+        g_call_stack[g_call_depth].ecx = cpu->ecx;
+        g_call_stack[g_call_depth].a0 = on ? rd(api, cpu->esp + 4) : 0;
+        g_call_stack[g_call_depth].a1 = on ? rd(api, cpu->esp + 8) : 0;
+        g_call_stack[g_call_depth].a2 = on ? rd(api, cpu->esp + 12) : 0;
+        g_call_stack[g_call_depth].rng = world ? rd(api, world + W_RNG) : 0;
+        if (on)
+            fprintf(g_out, "# call> %08x from %08x ecx %08x args %08x %08x %08x\n",
+                    g_call_stack[g_call_depth].fn, g_call_stack[g_call_depth].caller, cpu->ecx,
+                    g_call_stack[g_call_depth].a0, g_call_stack[g_call_depth].a1,
+                    g_call_stack[g_call_depth].a2);
+        if (on && g_call_depth == 0) {
+            /* A heuristic backtrace: the words on the stack that point into
+             * the EXE's code (return addresses, and some stale ones). */
+            fprintf(g_out, "# stack:");
+            for (uint32_t a = cpu->esp, n = 0; a < cpu->esp + 0x1000 && n < 40; a += 4) {
+                uint32_t w = rd(api, a);
+                if (w >= 0x00401000u && w < 0x00823000u) {
+                    fprintf(g_out, " %08x@+%x", w, a - cpu->esp);
+                    ++n;
+                }
+            }
+            fprintf(g_out, "\n");
+        }
+    }
+    ++g_call_depth;
+}
+
+static void after_trace_fn(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv,
+                           void *user) {
+    (void)inv;
+    (void)user;
+    if (!g_call_depth)
+        return;
+    --g_call_depth;
+    if (g_call_depth >= 64 || !g_call_stack[g_call_depth].caller)
+        return;
+    uint32_t world = rd(api, VA_WORLD_PTR);
+    fprintf(g_out, "# call< %08x eax %08x rng %08x -> %08x (PT %u)\n", g_call_stack[g_call_depth].fn,
+            cpu->eax, g_call_stack[g_call_depth].rng, world ? rd(api, world + W_RNG) : 0,
+            world ? rd(api, world + W_PT) + 1 : 0);
+}
+
+/* A computer player schedules its next strategy review (0x43dcf4, thiscall
+ * (uint now)): next = (int)(float)(now + [this+0xc5c] * 1000). */
+static _Thread_local uint32_t g_sched_now;
+
+static void before_ai_sched(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv,
+                            void *user) {
+    (void)inv;
+    (void)user;
+    g_sched_now = rd(api, cpu->esp + 4);
+}
+
+static void after_ai_sched(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv,
+                           void *user) {
+    (void)inv;
+    (void)user;
+    uint32_t world = rd(api, VA_WORLD_PTR);
+    fprintf(g_out, "# sched: PT %u player %u now %u interval %08x next %u\n",
+            world ? rd(api, world + W_PT) + 1 : 0, rd(api, cpu->ecx + 0x45c), g_sched_now,
+            rd(api, cpu->ecx + 0xc5c), rd(api, cpu->ecx + 0xedc));
+}
+
 PopModStatus pop_mod_init(const PopModApi *api) {
     const char *path = getenv("RECOMP_EE_CHECKSUM_TRACE");
     if (!path || !*path)
@@ -462,6 +574,22 @@ PopModStatus pop_mod_init(const PopModApi *api) {
             break;
         g_unit_pts[g_unit_npts++] = (uint32_t)v;
         p = *end == ',' ? end + 1 : end;
+    }
+    const char *mem = getenv("RECOMP_EE_CHECKSUM_MEM");
+    for (const char *p = mem; p && *p && g_nmem < MAX_MEM;) {
+        char *end = NULL;
+        uint32_t pt = (uint32_t)strtoul(p, &end, 0);
+        if (*end != ',')
+            break;
+        uint32_t at = (uint32_t)strtoul(end + 1, &end, 16);
+        if (*end != ',')
+            break;
+        uint32_t len = (uint32_t)strtoul(end + 1, &end, 0);
+        g_mem[g_nmem].pt = pt;
+        g_mem[g_nmem].ptr_at = at;
+        g_mem[g_nmem].len = len;
+        ++g_nmem;
+        p = *end == ';' ? end + 1 : end;
     }
     const char *seed = getenv("RECOMP_EE_SIMPARITY_SEED");
     if (seed && *seed) {
@@ -499,6 +627,12 @@ PopModStatus pop_mod_init(const PopModApi *api) {
         st = install(api, VA_CIV_SCREEN, before_civ_screen, POP_HOOK_BEFORE);
     if (st == POP_OK && lockstep)
         st = install(api, VA_CIV_SCREEN, after_civ_screen, POP_HOOK_AFTER);
+    const char *sched = getenv("RECOMP_EE_SIMPARITY_AI_SCHED");
+    if (st == POP_OK && sched && *sched && strcmp(sched, "0") != 0) {
+        st = install(api, 0x0043dcf4u, before_ai_sched, POP_HOOK_BEFORE);
+        if (st == POP_OK)
+            st = install(api, 0x0043dcf4u, after_ai_sched, POP_HOOK_AFTER);
+    }
     const char *draws = getenv("RECOMP_EE_CHECKSUM_DRAWS");
     if (st == POP_OK && draws && *draws) {
         char *end = NULL;
@@ -514,6 +648,24 @@ PopModStatus pop_mod_init(const PopModApi *api) {
                                           POP_HOOK_NO_GAME_VIEW, fn, &id);
         }
         fprintf(g_out, "# draws: R rows for PTs %u-%u\n", g_draws_from, g_draws_to);
+        const char *fns = getenv("RECOMP_EE_CHECKSUM_TRACE_FNS");
+        for (const char *p = fns; st == POP_OK && p && *p;) {
+            char *end = NULL;
+            uint32_t addr = (uint32_t)strtoul(p, &end, 16);
+            if (end == p)
+                break;
+            uint32_t id = 0;
+            void *fn = (void *)(uintptr_t)addr;
+            st = api->hook_install_ex(api, addr, 0, before_trace_fn, POP_HOOK_BEFORE,
+                                      POP_HOOK_NO_GAME_VIEW, fn, &id);
+            if (st == POP_OK)
+                st = api->hook_install_ex(api, addr, 0, after_trace_fn, POP_HOOK_AFTER,
+                                          POP_HOOK_NO_GAME_VIEW, fn, &id);
+            if (st != POP_OK)
+                fprintf(g_out, "# trace: cannot hook %08x (%d)\n", addr, (int)st);
+            st = POP_OK; /* a diagnostic: never fatal */
+            p = *end == ',' ? end + 1 : end;
+        }
     }
     if (st != POP_OK) {
         fprintf(g_out, "# hook install failed: %d\n", (int)st);

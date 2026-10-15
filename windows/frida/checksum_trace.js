@@ -46,6 +46,10 @@
 //   max_pt=<n>          stop writing rows after PT n
 //   draws=<a>-<b>       R rows for PTs a..b: every call of an EXE function that calls URandom, with
 //                       its caller and the world RNG around it
+//   mem=<pt>,<a>,<len>[;...]  after PT pt, "# mem" lines: len bytes of the object whose pointer is at
+//                       a (hex; 91837c = player 2 of the player table)
+//   ai_sched=<bool>     "# sched" lines: every time a computer player schedules its next strategy
+//                       review (EXE 0x43dcf4)
 //   lockstep=<bool>     the server builds a CT (EEServer vtable +0x28, EXE 0x4c3703, called from
 //                       SendCommunicationsTick on its send thread) only once the simulation has started every CT sent so far and run
 //                       all their PTs (waits at most 3 s), so a message the simulation sends during
@@ -102,6 +106,20 @@ emit('# ee-simparity/1 windows flags2=0x' + flags2.toString(16) + ' seed=' + (ha
      ((P.lockstep === true || P.lockstep === 'true' || P.lockstep === 1) ? 1 : 0) + ' no_civ_timer=' +
      ((P.no_civ_timer === true || P.no_civ_timer === 'true' || P.no_civ_timer === 1) ? 1 : 0));
 
+const memDumps = String(P.mem || '').split(';').filter((x) => x.length).map((x) => {
+  const [pt, at, len] = x.split(',');
+  return { pt: Number(pt), at: ptr('0x' + at), len: Number(len) };
+});
+function writeMem(m, pt) {
+  const base = m.at.readPointer();
+  for (let off = 0; !base.isNull() && off < m.len; off += 32) {
+    const words = [];
+    for (let w = 0; w < 32 && off + w < m.len; w += 4) words.push(h8(base.add(off + w).readU32()));
+    emit('# mem ' + pt + ' ' + h8(m.at.toUInt32()) + '+' + off.toString(16).padStart(4, '0') + ': ' +
+         words.join(' '));
+  }
+}
+
 function nextUnit(u) {
   const link = u.add(8).readPointer();
   return link.isNull() ? NULL : link.readPointer();
@@ -151,6 +169,7 @@ Interceptor.attach(at(0x546c63), {
     const cs2 = flags2 === 1 ? cs : models ? worldChecksum(world, 0, flags2) >>> 0 : 0;
     emit(['T', pt, ct, h8(cs), h8(cs2), h8(world.add(W_RNG).readU32()), VA_INPUTS.readU32(), units].join(','));
     if ((unitsEvery && pt % unitsEvery === 0) || unitPts.has(pt)) writeUnits(pt);
+    for (const m of memDumps) if (m.pt === pt) writeMem(m, pt);
     if (pt === oosdump) {
       worldChecksum(world, 1, 1);
       emit('# OOS dump written after PT ' + pt + " (the game's OOS *.log)");
@@ -230,6 +249,18 @@ if (lockstep) Interceptor.attach(at(0x4c3703), {
       }
       Thread.sleep(0.001);
     }
+  },
+});
+
+// A computer player schedules its next strategy review (0x43dcf4, thiscall (uint now)):
+// next = (int)(float)(now + [this+0xc5c] * 1000).
+if (P.ai_sched === true || P.ai_sched === 'true' || P.ai_sched === 1) Interceptor.attach(at(0x43dcf4), {
+  onEnter() { this.self = this.context.ecx; this.now = this.context.esp.add(4).readU32(); },
+  onLeave() {
+    const world = VA_WORLD_PTR.readPointer();
+    emit('# sched: PT ' + (world.isNull() ? 0 : world.add(W_PT).readU32() + 1) + ' player ' +
+         this.self.add(0x45c).readU32() + ' now ' + this.now + ' interval ' + h8(this.self.add(0xc5c).readU32()) +
+         ' next ' + this.self.add(0xedc).readU32());
   },
 });
 
