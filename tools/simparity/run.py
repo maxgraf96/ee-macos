@@ -2,7 +2,7 @@
 """Run the single-player checksum-stream scenario on the Mac (P4-C).
 
     .venv/bin/python tools/simparity/run.py [--runs N] [--minutes M] [--seed S]
-        [--ptps P] [--autosave-ms MS] [--reports] [--units PT,PT...] [--units-every N]
+        [--ptps P] [--autosave-ms MS] [--reg [SUBKEY\\]NAME=N] [--reports] [--units PT,PT...] [--units-every N]
         [--oosdump PT] [--max-pt N] [--draws A-B] [--trace-fns F,..] [--mem PT,A,L;..]
         [--players N] [--calls F,..] [--memfn F,L;..] [--ai-sched]
         [--lockstep] [--no-civ-timer] [--against STREAM] [--out DIR]
@@ -52,13 +52,20 @@ SAVE_TO_FILE = "00540aca"  # writes a save game; 0 = done (simparity.md §8)
 START_SECONDS = 600
 
 
-def pin_registry(user, ptps, autosave_ms=None):
+def pin_registry(user, ptps, autosave_ms=None, extra=()):
+    """The PT rate pinned, and the other values asked for: NAME=DWORD under the game's key,
+    or SUBKEY\\NAME=DWORD (e.g. 'Game Options\\Difficulty Level=0')."""
     reg_path = user / "registry.json"
     reg = json.loads(reg_path.read_text())
     for name in ("Min PTs per Second", "Max PTs per Second"):
         reg[HKCU][name] = {"type": seed_user.REG_DWORD, "data": ptps}
     if autosave_ms is not None:
         reg[HKCU]["AutoSave In Milliseconds"] = {"type": seed_user.REG_DWORD, "data": autosave_ms}
+    for item in extra:
+        path, _, value = item.partition("=")
+        sub, _, name = path.rpartition("\\")
+        key = HKCU + ("\\" + sub if sub else "")
+        reg.setdefault(key, {})[name] = {"type": seed_user.REG_DWORD, "data": int(value, 0)}
     reg_path.write_text(json.dumps(reg, indent=1))
 
 
@@ -88,7 +95,7 @@ def run_one(k, args, out):
     frames.mkdir(parents=True)
     try:
         seed_user.main(["--user", str(user), "--width", "800", "--height", "600"])
-        pin_registry(user, args.ptps, args.autosave_ms)
+        pin_registry(user, args.ptps, args.autosave_ms, args.reg)
         script = scenario(args.minutes, tmp, args.no_civ_timer)
         seconds = int(START_SECONDS + args.minutes * 60)
         # The mod is copied per run, so a rebuild cannot touch a running game's plugin.
@@ -151,6 +158,11 @@ def run_one(k, args, out):
         for c in saves:
             if c["eax"] != "00000000":
                 problems.append("the save at PT %d failed (0x540aca returned %s)" % (c["pt"], c["eax"]))
+        if stream and stream.ticks and args.autosave_ms and "540aca" in (args.calls or ""):
+            # The host counts ms per PT (1000 / PT rate) towards the interval.
+            due = max(stream.ticks) * 1000 // args.ptps // args.autosave_ms
+            if len(saves) < due - 1:
+                problems.append("%d saves, %d autosaves due" % (len(saves), due))
         files = [f for f in user.rglob("*") if f.is_file() and f.parent.name.lower() == "saved games"]
         if saves or files:
             print("run %d: %d saves, %d files in Saved Games" % (k, len(saves), len(files)), flush=True)
@@ -161,6 +173,18 @@ def run_one(k, args, out):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def save_timing(a, b):
+    """In single player the save message lands in whichever CT the server builds after the
+    simulation thread queued it, which is thread timing (simparity.md §9.3): the PTs of the
+    first save that landed at different PTs in the two streams, or None."""
+    sa = [c["pt"] for c in a.calls if c["fn"] == SAVE_TO_FILE]
+    sb = [c["pt"] for c in b.calls if c["fn"] == SAVE_TO_FILE]
+    for x, y in zip(sa, sb):
+        if x != y:
+            return x, y
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--runs", type=int, default=2)
@@ -169,6 +193,9 @@ def main():
     parser.add_argument("--ptps", type=int, default=40, help="PTs per second, pinned (registry)")
     parser.add_argument("--autosave-ms", type=int, default=None, metavar="MS",
                         help="the registry's AutoSave In Milliseconds (seed_user's: 600000; 0 = off)")
+    parser.add_argument("--reg", action="append", default=[], metavar="[SUBKEY\\]NAME=N",
+                        help="a DWORD under the game's registry key, e.g. "
+                             "'Game Options\\Difficulty Level=0' (repeatable)")
     parser.add_argument("--reports", action="store_true",
                         help="keep the wall-clock statistics reports (EXE 0x547365)")
     parser.add_argument("--lockstep", action="store_true",
@@ -215,25 +242,28 @@ def main():
     if failed:
         return 2
     same = True
-    if len(traces) >= 2:
-        for other in traces[1:]:
-            report = compare.compare(compare.load(traces[0]), compare.load(other))
-            print("%s vs %s: %s" % (traces[0].name, other.name, report["summary"]))
-            same &= report["agree"]
+    pairs = [(traces[0], other) for other in traces[1:]] + \
+        [(trace, ref) for ref in args.against if ref.is_file() for trace in traces]
     for ref in args.against:
         if not ref.is_file():
             print("%s: not here; skipped" % ref)
-            continue
-        for trace in traces:
-            report = compare.compare(compare.load(trace), compare.load(ref))
-            hidden = []
-            for key, what in (("players", "players"), ("calls", "calls")):
-                first = (report.get(key) or {}).get("first_difference")
-                if first:
-                    hidden.append("%s differ at PT %d" % (what, first["pt"]))
-            print("%s vs %s: %s%s" % (trace.name, ref, report["summary"],
-                                      "; " + ", ".join(hidden) if hidden else ""))
-            same &= report["agree"] and not hidden
+    for x, y in pairs:
+        a, b = compare.load(x), compare.load(y)
+        report = compare.compare(a, b)
+        timing = save_timing(a, b)
+        if timing and not report["agree"] and min(timing) >= report.get("first_pt", 0):
+            timing = None  # the streams differ before the saves did
+        hidden = []
+        for key in ("players", "calls"):
+            first = (report.get(key) or {}).get("first_difference")
+            if first and not (timing and first["pt"] >= min(timing)):
+                hidden.append("%s differ at PT %d" % (key, first["pt"]))
+        note = "; " + ", ".join(hidden) if hidden else ""
+        if timing:
+            note += ("; a save landed at PT %d / %d (thread timing, simparity.md §9.3), %s"
+                     % (timing + ("nothing differs after it" if report["agree"] else "the rest follows",)))
+        print("%s vs %s: %s%s" % (x.name, y, report["summary"], note), flush=True)
+        same &= (report["agree"] or bool(timing)) and not hidden
     return 0 if same else 1
 
 

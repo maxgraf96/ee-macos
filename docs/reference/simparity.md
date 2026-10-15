@@ -1,6 +1,6 @@
 # Single-player simulation parity: the checksum-stream oracle (P4-C)
 
-Status: Phase 4, workstream P4-C, 2026-10-15. Static RE done; the Mac tracer, its Windows twin, the scenario and the comparison tool work; Mac↔Mac, Windows↔Windows and Mac↔Windows results in §7; the first simulation difference (PT 24301) is narrowed to the computer player's hidden state, open in §8. Owner: P4-C (simparity).
+Status: Phase 4, workstreams P4-C (the oracle) and P4-D (the divergence), 2026-10-15. Static RE done; the Mac tracer, its Windows twin, the scenario and the comparison tool work; Mac↔Mac, Windows↔Windows and Mac↔Windows results in §7. **The first simulation difference (PT 24301) was the autosave**: on the Mac the save failed, so it skipped a side effect the save has on the computer player's schedule (§9; fixed in the kit). Owners: P4-C (simparity), P4-D (ai-divergence).
 Code:
 - [`mods/simparity/simparity.c`](../../mods/simparity/simparity.c): the Mac tracer, a kit mod plugin (public `pop_mod_api.h` only);
 - [`windows/frida/checksum_trace.js`](../../windows/frida/checksum_trace.js): its Windows twin (legion 0027);
@@ -27,6 +27,7 @@ Addresses are EXE VAs (fixed base 0x400000) or engine VAs (`Low-Level Engine.dll
 | **Time in the simulation** | Three paths, each fixable: the PT rate (PTs per second, hence the **step size**) is tuned from measured tick times; the statistics report fires on a wall-clock timer; and a message the simulation sends lands in whichever CT the server's timer thread emits next (§4) [static]. |
 | **The oracle** | The tracer calls 0x545ebf after every PT and writes `pt, ct, checksum, rng, inputs, objects`; per-object rows on request. Same rows on both platforms; `compare.py` finds the first PT that differs [measured]. |
 | **Results** | Each platform reproduces itself. **Mac = Windows for 24,300 PTs** (15 game minutes, 210 units) without the civilization timer: checksum, RNG, every unit's float position, the OOS dump. With lockstep the civilization pause and click match as well. The first real difference is at PT 24301: the Mac's computer player reviews its strategy and Windows' does not, on hidden AI state (§7, §8) [measured]. |
+| **The autosave** | Saving a game has a side effect on the simulation: the computer player's serializer (0x43ded9) clears its "review scheduled" flag (+0xef6), so at its next update it reschedules its strategy review 30 s later. The 10-minute autosave failed on the Mac (`CreateFileA` with no access, kit), the Mac's computer player kept its old schedule and reviewed at PT 24301 when Windows' did not. Fixed in the kit (`ee` 35912bd); the same mechanism caused the LAN out-of-sync of session 4E (§9) [measured]. |
 
 ## 2. The world checksum (0x545ebf)
 
@@ -118,11 +119,17 @@ A kit mod plugin, built with `ee_boot` into `build/recomp/ee-mods/simparity/` (`
 | `RECOMP_EE_CHECKSUM_TRACE=FILE` | the stream (§5.3) |
 | `RECOMP_EE_SIMPARITY_SEED=N` | force the game seed at 0x4bee57 (§4.2) |
 | `RECOMP_EE_SIMPARITY_NO_REPORTS=1` | skip the wall-clock statistics report (0x547365, a plain `RET`) |
-| `RECOMP_EE_SIMPARITY_LOCKSTEP=1` | the server builds a CT only once the simulation has run every PT it was sent (at most 60 s), so a message the simulation sends during CT n runs in CT n+1 (§4.3, §7) |
+| `RECOMP_EE_SIMPARITY_LOCKSTEP=1` | the server builds a CT only once the simulation has run every PT it was sent (at most 60 s), so a message the simulation sends during CT n runs in CT n+1 (§4.3, §7); **not with autosaves** (§9.3) |
 | `RECOMP_EE_SIMPARITY_NO_CIV_TIMER=1` | skip the civilization timer (0x54778a, a plain `RET`): no `EEMCivTimerExpired`, no "Choose Civilization" screen, no pause |
 | `RECOMP_EE_CHECKSUM_UNITS=PT,…` / `_UNITS_EVERY=N` | per-object rows after these PTs |
 | `RECOMP_EE_CHECKSUM_OOSDUMP=PT` | the game's own OOS dump after that PT |
 | `RECOMP_EE_CHECKSUM_FLAGS=N` / `_MAX_PT=N` | the second checksum column's flags (default 1); stop after PT N |
+| `RECOMP_EE_CHECKSUM_DRAWS=A-B` / `_TRACE_FNS=F,…` | `R` rows for PTs A..B (every call of a function that draws from the world RNG); `# call` lines for these functions in that window |
+| `RECOMP_EE_CHECKSUM_MEM=PT,A,L;…` | `# mem` lines after PT: L bytes of the object whose pointer is at A |
+| `RECOMP_EE_SIMPARITY_AI_SCHED=1` | `# sched` lines: a computer player schedules its next strategy review (0x43dcf4) |
+| `RECOMP_EE_SIMPARITY_PLAYERS=N` | `P` rows after every Nth PT: each player's 12 words at +0xaf0 (resources and counters, which no checksum covers) |
+| `RECOMP_EE_SIMPARITY_CALLS=F[/N],…` | `K` rows: every call of these functions at any PT, with N stack arguments (default 3, the rest 0), the player slot ECX is (or −1) and EAX |
+| `RECOMP_EE_SIMPARITY_MEMFN=F,L;…` | `# memfn` lines: L bytes of ECX's object on every entry of F |
 
 Hooks:
 - always: after 0x546c63 (a row per PT), before 0x4bee57 (the seed), before 0x683bc8 (messages to the server), before and after 0x545ebf (the game's own calls, `W` rows; the tracer's own calls are not counted);
@@ -143,14 +150,20 @@ S,pt,ct,type,slot                          a message handed to the server (type 
 U,pt,i,vtable,id,x,y,hp,cs,cs2             one object: vtable, id (+0x24), tile x/y (+0x1c/+0x20),
                                            hit points (+0x3c), its +0x4c(1)
 W,ct,pt,dump,flags,cs                      the game's own checksum call (multiplayer, once per CT)
+R,pt,fn,caller,rng_in,rng_out              a call of a function that draws from the world RNG (a window)
+P,pt,slot,w0,..,w11                        a player's 12 words at +0xaf0: resources and counters
+K,pt,fn,caller,self,a0,a1,a2,eax           a logged call: self = the player slot ECX is, or -1
 ```
+`compare.py` compares `P` rows from word 2: resources 0 and 1 are never written for the world (slot 0) and the human player (slot 1), so they hold heap garbage that differs between runs and machines (the Mac 0x81818181/0, Windows 0/random) [measured]. `K` rows are compared without a2 and EAX, which are often stack garbage or a void return.
 `#` lines are comments: the options, the PT-rate settings the server got, lockstep waits, the civilization screen's timeline.
 Pointers never appear in a row (heap addresses differ between platforms); the object id and vtable identify an object.
 
 ### 5.4 The scenario (`tests/menus/simparity.script`) and the runner
 - Main menu → Single Player → Play Random Map → Start Game with the setup screen's defaults (Continental, Small, one computer player, the standard speed: ×1.5, 37.5 game ms per PT at 40 PT/s), then nobody at the controls but for one click: 5 game minutes in (PT 8000) the civilization timer opens "Choose Civilization" with Ancient Greece preselected, which pauses a single-player game, and the script clicks OK (400, 520) once. `--minutes` counts from there. `# menus: manual`: the menu test skips it.
 - With `--no-civ-timer` the runner leaves the civilization block out of the script, and the game has no screen, no pause and no click.
-- `tools/simparity/run.py` (`tools/test.py --simparity`): a fresh user directory per run, `seed_user.py`'s registry (legion's options, 800×600) with **Min = Max PTs per Second = 40**, seed 1000, the reports skipped; `ee_boot` in strict mode under `tools/game_ports.py`'s lock; the mod copied per run (a rebuild cannot touch a running game); streams to `analysis/simparity/mac/` (ignored). With two runs or more it compares them.
+- `tools/simparity/run.py` (`tools/test.py --simparity`): a fresh user directory per run, `seed_user.py`'s registry (legion's options, 800×600) with **Min = Max PTs per Second = 40**, seed 1000, the reports skipped; `ee_boot` in strict mode under `tools/game_ports.py`'s lock; the mod copied per run (a rebuild cannot touch a running game); streams to `analysis/simparity/mac/` (ignored). With two runs or more it compares them. `--autosave-ms MS` sets the registry's `AutoSave In Milliseconds` (seed_user's 600000); `--against STREAM` compares every run with a stored stream, hidden rows included; when `K` rows of the save (0x540aca) are logged, a run fails if a save returned non-zero or fewer saves happened than were due.
+- Two streams whose saves landed at different PTs (§9.3) are reported as such, and a difference that follows such a save is not counted against them.
+- `tools/test.py --simparity` without options: two 3-minute games, no civilization timer, an autosave every minute (`P` and `K` rows on), compared with each other and with legion's `win-as-1` when `analysis/simparity/win/win-as-1/stream.csv` is here.
 - `tools/simparity/compare.py A B`: the first PT whose row differs and which fields, rows around it, the CT schedule's first difference, the message types sent up to there, and the objects that differ at the latest common per-object snapshot (matched by vtable and id). `tests/test_simparity.py` checks it on synthetic streams, and that both tracers and the comparer declare the same rows.
 
 ## 6. The Windows side (legion)
@@ -160,6 +173,9 @@ Pointers never appear in a row (heap addresses differ between platforms); the ob
 | 0030 → 0033 | `win-ok-1`, `win-ok-2`: the same, then OK once on the civilization screen, 10 minutes more (to PT 24187/24183) | the same |
 | 0034 | `win-nc-1`, `win-nc-2`: no civilization timer, 12 minutes (to PT 28863/28851); `win-ls-1`: the OK variant with lockstep (to PT 32163) | the same |
 | 0035 + 0036 | `win-ph-1`, `win-ph-2`: no civilization timer, `flags2=3`, per-object rows around PT 24301, the OOS dump at PT 24300, `R` rows for PTs 24290–24305 | the same |
+| 0045 | `win-ai-1`: as `win-ph`, with `P` rows every PT, `K` rows of the computer player's resource adds, the computer player on every review entry (`memfn`), `# sched`, `# call` lines in PT 24301 | the same |
+| 0046 | `win-as-1`: an autosave every minute (registry 60000), 5 minutes; `win-long-1`: the default autosave, 25 minutes; both with `P` rows every 10 PTs and `K` rows of the schedule, the review, the AI's serializer and the save | the same |
+| 0047 + 0049 | `win-long-2`: as `win-long-1` with the easiest computer player (`Difficulty Level` and `Computer Player Difficulty Level` 0), so the idle player lives past the second autosave; the lockstep runs of 0047 were dropped (§9.3) | the same |
 
 Streams are fetched to `analysis/simparity/win/` (ignored) with `scp`. Legion's Frida run writes CRLF line ends, which `compare.py` ignores.
 
@@ -207,11 +223,48 @@ With the PT rate pinned, the seed forced and the wall-clock report skipped, each
 - **The Mac's draw trace** (`R` rows) puts the 75 extra draws in one place: 75 calls of `RTSPhysics::RandomInt` (0x5531c2, an integer from the world RNG) from 0x42f2cc, `random index below n`, the generator of the game's three `std::random_shuffle` instantiations (0x42f275, 0x47956d, 0x44e16e; element sizes 8, 4, 8). So in PT 24301 the Mac shuffles a 76-element sequence that Windows does not shuffle, or shuffles with one element at most.
 - **No float drifted before it:** in `win-ph-1` and the Mac's run with the physics column (`flags2=3`: every unit's model, i.e. float position bits, update count and target), the second checksum agrees through PT 24300, and every object still agrees at PT 24301 (212 objects, both columns). Only the world RNG differs at the end of PT 24301.
 - **Both draw traces** (`R` rows, PTs 24290–24305) are identical but for one insertion. In PT 24301, after the same two float draws, the Mac runs seven `random_shuffle`s (75 draws) before the AI's draws at 0x46370e (`EECPAttackSubGroupUnit` vtable slot 8), which both platforms then make with the same values shifted. The Mac's call trace names them: one from 0x42f912 (a computer player's strategy review: it lists candidate strategies from conditions and shuffles them), then six from 0x4874f6.
-- **Why the Mac reviews and Windows does not:** the computer player's update (0x43f91a, every PT, `now` = game ms) calls the review only when `now >= this[0xedc]`, the time scheduled at the previous review by 0x43dcf4: `next = (int)(float)(now + this[0xc5c] * 1000)` (an `FIADD`, an `FSTP m32` and a nearest-even `FISTP`, all exact in the kit's x87 model). So the scheduled time or its inputs (the review interval at +0xc5c, which comes from a global table at 0x8d0990, or the time of the previous review) differ, and none of those is in any checksum. Where they first differ is the next step (§8).
+- **Why the Mac reviews and Windows does not:** the computer player's update (0x43f91a, every PT, `now` = game ms) calls the review only when `now >= this[0xedc]`, the time scheduled at the previous review by 0x43dcf4: `next = (int)(float)(now + this[0xc5c] * 1000)` (an `FIADD`, an `FSTP m32` and a nearest-even `FISTP`, all exact in the kit's x87 model). So the scheduled time or its inputs (the review interval at +0xc5c, which comes from a global table at 0x8d0990, or the time of the previous review) differ, and none of those is in any checksum. **Found (P4-D, §9):** Windows rescheduled at PT 24031 after the autosave; the Mac's save had failed.
 
 ## 8. Open items
-1. **PT 24301** (§7.6): find which part of the computer player's bookkeeping differs. The plan is the same dump on both platforms: `RECOMP_EE_CHECKSUM_MEM` / `mem` of the computer player (pointer at 0x91837c) after PTs 23490, 23491, 24300 and 24301, the review schedule (`AI_SCHED` / `ai_sched`), and call traces of the review (0x42f912 and its shuffle 0x440311) and the attack-group shuffles (0x4874f6). Legion request 0037 is drafted, to be sent after 0040.
+1. ~~**PT 24301**~~: the autosave (§9). Fixed in the kit; proof in §9.4.
 2. **The x87 stack.** The kit's `fpush` does not model a push onto a full stack: x87 with invalid masked loads the real indefinite (a NaN) and sets C1/IE, while the kit keeps the value. The tracer now logs any PT after which the x87 stack is not empty (`# fpu:`). A leak would make that difference reachable.
 3. **The civilization pause without lockstep** (§7.5) lands on different PTs on the two platforms; with lockstep on both it lands on the same one. A deterministic pause needs either lockstep on every machine, or holding the UI's `PauseGame` (0x662f64) until the simulation has finished its CT; the latter deadlocks if the UI holds the world lock.
 4. **Coverage:** one map (Continental, Small), one computer player, standard speed, about 15 game minutes. Next: more players, other scripts and epochs, a faster speed, and the LAN path, where the CT stream is the host's and the `W` rows carry every machine's per-CT checksum (P5-E).
-5. **A regression test.** `tools/test.py --simparity` (by default two 3-minute Mac games without the civilization timer, about 10 minutes in all) checks the Mac's own determinism. A Mac-vs-Windows check needs a stored Windows stream, which is game state and stays out of git; it could run from `analysis/simparity/win/` when present.
+5. **A regression test.** `tools/test.py --simparity` now plays two 3-minute Mac games with an autosave every minute: every save must succeed, and they must agree with each other and, with legion's `win-as-1` stream present, with Windows, up to a save that landed in a different CT (§5.4, §9.3). The stream is game state and stays out of git.
+6. **Saving changes the simulation.** Besides the review flag (§9.1), each save shifts the computer player's update phase by a few PTs (§9.3). That is the game's behaviour on every machine, harmless while every machine saves at the same PT, which the host's CT stream guarantees in multiplayer. A machine whose save fails, or a mod that saves on its own, goes out of sync.
+
+## 9. The autosave: the cause of PT 24301 and of the LAN out-of-sync (P4-D)
+
+### 9.1 The mechanism [static, measured]
+1. **The trigger, host only.** At the end of each PT (0x546c63) the host (`comm->vfunc+0x10() == 1`) adds the timer's ms per PT (`EEPhysics+0x54`, 25 ms at the oracle's 40 PT/s) to `EEPhysics+0xcc`. Once that passes `AutoSave In Milliseconds` (`[0x91943c]`, 600000 by default), it resets the counter and **0x547676** posts the simulation's own thread the message 0x50a (`TSThread::Post`). At 40 PT/s that is after PT 24000, 48000, … [static; measured: PT 2401 with a 60000-ms interval].
+2. **The message.** The simulation thread handles 0x50a after its PTs (`RTSPhysics::Main` → 0x546b26 → **0x545b79**). That function names the save `AutoSave <date> - <time>` and queues an `EEMLoadOrSaveGame` (vtable 0x8293a0) with `NESynchronousServer::SendToAllAndWait`, which only appends it to the server's list (engine 0x10054e7c). The next CT carries it to every machine [static].
+3. **The save, on every machine.** `EEMLoadOrSaveGame`'s execute (0x4b876d) queues itself on `EEPhysics+0x70` (0x546f57). At the CT's last PT (`+0xb8 == 0`), 0x5478bb saves (0x4b890f → **0x540aca**). 0x540aca opens `data\Saved Games\AutoSave ….ees` (0x540b4a: `CreateFileA(name, 0, 0, NULL, CREATE_NEW, …)`, then the write) and serializes the world (0x540da3), every player included [static; measured with `K` rows].
+4. **The side effect.** `EEComputerPlayer`'s serializer, **0x43ded9**, clears the live object's "review scheduled" flag (`+0xef6 = 0`) before writing it (so that a loaded game reschedules). At the player's next update, 0x43f91a sees the flag clear and calls 0x43dcf4(now): `next review = now + 30 s` (`+0xc5c` = 30.0). So **every successful save moves the computer player's next strategy review** to 30 s after the save [static; measured].
+5. **On the Mac the save failed.** The kit treated `CreateFileA` with access 0 as a read and returned `INVALID_HANDLE_VALUE` for a file that did not exist yet, so 0x540b4a returned 1 and 0x540aca never serialized anything. The game showed "Error Creating File" (lansession.md §9.2 item 4). The computer player's flag stayed set, so its review stayed where it was [measured: `as2`, `K` rows: 0x540b4a → 1, no 0x540da3, no 0x43ded9].
+
+So in the oracle's game:
+- Windows saved at the end of a CT near PT 24010 (`win-long-1`: after PT 24010) and rescheduled at PT 24031 (`now` 901162 → next 931162, i.e. PT 24841);
+- the Mac kept the review due at 910912 and ran it at PT 24301.
+
+The review's `random_shuffle`s are the 75 extra draws of §7.6. Nothing else differed: `P` rows (all players' resources), `K` rows (every resource deposit) and the computer player's object at every review (`memfn`, compared as a value bijection to ignore pointers) agree through PT 24300 [measured, `win-ai-1` vs `mac/ai1`].
+
+### 9.2 The fix
+- **Kit** `ee` 35912bd (P5-F's f4f711c, `runtime/kernel32.cpp`): `CREATE_NEW`, `CREATE_ALWAYS` and `TRUNCATE_EXISTING` create or truncate whatever the access asked for, as on Windows. `loader_tests` covers it.
+- **ee-macos:** `run.py` fails a run whose save returned non-zero, or that saved fewer times than were due, and `tools/test.py --simparity` saves every minute (§5.4). The game's own behaviour (a save that touches the simulation) is left as it is: Windows peers do the same.
+
+### 9.3 Where a save lands in single player [measured]
+- In single player the save message lands in whichever CT the server builds after the simulation thread has queued it. Whether the server's send thread or the simulation thread gets there first is thread timing, as for the messages of §4.3.
+- `win-as-1` against the Mac's `as3` (an autosave every minute, no lockstep): the first save landed at the same CT (after PT 2422) on both, and both rescheduled at PT 2431. The second landed one CT earlier on Windows (after PT 4802) than on the Mac (after 4816); the computer players then rescheduled at 4807 and 4834, and the streams differ from PT 5617.
+- Each save also moves the computer player's update phase. Its next update came 4–26 PTs after the save, depending on the save's PT, not every 10 PTs from PT 1. The rule is the same on both platforms for the same save PT.
+- **In multiplayer this cannot differ:** only the host decides, and its CT stream carries the message to every machine.
+- **Lockstep does not help, and hangs.** A gate that also waited for the posted save to be queued hung the Mac's game for good at the first autosave (PT 2403; the gate gave up after 60 s and the simulation never resumed) [measured]. The gate runs inside the server's `SendCommunicationsTick`, and `SendToAllAndWait` needs the server's critical section (engine 0x10054e7c), so the save cannot be queued while the gate waits [static]. The simulation thread never got going again after the gate gave up, so a second lock is involved, presumably the world's. The gate was removed. Plain lockstep likely has the same exposure whenever the simulation thread handles the save while PTs of its CT are left [inferred], so the autosave runs here are without lockstep.
+- So in single player a difference that follows a save which landed at different PTs is timing, and `run.py` reports it as such (§5.4). A save that lands in a different CT changes nothing when the computer player's next update is the same PT, as at the first autosave of `long1`/`win-long-1` below.
+
+### 9.4 Proof
+All [measured], seed 1000, no civilization timer, 40 PT/s, Mac kit `ee` 35912bd:
+
+| Comparison | Common PTs | Result |
+|---|---|---|
+| Mac `long1` (the default autosave) vs `win-long-1` | **29,827** (18.6 game minutes, to the end of the game: the idle human player is defeated at PT 29,827 on both) | **identical**: checksum, world RNG, objects, executed inputs, every player's resources (`P` rows, every 10 PTs). The autosave serialized the computer player on both and both rescheduled at PT 24031 with the same times. The save itself landed one CT apart (after PT 24024 on the Mac, 24010 on Windows; §9.3), which this time did not reach the simulation |
+| the same Mac run vs `win-nc-1`, `win-nc-2`, `win-ph-1`, `win-ph-2`, `win-ai-1` (P4-C's and 0045's streams) | 26,431–28,863 | **identical** over each stream's whole length, PT 24301 included |
+| Mac `as3` vs `win-as-1` (an autosave every minute, no lockstep) | 11,183 | the first save at the same PT on both, and identical to PT 5616; then the second save landed one CT apart and the streams differ from PT 5617 (§9.3) |
