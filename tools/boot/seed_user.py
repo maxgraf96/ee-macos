@@ -2,7 +2,8 @@
 """Seed the player's data directory for the native build: the emulated registry.
 
     .venv/bin/python tools/boot/seed_user.py [--user DIR] [--gog-script FILE]
-                                             [--width W --height H] [--player-name NAME] [--reset]
+                                             [--width W --height H] [--player-name NAME]
+                                             [--bit-depth 16|32] [--reset]
 
 Writes <user>/registry.json (the kit's registry store, runtime/misc.cpp), the
 values a GOG install of the base game leaves on Windows:
@@ -17,6 +18,10 @@ values a GOG install of the base game leaves on Windows:
   install script (goggame-1207658777.script), base game only. The CD key is
   the player's; it is written only into their registry file and never
   printed. A 32-bit program sees HKLM\\Software, so there is no WOW6432Node.
+
+--bit-depth sets Game Bit Depth and Texture Bit Depth (legion's 32 by
+default), replacing what the registry had: GOG's installer defaults are 16
+(docs/reference/legion.md §3).
 
 An existing registry is merged, never overwritten: the game saves its options
 there on exit. --reset starts again from the defaults.
@@ -162,6 +167,8 @@ def main(argv=None):
     # default name EE asks for a civilization at the start of a random map,
     # with legion's it does not (docs/reference/parity.md §3).
     parser.add_argument("--player-name", default="Max the Conqueror")
+    parser.add_argument("--bit-depth", type=int, choices=(16, 32), default=None,
+                        help="Game Bit Depth and Texture Bit Depth (default: legion's 32)")
     parser.add_argument("--reset", action="store_true", help="discard the existing registry")
     args = parser.parse_args(argv)
 
@@ -175,6 +182,9 @@ def main(argv=None):
     if path.is_file() and not args.reset:
         existing = json.loads(path.read_text())
     added = merge(existing, seed)
+    if args.bit_depth:
+        for name in ("Game Bit Depth", "Texture Bit Depth"):
+            existing[HKCU_SSSI][name] = value(args.bit_depth)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n")
     os.replace(tmp, path)

@@ -15,7 +15,10 @@ the main menu with a fresh user directory and must
 
 A script's `# menus: alone` line runs it on its own (it opens the game's
 server), `# menus: env NAME=VALUE` lines set its environment, and a
-`# menus: seed ARGS` line passes ARGS to tools/boot/seed_user.py.
+`# menus: seed ARGS` line passes ARGS to tools/boot/seed_user.py. Two lines
+check its frames: `# menus: mode WxHxB` (the game set that display mode) and
+`# menus: same A B` (dumps A and B show the same picture apart from the
+pointer, which may land a pixel or two from where it was: no cursor trail).
 
     .venv/bin/python tests/menus/run_menus.py [--kit DIR] [--no-build] [--jobs N]
                                               [SCENARIO ...]
@@ -45,6 +48,24 @@ OUT = ROOT / "build/menus"
 # sockets were, until the kit's Winsock.)
 KNOWN_UNIMPLEMENTED = set()
 SECONDS = {"random-map": 420}
+
+
+def same_picture(a, b, pointer=48, tolerance=24):
+    """None when frames a and b agree except inside one pointer-sized box (the
+    cursor itself, a pixel or two apart); otherwise what differs."""
+    import numpy as np
+    from PIL import Image
+    x = np.asarray(Image.open(a).convert("RGB"), dtype=np.int16)
+    y = np.asarray(Image.open(b).convert("RGB"), dtype=np.int16)
+    if x.shape != y.shape:
+        return "sizes %s and %s" % (x.shape[1::-1], y.shape[1::-1])
+    ys, xs = np.nonzero(np.abs(x - y).max(axis=2) > tolerance)
+    if not len(xs):
+        return None
+    box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    if box[2] - box[0] <= pointer and box[3] - box[1] <= pointer:
+        return None
+    return "%d pixels in %s" % (len(xs), box)
 
 
 def run(name, script, seconds, keep_user):
@@ -108,6 +129,15 @@ def run(name, script, seconds, keep_user):
         if forced and not re.search(r"^\[ee\] random map: seed \d+ forced to %s$" % forced.group(1),
                                     out, re.M):
             problems.append("the map was not generated from seed %s" % forced.group(1))
+        text = script.read_text()
+        for mode in re.findall(r"^# menus: mode (\d+x\d+x\d+)", text, re.M):
+            if "Video mode changed to %s " % mode not in out:
+                problems.append("the game never set %s" % mode)
+        for a, b in re.findall(r"^# menus: same (\S+) (\S+)", text, re.M):
+            if a in written and b in written:
+                differs = same_picture(out_dir / ("%s.png" % a), out_dir / ("%s.png" % b))
+                if differs:
+                    problems.append("%s and %s differ outside the pointer: %s" % (a, b, differs))
         if name == "random-map":
             game = [d for d in dumps if d[0].startswith("in-game")]
             if not game or any((w, h) != ("800", "600") for _, w, h, _, _ in game):

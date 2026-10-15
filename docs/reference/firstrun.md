@@ -192,6 +192,11 @@ How the runtime maps the folders [static, kit `runtime/layout.cpp`, `host/game_p
 `registry.json` is seeded with `tools/boot/seed_user.py`'s defaults and merged, so the game's own saved options win.
 - **Player name.** "Player Name" is the macOS account's first name, not legion's "Max the Conqueror"; `--player-name` overrides it.
 - **Resolution.** `--width`/`--height` default to 1920×1080, as `seed_user.py` does.
+- **Bit depth.** `Game Bit Depth` and `Texture Bit Depth` are seeded 32, legion's (`seed_user.py --bit-depth` sets either). Where a 16 comes from [measured, P3-G, headless]:
+  - **EE's own defaults.** Started with no registry, EE writes 16/16, 800×600, `Direct3D` and the player name "Unknown" on exit. GOG's script writes only HKLM, and the importer takes nothing else from it, from `goglog.ini` or from a Wine prefix.
+  - **A mode the display list lacks.** When the registry's Width × Height × depth is not enumerated, EE runs the movies, the menus and the game at 800×600×16 and saves Game Bit Depth 16 and 800×600 (Texture Bit Depth stays): seeded 1920×1080×32 with `RECOMP_D3D7_MODES` limited to 1152×864, the old headless list. The app offers every size up to 2560×1600 in both depths (the desktop host records no screen size), so the seeded 1920×1080×32 is always there.
+  - **The merge keeps it.** The game's values win, so a profile that an earlier unseeded or headless run wrote keeps 16 bpp through an import. That is how the developer's profile ran at 16 bpp (2026-10-15: player name "Unknown144", 800×600×16; until P3-F, headless runs wrote the default profile's registry). A friend's first import starts with no registry and gets 32.
+  - **16 bpp works** since kit `feat/cursor16`: the menu's cursor trail was the DD7 `Flip`, not the depth (graphics.md §11.6), and it showed at 32 bpp too.
 - **The HKLM values,** with the CD key, come from the first of:
   1. `goggame-1207658777.script` (seed_user's own parser);
   2. `goglog.ini`, the installer's own record of the registry it wrote (section `[1207658777]`, `RootKey_i`/`SubKey_i`/`ValueName_i`/`ValueType_i`/`ValueData_i`);
