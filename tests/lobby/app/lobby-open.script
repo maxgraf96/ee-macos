@@ -1,0 +1,42 @@
+# The windowed app on Metal (RECOMP_INPUT_SCRIPT; not part of --lobby, which
+# is headless): Escape through the intro movies, the main menu, Multiplayer ->
+# the WON page -> Other Multiplayer -> the LAN page -> Logout -> Back -> the
+# main menu, then quit. The lobby is composed over the menu's last frame by
+# the presenter (one BGRA overlay texture); the script's frames are the
+# Direct3D 7 tap's with the overlay over them. See ../lobby-open.script for
+# the two pointers.
+timeout 300000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+key ESCAPE
+wait 2500
+key ESCAPE
+wait 2500
+key ESCAPE
+wait size 1024 768 within 180000
+wait 3000
+moveby 1 1
+wait 300
+dump app-main-menu
+
+click 511 371                 # Multiplayer
+wait change within 30000
+wait 2000
+dump app-lobby
+
+pointer system
+click 618 644                 # Other Multiplayer
+wait change within 20000
+wait 2000
+dump app-lan
+wait 5000                     # time for a screenshot of the window, if wanted
+click 937 733                 # Logout
+wait change within 20000
+wait 1500
+click 781 644                 # Back
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+wait change within 30000
+wait 1500
+dump app-main-menu-again
+quit

@@ -3,7 +3,7 @@
 //
 //   ee_boot [--game DIR] [--user DIR] [--seconds S] [--trace FILE] [--no-strict]
 //           [--play-movies] [--frames DIR [--frame-every N]]
-//           [--script FILE [--script-out DIR]]
+//           [--script FILE [--script-out DIR]] [--lan-pcap FILE]
 //
 // The boot itself is the kit's (host/boot.cpp): mem_init, the loader (the
 // executable plus every [modules.aux.*] DLL at its base-map address), the
@@ -33,6 +33,10 @@
 //     player takes through the menus, delivered through the kit's input state
 //     and message queue as the windowed host delivers a real device's events,
 //     with frame dumps as PNG. tests/menus/ holds the scenarios.
+//   - --lan-pcap: every UDP datagram the game sends or receives through
+//     Winsock, as the game sees it (its own buffers, before the kit's sockets),
+//     written as a raw-IP pcap that tools/lan/eelan.py decodes - the LAN
+//     lobby's adverts on UDP 8585 without a packet capture's privileges.
 //   - A boot report: the milestones reached, the threads the game started and
 //     the x87 control word each ran at, and every import that was called with
 //     no implementation behind it. --trace writes every import call.
@@ -128,6 +132,99 @@ uint32_t g_render_tid = 0;
 double g_last_movie_close = -1;
 uint32_t g_menu_flips = 0, g_menu_peeks = 0;
 
+// --- --lan-pcap -------------------------------------------------------------------
+// The game's own UDP traffic as raw IPv4 (LINKTYPE_RAW). A socket's address is
+// what it was bound to (0.0.0.0 for INADDR_ANY); the IP and UDP checksums are
+// left 0 except the IP header's, which readers check.
+FILE *g_pcap = nullptr;
+std::map<uint32_t, std::pair<uint32_t, uint16_t>> g_bound; // socket -> (ip, port), network order
+struct PendingRecv {
+    uint32_t socket = 0, buf = 0, len = 0, from = 0;
+};
+std::map<uint32_t, PendingRecv> g_recv; // by guest thread: a recvfrom in flight
+
+void pcap_open(const char *path) {
+    if (!(g_pcap = fopen(path, "wb")))
+        return;
+    const uint32_t header[6] = {0xa1b2c3d4u, 0x00040002u, 0, 0, 65535, 101 /* LINKTYPE_RAW */};
+    fwrite(header, 1, sizeof header, g_pcap);
+    fflush(g_pcap);
+}
+// `src`/`dst` are a sockaddr_in's address and port words, in network order.
+void pcap_udp(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip, uint16_t dst_port,
+              const uint8_t *data, uint32_t len) {
+    if (!g_pcap || len > 65000)
+        return;
+    uint8_t h[28] = {0x45, 0};
+    const uint16_t total = uint16_t(28 + len);
+    h[2] = uint8_t(total >> 8);
+    h[3] = uint8_t(total);
+    h[8] = 64;
+    h[9] = 17; // UDP
+    memcpy(h + 12, &src_ip, 4);
+    memcpy(h + 16, &dst_ip, 4);
+    uint32_t sum = 0;
+    for (int i = 0; i < 20; i += 2)
+        sum += uint32_t(h[i]) << 8 | h[i + 1];
+    while (sum >> 16)
+        sum = (sum & 0xffff) + (sum >> 16);
+    h[10] = uint8_t(~sum >> 8);
+    h[11] = uint8_t(~sum);
+    memcpy(h + 20, &src_port, 2);
+    memcpy(h + 22, &dst_port, 2);
+    const uint16_t udp_len = uint16_t(8 + len);
+    h[24] = uint8_t(udp_len >> 8);
+    h[25] = uint8_t(udp_len);
+    const uint64_t ns = os_monotonic_ns(); // the run's own clock: only spacing matters
+    const uint32_t rec[4] = {uint32_t(ns / 1000000000u), uint32_t(ns / 1000u % 1000000u),
+                             28u + len, 28u + len};
+    fwrite(rec, 1, sizeof rec, g_pcap);
+    fwrite(h, 1, sizeof h, g_pcap);
+    fwrite(data, 1, len, g_pcap);
+    fflush(g_pcap);
+}
+void pcap_call(const char *name, const uint32_t *args, uint32_t argc, uint32_t tid) {
+    if (!strcmp(name, "bind") && argc >= 3 && gm_valid(args[1], 8)) {
+        uint16_t port;
+        uint32_t ip;
+        memcpy(&port, g_mem + args[1] + 2, 2);
+        memcpy(&ip, g_mem + args[1] + 4, 4);
+        g_bound[args[0]] = {ip, port};
+    } else if (!strcmp(name, "closesocket") && argc >= 1) {
+        g_bound.erase(args[0]);
+    } else if (!strcmp(name, "sendto") && argc >= 6 && args[4] && gm_valid(args[4], 8) &&
+               gm_valid(args[1], args[2])) {
+        uint16_t port;
+        uint32_t ip;
+        memcpy(&port, g_mem + args[4] + 2, 2);
+        memcpy(&ip, g_mem + args[4] + 4, 4);
+        const auto self = g_bound.count(args[0]) ? g_bound[args[0]]
+                                                 : std::pair<uint32_t, uint16_t>{0, 0};
+        pcap_udp(self.first, self.second, ip, port, g_mem + args[1], args[2]);
+    } else if (!strcmp(name, "recvfrom") && argc >= 6) {
+        g_recv[tid] = {args[0], args[1], args[2], args[4]};
+    }
+}
+void pcap_return(const char *name, uint32_t eax, uint32_t tid) {
+    if (strcmp(name, "recvfrom"))
+        return;
+    auto it = g_recv.find(tid);
+    if (it == g_recv.end())
+        return;
+    const PendingRecv r = it->second;
+    g_recv.erase(it);
+    if (eax == 0xffffffffu || !eax || eax > r.len || !r.from || !gm_valid(r.from, 8) ||
+        !gm_valid(r.buf, eax))
+        return;
+    uint16_t port;
+    uint32_t ip;
+    memcpy(&port, g_mem + r.from + 2, 2);
+    memcpy(&ip, g_mem + r.from + 4, 4);
+    const auto self =
+        g_bound.count(r.socket) ? g_bound[r.socket] : std::pair<uint32_t, uint16_t>{0, 0};
+    pcap_udp(ip, port, self.first, self.second, g_mem + r.buf, eax);
+}
+
 const char *after_bang(const char *desc) {
     const char *b = strchr(desc, '!');
     return b ? b + 1 : desc;
@@ -157,6 +254,8 @@ bool observe_call(const char *desc, const uint32_t *args, uint32_t argc, uint32_
     }
     {
         std::lock_guard<std::mutex> hold(g_lock);
+        if (g_pcap)
+            pcap_call(name, args, argc, tid);
         ThreadInfo &ti = g_thread_info[tid];
         uint16_t cw = guest_current_context()->fpu_cw;
         if (!ti.seen) {
@@ -233,6 +332,10 @@ void observe_return(const char *desc, uint32_t eax) {
     const uint32_t tid = guest_current_thread_id();
     if (g_trace)
         fprintf(g_trace, "%u   -> %08x %s\n", tid, eax, after_bang(desc));
+    if (g_pcap) {
+        std::lock_guard<std::mutex> hold(g_lock);
+        pcap_return(after_bang(desc), eax, tid);
+    }
     if (!strcmp(after_bang(desc), "CreateThread")) {
         std::lock_guard<std::mutex> hold(g_lock);
         auto it = g_creating.find(tid);
@@ -323,6 +426,10 @@ void tick() {
     if (!g_sink)
         g_sink = new iscript::HeadlessSink();
     skip_movies();
+    // The display's clock for GDI windows: while the game presents nothing (the
+    // Multiplayer lobby is up), the kit repeats what the screen shows a few
+    // times a second, so a script's dumps and waits see it.
+    boot_present_windows();
     // A script starts at the main menu, the screen every scenario starts from.
     if (g_script && !g_movies_open && g_reached[kMenuLoop] > 0) {
         iscript::host_tick(*g_sink, g_presents.load());
@@ -395,7 +502,8 @@ int usage(const char *argv0) {
         "  --play-movies do not press Escape through the intro movies\n"
         "  --frames DIR write presented frames there as PPM (every --frame-every N, default 60)\n"
         "  --script FILE scripted input (kit host/input_script.h); --script-out DIR for its\n"
-        "               frames (default FILE without its extension, plus -frames)\n",
+        "               frames (default FILE without its extension, plus -frames)\n"
+        "  --lan-pcap FILE the game's UDP datagrams as a raw-IP pcap (tools/lan/eelan.py)\n",
         argv0);
     return 2;
 }
@@ -405,7 +513,7 @@ int usage(const char *argv0) {
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
     std::string game, user = user_dir_default(), trace, frames, frame_every = "60";
-    std::string script, script_out;
+    std::string script, script_out, lan_pcap;
     bool strict = true;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--game") && i + 1 < argc)
@@ -428,6 +536,8 @@ int main(int argc, char **argv) {
             script = argv[++i];
         else if (!strcmp(argv[i], "--script-out") && i + 1 < argc)
             script_out = argv[++i];
+        else if (!strcmp(argv[i], "--lan-pcap") && i + 1 < argc)
+            lan_pcap = argv[++i];
         else
             return usage(argv[0]);
     }
@@ -466,6 +576,11 @@ int main(int argc, char **argv) {
             return 2;
         }
         g_script = true;
+    }
+    if (!lan_pcap.empty()) {
+        pcap_open(lan_pcap.c_str());
+        if (!g_pcap)
+            fprintf(stderr, "[ee] cannot write %s\n", lan_pcap.c_str());
     }
     if (!trace.empty() && !(g_trace = fopen(trace.c_str(), "w")))
         fprintf(stderr, "[ee] cannot write %s\n", trace.c_str());
@@ -508,6 +623,8 @@ int main(int argc, char **argv) {
     boot_report_unlock();
     if (g_trace)
         fclose(g_trace);
+    if (g_pcap)
+        fclose(g_pcap);
     if (boot_abnormal_exit() && !(boot_close_requested() && g_reached[kMenuLoop] > 0)) {
         fprintf(stderr, "[ee] the run did not end normally (%s)\n", boot_stop_reason());
         return 3;
