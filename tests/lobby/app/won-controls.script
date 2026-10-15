@@ -1,0 +1,49 @@
+# The windowed app (RECOMP_INPUT_SCRIPT): the WON page and every control on
+# it - Retry, Help, Announcements, the two greyed Lost buttons, empty places
+# where the single-player screens have buttons - then Back and quit. None of
+# them binds the LAN ports. Run it in the background and silent while someone
+# uses the Mac (docs/reference/packaging.md §9):
+#   open -g -n -W --env EE_HOME=<scratch> --env RECOMP_INPUT_SCRIPT=$PWD/tests/lobby/app/won-controls.script \
+#     --env RECOMP_SCRIPT_BACKGROUND=1 --env RECOMP_HOST_NO_AUDIO=1 build/dist/EmpireEarth.app
+timeout 300000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+key ESCAPE
+wait 2500
+key ESCAPE
+wait 2500
+key ESCAPE
+wait size 1024 768 within 180000
+wait 3000
+moveby 1 1
+wait 300
+click 511 371                 # Multiplayer
+wait change within 30000
+wait 3000
+dump c0-won
+pointer system
+click 328 344                 # Retry
+wait 6000
+dump c1-retry
+click 405 512                 # Help
+wait 4000
+dump c2-help
+click 405 552                 # Announcements
+wait 4000
+dump c3-announcements
+click 252 512                 # Lost Password? (greyed)
+wait 2000
+click 252 552                 # Lost Username? (greyed)
+wait 2000
+dump c4-lost
+click 748 145                 # where Play Random Map is on the single-player screen
+wait 2000
+click 644 730                 # where Start Game is
+wait 2000
+dump c5-misc
+click 781 644                 # Back
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+wait 5000
+dump c6-after-back
+quit

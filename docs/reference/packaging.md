@@ -260,3 +260,31 @@ EmpireEarth.app/Contents/
   - the window closed, and the same process became the game, which reached the main menu.
 - **Not measured: a Mac that never had Xcode.** The sandbox hides the developer tools from the first run, but the host and launcher were built on this Mac. A friend's Mac is the remaining check (phase6.md).
 
+
+## 9. When the game crashes on a player's Mac (P6-C)
+
+**Where to look.** Everything is in the player's data folder, `~/Library/Application Support/EmpireEarth` (or `$EE_HOME`):
+
+| File | What it holds |
+|---|---|
+| `Logs/game.log` | the host's stdout and stderr for the last run (the launcher `exec`s the host with both pointed there); the run before is `Logs/game.previous.log` |
+| `Logs/launcher.log` | the launcher's own lines: status, import, build, each start |
+| `0_Error.log` | the game's own error log. **Empty after a normal start:** the game probes it with `CreateFile(…, 0, CREATE_NEW)` at boot (boot.md §2), which creates it, and nothing in this port's crashes so far wrote to it. Its engine assertion (below) never does |
+| `mod-settings.json` | the host's settings (window mode: `host.display/window` 0 windowed, 1 borderless, 2 full screen; frame limit; overlay), saved at exit |
+| `registry.json` | the game's options. It holds the CD key: don't paste it anywhere public |
+
+**What a failed assertion looks like.** The game's assertion is the engine's `ESVerify(file, line, expr)` (Low-Level Engine.dll 0x1001c43e, export `?ESVerify@@YAXPBDK0@Z`). It formats `<file> (<line>) : Verification failure (<expr>)` into a buffer on its own stack and calls `abort()`; nothing else sees the text. On Windows the player gets msvcrt's "abnormal program termination". Every host here (the shareable app's player host, `recomp_app`, `ee_boot`) hooks its entry (`app/ee_assertions.cpp`, through the kit's `boot_add_load_step`) and writes, on stderr:
+
+```
+[ee] ESVerify failed: <the developers' source path>:<line>: <the expression>
+[ee]   called from EXE+<offset> EXE+<offset> …
+[recomp] msvcrt: abort() from 1001c47e (called from <address> …): abnormal program termination
+[recomp] ExitProcess(3)
+```
+
+- The path is the original developers' source file, the line number theirs, the expression the condition that was false. That alone usually says which subsystem gave up.
+- `called from` is ESVerify's return address and then the return addresses along the caller's EBP chain, as module+offset: `EXE+…` is `Empire Earth.exe` from 0x400000, a DLL is named with its offset from its load base (build.md §3). `db/functions/<module>.json` names the functions.
+- `msvcrt: abort() from …` with no `[ee] ESVerify` line before it is another `abort()`: the kit's msvcrt now logs the return address and the guest's EBP chain for every fatal exit (`abort`, `terminate`, a pure virtual call, `_exit`), and flushes the guest's C streams and the host's log first.
+- The boot test requires the hook (`[ee] assertions: a failed ESVerify (Low-Level Engine.dll+1c43e) is reported`); the boot, menu and lobby runners fail with the `ESVerify failed` line when one fires.
+
+**Reproducing it on this Mac without disturbing whoever is using it.** Run the packaged app in the background, silent, with a script: `open -g -n -W --env EE_HOME=<scratch> --env RECOMP_INPUT_SCRIPT=<script> --env RECOMP_SCRIPT_BACKGROUND=1 --env RECOMP_HOST_NO_AUDIO=1 --env SDL_AUDIO_DRIVER=dummy build/dist/EmpireEarth.app`. `RECOMP_SCRIPT_BACKGROUND` (kit `host/README.md`) keeps the window from being raised and the game from losing its DirectInput devices when someone clicks elsewhere. Copy the player's `registry.json` and `mod-settings.json` into the scratch home to run with their options.

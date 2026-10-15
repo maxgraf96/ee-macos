@@ -81,6 +81,8 @@ def run(name, script, seconds, keep_user):
             problems.append("the script did not finish%s" % (": " + failed.group(1) if failed else ""))
         if "[recomp] strict:" in out:
             problems.append("a strict-mode stop: %s" % re.search(r"\[recomp\] strict:.*", out).group(0))
+        if "[ee] ESVerify failed:" in out:  # the engine's assertion (app/ee_assertions.cpp)
+            problems.append(re.search(r"\[ee\] ESVerify failed:.*", out).group(0))
         if "guest memory fault" in out:
             problems.append(re.search(r".*guest memory fault.*", out).group(0))
         called = set(re.findall(r"^\s+(\S+!\S+)\s+CALLED$", out, re.M))
