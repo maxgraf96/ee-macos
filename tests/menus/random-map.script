@@ -1,0 +1,44 @@
+# Main menu -> Single Player -> Play Random Map -> Start Game with the
+# registry's defaults (Small, Continental, one computer player), then the game
+# itself for 90 seconds: the first frames of a game rendered natively. See
+# settings.script for the pointer.
+# menus: alone (Start Game opens the game server: one at a time)
+timeout 400000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+
+click 511 268                 # Single Player
+wait change within 15000
+wait 1000
+click 748 145                 # Play Random Map
+wait change within 20000
+wait 1500
+dump game-setup
+
+click 644 730                 # Start Game: black, the loading screen ("Creating
+wait size 800 600 within 60000  # World...", "Loading Complete"), then the game
+wait 2500
+dump loading
+# The game is up when its own command panel is (bottom of the screen; the
+# loading screens have neither its colour nor its place).
+wait pixel 300 560 948a7b tol 24 within 240000
+wait 5000
+dump in-game-05s
+wait 25000
+dump in-game-30s
+
+# The camera starts on the player's town center, in the middle of the view:
+# selecting it fills the panel at the bottom with its commands.
+click 350 290
+wait change 0.02 within 10000
+wait 1000
+dump town-center-selected
+
+wait 30000
+dump in-game-60s
+wait 30000
+dump in-game-90s
+quit

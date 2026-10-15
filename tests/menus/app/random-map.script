@@ -1,0 +1,34 @@
+# The windowed app into a random-map game (RECOMP_INPUT_SCRIPT; Metal): Escape
+# through the intro movies, Single Player, Play Random Map, Start Game, the
+# game's first 60 seconds, then quit. See ../settings.script for the pointer.
+timeout 400000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+key ESCAPE
+wait 2500
+key ESCAPE
+wait 2500
+key ESCAPE
+wait size 1024 768 within 180000
+wait 3000
+moveby 1 1
+wait 300
+click 511 268                 # Single Player
+wait change within 15000
+wait 1000
+click 748 145                 # Play Random Map
+wait change within 20000
+wait 1500
+click 644 730                 # Start Game
+wait change within 60000
+wait 2500
+mark
+wait change 0.5 within 240000
+wait 5000
+dump app-in-game-05s
+wait 25000
+dump app-in-game-30s
+wait 30000
+dump app-in-game-60s
+quit

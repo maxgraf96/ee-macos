@@ -1,0 +1,30 @@
+# Main menu -> Single Player -> Play Random Map (Game Setup) -> Cancel ->
+# Single Player -> Main Menu. See settings.script for the pointer.
+# menus: alone (Play Random Map opens the game server: one at a time)
+timeout 300000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+
+click 511 268                 # Single Player
+wait change within 15000
+wait 1000
+dump single-player
+
+click 748 145                 # Play Random Map
+wait change within 20000
+wait 1500
+dump game-setup
+
+click 888 730                 # Cancel
+wait change within 15000
+wait 1000
+dump single-player-again
+
+click 748 660                 # Main Menu
+wait change within 15000
+wait 1000
+dump main-menu
+quit

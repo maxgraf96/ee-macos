@@ -3,6 +3,7 @@
 //
 //   ee_boot [--game DIR] [--user DIR] [--seconds S] [--trace FILE] [--no-strict]
 //           [--play-movies] [--frames DIR [--frame-every N]]
+//           [--script FILE [--script-out DIR]]
 //
 // The boot itself is the kit's (host/boot.cpp): mem_init, the loader (the
 // executable plus every [modules.aux.*] DLL at its base-map address), the
@@ -28,14 +29,21 @@
 //     menu in seconds.
 //   - What every Empire Earth host adds to the kit, the user directory and
 //     the temporary stand-ins, is ee_standins.cpp's (shared with the app).
+//   - Scripted input (--script, the kit's host/input_script.h): the steps a
+//     player takes through the menus, delivered through the kit's input state
+//     and message queue as the windowed host delivers a real device's events,
+//     with frame dumps as PNG. tests/menus/ holds the scenarios.
 //   - A boot report: the milestones reached, the threads the game started and
 //     the x87 control word each ran at, and every import that was called with
 //     no implementation behind it. --trace writes every import call.
 //
 // Exit status: 0 when the guest ended the run itself or the deadline closed it
 // after the main menu's message loop was reached; 3 when it ended abnormally;
-// 4/5/6 from the watchdog and the fault handler (kit boot.cpp).
+// 4/5/6 from the watchdog and the fault handler (kit boot.cpp); 7 when a
+// --script failed or did not finish.
 #include "boot.h"
+#include "input.h"
+#include "input_script_host.h"
 
 #include "../dx/host_api.h"
 #include "../runtime/guest.h"
@@ -260,10 +268,12 @@ std::string where(uint32_t a) {
 
 // --- presentation ---------------------------------------------------------------------
 // What the kit's DirectDraw 7 presents through its software renderer (and GDI
-// windows): counted, and with --frames every Nth one written as a PPM - the
-// frames to compare with legion's references.
+// windows): counted, handed to the --script (dumps, picture waits), and with
+// --frames every Nth one written as a PPM - the frames to compare with
+// legion's references.
 extern "C" void host_display_present_window(const uint32_t *argb, int w, int h) {
     const uint64_t n = ++g_presents;
+    iscript::host_pixels(argb, w, h);
     if (g_frames_dir.empty() || !argb || w <= 0 || h <= 0 || n % g_frame_every)
         return;
     char path[1024];
@@ -286,24 +296,42 @@ extern "C" void host_display_present_window(const uint32_t *argb, int w, int h) 
 }
 
 // --- input -----------------------------------------------------------------------
-// The keyboard and mouse DirectInput reads (dx/dinput.cpp): nothing is pressed,
-// except Escape while an intro movie plays with --skip-movies (the default),
-// held for 100 ms of every second - what a player does on Windows to reach the
-// menu in seconds rather than two minutes (legion.md §6).
-extern "C" void host_input_state(HostInputState *out) {
-    if (!out)
-        return;
-    memset(out, 0, sizeof *out);
-    if (g_skip_movies && g_movies_open > 0 && (boot_millis() % 1000) < 100)
-        out->keys[0x01] = 0x80; // DIK_ESCAPE
-}
-
+// The keyboard and mouse DirectInput reads are the kit's input state
+// (host/input.cpp), fed by the kit's headless input path (input_script_host):
+// Escape while an intro movie plays with --skip-movies (the default), held for
+// 100 ms of every second - what a player does on Windows to reach the menu in
+// seconds rather than two minutes (legion.md §6) - and whatever a --script does.
 namespace {
+
+iscript::HeadlessSink *g_sink = nullptr;
+bool g_escape_down = false;
+bool g_script = false;
+bool g_script_closed = false;
+
+void skip_movies() {
+    const bool want = g_skip_movies && g_movies_open > 0 && (boot_millis() % 1000) < 100;
+    if (want != g_escape_down) {
+        g_escape_down = want;
+        g_sink->key(0x01, want); // DIK_ESCAPE
+    }
+}
 
 // --- the host ----------------------------------------------------------------
 // The deadline: WM_CLOSE to the main window, as closing it does; the game
 // then shuts down through its own exit path.
 void tick() {
+    if (!g_sink)
+        g_sink = new iscript::HeadlessSink();
+    skip_movies();
+    // A script starts at the main menu, the screen every scenario starts from.
+    if (g_script && !g_movies_open && g_reached[kMenuLoop] > 0) {
+        iscript::host_tick(*g_sink, g_presents.load());
+        iscript::Runner *r = iscript::host_runner();
+        if (r->failed() && !g_script_closed && !boot_close_requested()) {
+            g_script_closed = true;
+            boot_request_close("input script failed");
+        }
+    }
     if (g_seconds > 0 && boot_elapsed() > g_seconds && !boot_close_requested()) {
         printf("[ee] %.0fs deadline: posting WM_CLOSE to %08x\n", g_seconds, host_main_window());
         boot_request_close("deadline");
@@ -317,6 +345,8 @@ void report(FILE *out, bool abnormal) {
     fprintf(out, "frames presented: %llu; application active: %s\n",
             (unsigned long long)g_presents.load(), win32_app_active() ? "yes" : "no");
     boot_print_exit_code(out);
+    if (iscript::Runner *r = iscript::host_runner())
+        r->report(out);
     for (int m = 0; m < kMilestoneCount; ++m)
         if (g_reached[m] > 0)
             fprintf(out, "  milestone %d %-22s %7.2fs\n", m, kMilestoneNames[m], g_reached[m]);
@@ -363,7 +393,9 @@ int usage(const char *argv0) {
         "  --seconds S  post WM_CLOSE after S seconds (default 120; 0 = never)\n"
         "  --trace FILE every import call: thread, DLL!name, stdcall arguments\n"
         "  --play-movies do not press Escape through the intro movies\n"
-        "  --frames DIR write presented frames there as PPM (every --frame-every N, default 60)\n",
+        "  --frames DIR write presented frames there as PPM (every --frame-every N, default 60)\n"
+        "  --script FILE scripted input (kit host/input_script.h); --script-out DIR for its\n"
+        "               frames (default FILE without its extension, plus -frames)\n",
         argv0);
     return 2;
 }
@@ -373,6 +405,7 @@ int usage(const char *argv0) {
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
     std::string game, user = user_dir_default(), trace, frames, frame_every = "60";
+    std::string script, script_out;
     bool strict = true;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--game") && i + 1 < argc)
@@ -391,6 +424,10 @@ int main(int argc, char **argv) {
             frames = argv[++i];
         else if (!strcmp(argv[i], "--frame-every") && i + 1 < argc)
             frame_every = argv[++i];
+        else if (!strcmp(argv[i], "--script") && i + 1 < argc)
+            script = argv[++i];
+        else if (!strcmp(argv[i], "--script-out") && i + 1 < argc)
+            script_out = argv[++i];
         else
             return usage(argv[0]);
     }
@@ -422,8 +459,20 @@ int main(int argc, char **argv) {
                     "Seed it with tools/boot/seed_user.py\n",
                     getenv("RECOMP_REGISTRY"));
     }
+    if (!script.empty()) {
+        std::string error;
+        if (!iscript::host_start(script, script_out, &error)) {
+            fprintf(stderr, "[ee] %s\n", error.c_str());
+            return 2;
+        }
+        g_script = true;
+    }
     if (!trace.empty() && !(g_trace = fopen(trace.c_str(), "w")))
         fprintf(stderr, "[ee] cannot write %s\n", trace.c_str());
+    // Line by line: a trace is read most when the run died, and a fault
+    // ends the process without flushing a buffer.
+    if (g_trace)
+        setvbuf(g_trace, nullptr, _IOLBF, 1 << 16);
 
     BootOptions opts;
     opts.name = "EmpireEarth";
@@ -462,6 +511,11 @@ int main(int argc, char **argv) {
     if (boot_abnormal_exit() && !(boot_close_requested() && g_reached[kMenuLoop] > 0)) {
         fprintf(stderr, "[ee] the run did not end normally (%s)\n", boot_stop_reason());
         return 3;
+    }
+    if (iscript::Runner *r = iscript::host_runner(); r && !r->finished()) {
+        fprintf(stderr, "[ee] the input script %s\n",
+                r->failed() ? ("failed: " + r->failure()).c_str() : "did not finish");
+        return 7;
     }
     return 0;
 }
