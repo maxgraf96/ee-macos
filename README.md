@@ -6,7 +6,7 @@
 
 There's no Wine, no Rosetta and no emulator. On first start, the app takes your own GOG copy of *Empire Earth Gold* and recompiles the game's 32-bit x86 code into native arm64 code, on your Mac. It then runs that code on a small runtime that stands in for Windows and DirectX. The app contains none of the game.
 
-> **Release 0.8.1, October 2026.** Single player, saved games, music, movies and LAN multiplayer with unmodified Windows players all work. Release 0.7 passed its first test on a Mac that had never had developer tools: it installed from GOG's installer and played a 30-minute LAN game. Release 0.8 fixed what LAN evenings with friends turned up: slow scrolling, stutter in big battles and slow responses to clicks. This is early software. Please try it and [tell us what breaks](https://github.com/maxgraf96/ee-macos/issues).
+> **Release 0.8.2, October 2026.** Single player, saved games, music, movies and LAN multiplayer with unmodified Windows players all work. Release 0.7 passed its first test on a Mac that had never had developer tools: it installed from GOG's installer and played a 30-minute LAN game. Release 0.8 fixed what LAN evenings with friends turned up: slow scrolling, stutter in big battles and slow responses to clicks. Release 0.8.2 fixes a crash in the original game's own code when many units stand stacked on one spot. This is early software. Please try it and [tell us what breaks](https://github.com/maxgraf96/ee-macos/issues).
 
 ## What works
 
@@ -34,7 +34,7 @@ There's no Wine, no Rosetta and no emulator. On first start, the app takes your 
 
 **Steps:**
 1. **Download the installer from GOG.** Go to Account → Games → Empire Earth Gold → *Download offline backup game installers* → Windows, English. Today that is one 667 MB file, `setup_empire_earth_gold_2.0.0.2974_gog_v3_(78415).exe`. You don't need Windows to use it: the app unpacks it itself.
-2. **Install the app.** Download `EmpireEarth-0.8.1.dmg` from [Releases](https://github.com/maxgraf96/ee-macos/releases), open it and drag **EmpireEarth** onto **Applications**.
+2. **Install the app.** Download `EmpireEarth-0.8.2.dmg` from [Releases](https://github.com/maxgraf96/ee-macos/releases), open it and drag **EmpireEarth** onto **Applications**.
 3. **Approve it once.** The app isn't notarized by Apple, because that needs a paid developer account, so macOS blocks it the first time. Click **Done**, then go to System Settings → Privacy & Security and click **Open Anyway**. You only do this once.
 4. **Give it your installer.** The app checks every game file against GOG's release, then builds the game for your Mac. This takes 2–3 minutes on a recent Mac and up to about 10 on a base M1. It happens once; after that the app starts straight into the game.
 5. **For multiplayer, click Allow** when macOS asks whether EmpireEarth may find devices on your local network.
