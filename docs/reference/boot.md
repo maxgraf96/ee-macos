@@ -9,7 +9,7 @@ Labels: **[measured]** = output of the commands here (M4 Max, macOS 15.5); **[st
 ## 0. Try it: the windowed game
 
 ```sh
-cd /Users/max/Code/neoee-macos          # this repository, with the kit at an `ee` that has feat/boot
+cd ee-macos                              # this repository, with the kit at an `ee` that has feat/boot
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt   # once
 .venv/bin/python tools/setup.py --install "original/gog/Empire Earth"   # once: link + write the nine modules' inputs (no Ghidra)
 .venv/bin/python tools/run.py            # seed the registry, translate (when stale, ~5 min), build, open the app

@@ -19,7 +19,7 @@
 id = "ee"
 name = "Empire Earth"
 app_name = "EmpireEarth"
-bundle_id = "dev.neoee.empireearth"
+bundle_id = "io.github.maxgraf96.empireearth"
 executable = "Empire Earth.exe"
 sha256 = "957e35d75ba80309d094cbfb7367f7c6d61c5fd19fc5f7ca3f2e1cf636a065ab"
 image_base = 0x00400000

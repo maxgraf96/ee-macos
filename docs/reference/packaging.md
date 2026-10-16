@@ -119,7 +119,7 @@ A re-run after an app update re-translates only when the translator or the DB ch
 - **App Translocation:** an app started from Downloads runs from a read-only random path. Since 0.7 the launcher asks to be moved into Applications first (§5.1). Nothing is written inside the app apart from clearing the quarantine mark (§5.1): the cache, user data and registry all live in `~/Library/Application Support/EmpireEarth/`.
   - A full first run left all 1,199 files of the app byte-identical (SHA-256 before and after) [measured].
   - The launcher, the first run and the game also ran from the read-only DMG volume (§8) [measured].
-- **If we get a Developer ID** (notarization requires the hardened runtime):
+- **No notarization:** the user decided on 2026-10-16 that the app stays ad-hoc signed. What a Developer ID would need, should that ever change (notarization requires the hardened runtime):
   - The host needs `com.apple.security.cs.disable-library-validation`, so it can load bundles that our team did not sign.
   - `clang`, `ld64.lld` and the Python executable must be signed with the Developer ID and the hardened runtime too, as nested code.
   - Python's ctypes (capstone's binding) may need `com.apple.security.cs.allow-unsigned-executable-memory` under the hardened runtime. This is untested and needed only on this path [inferred].
@@ -229,9 +229,9 @@ It also **warns** when a file spells out the packager's home directory. Today th
 - **The macOS host** (what `recomp_app` links, from the kit's CMake): the kit itself (MIT, with NOTICE), SDL 3.4.16 (Zlib), FFmpeg 7.1.1 (LGPL-2.1+, dylibs), glslang 16.6.0, volk, Vulkan-Headers, Lua 5.4.6, miniz 3.0.2, SoftFloat 3e, stb_truetype, TinySoundFont, GothicKit dmusic, minimp3, Open Sans, GeneralUser GS 2.0.3. The kit's NOTICE now names glslang, which it had left out; `test_toolchain.py` keeps the two in step and checks the SDL and glslang tags against `Dependencies.cmake`.
 - **This repository's:** innoextract and the Boost, XZ and bzip2 code in it, from the licence files `tools/firstrun/innoextract/build.sh` writes (`tools/stage_toolchain.py --innoextract DIR`).
 
-**To decide before the app is shared** [static]:
-- **This repository has no licence file.** The app ships its code (`tools/firstrun/`, `tools/inputs/`, `db/`, `game.toml`): it needs one, or an explicit statement, before the app is given to anyone.
-- **FFmpeg (LGPL-2.1):** the notice names the exact upstream source and SHA-256. The LGPL asks that the source accompany the binary or be offered in writing for three years; the safe course is to put `ffmpeg-7.1.1.tar.xz` next to the app wherever it is published. The dylibs stay replaceable; a replaced one needs the app re-signed ad hoc (the notice says how).
+**Settled before the app was published (2026-10-16)** [static]:
+- **This repository is MIT** (`LICENSE`), like the kit. The app ships its code (`tools/firstrun/`, `tools/inputs/`, `db/`, `game.toml`) under it.
+- **FFmpeg (LGPL-2.1):** the notice names the exact upstream source and SHA-256. The LGPL asks that the source accompany the binary or be offered from the same place (LGPL-2.1 §6). So `tools/package_app.py --release` puts `ffmpeg-7.1.1.tar.xz` beside the DMG and the zip, checked against the kit's pin and listed in `SHA256SUMS`, and every GitHub release carries it. The dylibs stay replaceable; a replaced one needs the app re-signed ad hoc (the notice says how).
 - **GeneralUser GS** has its own licence (it permits use in software projects; its text ships in full).
 - python-build-standalone's MPL-2.0 covers its build scripts and the patches it applies to CPython; the notice carries the MPL text and the release URL, which is what the MPL asks of a binary.
 - glslang's licence file also carries GPL-3.0 with Bison's exception, for a Bison grammar glslang no longer uses: nothing GPL is built in.
@@ -259,7 +259,8 @@ Everything lands under `build/` (ignored). A run with the host already built tak
 
 ```
 EmpireEarth.app/Contents/
-  Info.plist                 CFBundleExecutable EmpireEarth, dev.neoee.empireearth, 0.7, LSMinimumSystemVersion 13.0, arm64,
+  Info.plist                 CFBundleExecutable EmpireEarth, io.github.maxgraf96.empireearth (game.toml's bundle_id;
+                             dev.neoee.empireearth up to 0.8), 0.8.1, LSMinimumSystemVersion 13.0, arm64,
                              NSLocalNetworkUsageDescription (macOS 15's Local Network prompt: lansession.md §9.2)
   MacOS/EmpireEarth          the launcher (app/launcher/launcher.m, AppKit, 0.1 MB)
   MacOS/EmpireEarthHost      the kit's player host + EE's stand-ins (app/ee_standins.cpp), 16.9 MB, debug stabs stripped

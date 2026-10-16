@@ -30,7 +30,7 @@ The capture format is specified by the `m1-re` workstream in `docs/reference/rmg
 | G | m1-re | Reverse-engineer the EXE's random-map pipeline: call sequence, context layout, inputs and outputs, seeds. Specify the capture format and the replay driver (`docs/reference/rmg.md`). | `ee-macos` docs + `analysis/` |
 
 ## Branches, worktrees and merging
-- **Kit fork:** `codeberg.org/maxgraf/recomp-kit`. `main` is an upstream mirror at `eb32cc4`; `ee` is our integration branch. `ee-macos/kit` is a submodule tracking `ee`.
+- **Kit fork:** `github.com/maxgraf96/recomp-kit` (public, a GitHub fork of upstream; on `codeberg.org/maxgraf/recomp-kit`, private, until 2026-10-16). `main` is an upstream mirror at `eb32cc4`; `ee` is our integration branch. `ee-macos/kit` is a submodule tracking `ee`.
 - **Worktrees:** each kit workstream works in its own worktree under `/Users/max/Code/ee-kit-wt/<name>`, on branch `feat/<name>` from `ee`. Never edit `ee-macos/kit` directly.
 - **Before reporting:** rebase onto the latest `ee` and push the feature branch to the fork (`git push fork feat/<name>`).
 - **Merging:** the main session merges into `ee` one branch at a time, runs the full test suite, bumps the submodule in `ee-macos`, and announces new `ee` heads to running workstreams.

@@ -374,8 +374,8 @@ static NSString *move_to_applications(EEPaths *paths, NSString *from, NSString *
         }
         return dest;
     }
-    NSString *me = NSBundle.mainBundle.bundleIdentifier;
-    for (NSRunningApplication *other in [NSRunningApplication runningApplicationsWithBundleIdentifier:me ?: @""])
+    // Whatever its bundle id: 0.8 and earlier were dev.neoee.empireearth.
+    for (NSRunningApplication *other in NSWorkspace.sharedWorkspace.runningApplications)
         if (other.processIdentifier != getpid() &&
             [other.bundleURL.path.stringByStandardizingPath isEqual:dest]) {
             *why = @"Empire Earth is running from the Applications folder. Quit it, then try again.";

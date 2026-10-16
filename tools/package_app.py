@@ -42,7 +42,9 @@ default the newest upstream build in $EE_BUILD_CACHE, else
 from; default ~/Library/Caches/recomp-kit/toolchain).
 Outputs (all under build/, ignored): <out>/EmpireEarth.app, EmpireEarth.zip,
 EmpireEarth.dmg, check.json. --release DIR also copies the zip and the DMG
-there as EmpireEarth-<VERSION>.zip/.dmg, with their SHA256SUMS.
+there as EmpireEarth-<VERSION>.zip/.dmg, with the FFmpeg source archive the
+host was built from (LGPL-2.1: it goes wherever the app is published,
+packaging.md §7) and their SHA256SUMS.
 """
 import argparse
 import hashlib
@@ -50,11 +52,13 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -68,7 +72,8 @@ HOST = "EmpireEarthHost"
 MIN_MACOS = "13.0"
 # CFBundleShortVersionString. CFBundleVersion is <commits>.<UTC yymmddHHMM>
 # of the build, so every build has its own.
-VERSION = "0.8"
+VERSION = "0.8.1"
+BUNDLE_ID = tomllib.loads((ROOT / "game.toml").read_text())["game"]["bundle_id"]
 README = ROOT / "app/ReadMeFirst.txt"
 
 # This repository's part of the first run (firstrun.md §6), relative to ROOT.
@@ -166,7 +171,7 @@ def info_plist(version):
     return {
         "CFBundleName": APP,
         "CFBundleDisplayName": DISPLAY,
-        "CFBundleIdentifier": "dev.neoee.empireearth",
+        "CFBundleIdentifier": BUNDLE_ID,
         "CFBundleExecutable": APP,
         "CFBundleIconFile": "AppIcon",
         "CFBundlePackageType": "APPL",
@@ -294,17 +299,36 @@ def sha256(path):
     return h.hexdigest()
 
 
-def release(files, dest):
+def ffmpeg_pin(kit):
+    """(archive name, SHA-256) of the FFmpeg source the kit's CMake builds."""
+    m = re.search(r"URL https://ffmpeg\.org/releases/(ffmpeg-[0-9.]+\.tar\.xz)\s+URL_HASH SHA256=([0-9a-f]{64})",
+                  (kit / "cmake/Dependencies.cmake").read_text())
+    if not m:
+        sys.exit("package_app: no FFmpeg pin in %s" % (kit / "cmake/Dependencies.cmake"))
+    return m.group(1), m.group(2)
+
+
+def ffmpeg_source(kit):
+    """The FFmpeg source archive the player host's build tree downloaded,
+    checked against the pin. The LGPL asks for the exact source of the
+    shipped dylibs; it goes beside the app wherever that is published."""
+    name, digest = ffmpeg_pin(kit)
+    path = ROOT / "build/cmake/macos-player/ffmpeg-prefix/src" / name
+    if not path.is_file() or sha256(path) != digest:
+        sys.exit("package_app: %s is missing or is not the pinned %s" % (path, name))
+    return path
+
+
+def release(files, dest, sources=()):
     """Copies (never moves) the archives into `dest` as EmpireEarth-<VERSION>.<ext>
-    and writes SHA256SUMS beside them, in shasum -a 256's format."""
+    and `sources` under their own names, and writes SHA256SUMS beside them, in
+    shasum -a 256's format."""
     dest.mkdir(parents=True, exist_ok=True)
-    lines = []
-    for f in files:
-        name = "%s-%s%s" % (APP, VERSION, f.suffix)
-        shutil.copy2(f, dest / name)
-        lines.append("%s  %s\n" % (sha256(dest / name), name))
-    (dest / "SHA256SUMS").write_text("".join(lines))
-    return [dest / ("%s-%s%s" % (APP, VERSION, f.suffix)) for f in files]
+    copies = [dest / ("%s-%s%s" % (APP, VERSION, f.suffix)) for f in files] + [dest / f.name for f in sources]
+    for f, c in zip(list(files) + list(sources), copies):
+        shutil.copy2(f, c)
+    (dest / "SHA256SUMS").write_text("".join("%s  %s\n" % (sha256(c), c.name) for c in copies))
+    return copies
 
 
 def main(argv=None):
@@ -317,7 +341,8 @@ def main(argv=None):
     ap.add_argument("--no-host-build", action="store_true", help="use build/player/EmpireEarth.app as it is")
     ap.add_argument("--no-archives", action="store_true")
     ap.add_argument("--release", type=Path, default=None,
-                    help="also copy the zip and DMG there as EmpireEarth-%s.*, with SHA256SUMS" % VERSION)
+                    help="also copy the zip and DMG there as EmpireEarth-%s.*, with FFmpeg's source "
+                         "and SHA256SUMS" % VERSION)
     ap.add_argument("--jobs", default=str(min(os.cpu_count() or 4, 12)))
     kit, rest = kitpath.take_kit(list(sys.argv[1:] if argv is None else argv))
     args = ap.parse_args(rest)
@@ -368,7 +393,7 @@ def main(argv=None):
         result.update(zip=str(z), zip_bytes=z.stat().st_size, dmg=str(dmg), dmg_bytes=dmg.stat().st_size)
         print("\n%s: %.1f MB\n%s: %.1f MB" % (z, z.stat().st_size / 1e6, dmg, dmg.stat().st_size / 1e6))
         if args.release:
-            copies = release([dmg, z], args.release.resolve())
+            copies = release([dmg, z], args.release.resolve(), [ffmpeg_source(kit)])
             result.update(release=[str(c) for c in copies])
             print("\nRelease %s:" % VERSION)
             print((args.release.resolve() / "SHA256SUMS").read_text(), end="")

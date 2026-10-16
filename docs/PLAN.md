@@ -552,13 +552,15 @@ Details: [phase5.md](phase5.md), [lansession.md](reference/lansession.md).
 
 The user's playtest reported loading, panning, responsiveness and big battles fixed. A/D's alarm is the original game's hotkey.
 
+**Status 2026-10-16, later: published on GitHub.** The repository moved from Codeberg to [github.com/maxgraf96/ee-macos](https://github.com/maxgraf96/ee-macos), and the kit fork to the public [github.com/maxgraf96/recomp-kit](https://github.com/maxgraf96/recomp-kit) (branch `ee`), a fork of upstream's. Both histories were scanned before the first push: no game bytes, no CD key, no secrets. This repository is now **MIT** (`LICENSE`). The bundle id is `io.github.maxgraf96.empireearth` (was `dev.neoee.empireearth`). Every release carries the FFmpeg source its dylibs were built from (LGPL-2.1; [packaging.md](reference/packaging.md) §7). **Notarization: no**, by the user's decision; the app stays ad-hoc signed. Release 0.8.1 is the first published on GitHub.
+
 - App bundle + first-run importer: GOG offline installer (Inno) or game folder → hash check → translate + compile (one-time, cached).
 - **Bundled LLVM toolchain** (D10, §5.8): freestanding build, lld link, ad-hoc signing, cached output.
 - **No Ghidra on players' Macs:** first-run translation inputs come from the repo's function DB plus the player's own binaries, decoded by our own tools. Ghidra listings are derived from game code and can't ship. Workstream P6-A, **done 2026-10-15**: `tools/setup.py`/`tools/run.py` need only the repository and the game files, with inputs and generated C byte-identical to the Ghidra pipeline's ([build.md](reference/build.md) §2.1); inventory in [packaging.md](reference/packaging.md).
 - Settings UI; logs and crash reports; a friend-facing README (VPN how-to).
 - **Signing:**
   - Ad-hoc signed by default; friends use *Open Anyway* in Privacy & Security once.
-  - Developer ID + notarization ($99/yr) only if friction becomes a problem.
+  - No Developer ID and no notarization: decided 2026-10-16.
 
 ### Phase 7: Decompilation and modernisation (ongoing, from M3)
 Bug fixes, then the display plugin and modern renderer, widescreen/HiDPI UI, camera zoom, then UI, then simulation. Optional: AoC, fully native 64-bit.
@@ -574,7 +576,7 @@ Bug fixes, then the display plugin and modern renderer, widescreen/HiDPI UI, cam
 Follows recomp-kit's game-repo pattern if adopted:
 
 ```
-neoee-macos/
+ee-macos/
 ├── kit/             recomp-kit (submodule/fork), or our own recomp/ + runtime/ + hle/
 ├── game.toml        identity, module hashes (§2.4), translator inputs
 ├── db/              function DB, globals, per-module config

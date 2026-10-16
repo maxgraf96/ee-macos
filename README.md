@@ -4,18 +4,18 @@
 
 There's no Wine, no Rosetta and no emulator. On first start, the app takes your own GOG copy of *Empire Earth Gold* and recompiles the game's 32-bit x86 code into native arm64 code, on your Mac. It then runs that code on a small runtime that stands in for Windows and DirectX. The app contains none of the game.
 
-> **Release 0.7, October 2026.** Single player, saved games, music, movies and LAN multiplayer with unmodified Windows players all work. Release 0.7 passed its first test on a Mac that had never had developer tools: it installed from GOG's installer and played a 30-minute LAN game. This is early software. Please try it and [tell us what breaks](https://codeberg.org/maxgraf/ee-macos/issues).
+> **Release 0.8.1, October 2026.** Single player, saved games, music, movies and LAN multiplayer with unmodified Windows players all work. Release 0.7 passed its first test on a Mac that had never had developer tools: it installed from GOG's installer and played a 30-minute LAN game. Release 0.8 fixed what LAN evenings with friends turned up: slow scrolling, stutter in big battles and slow responses to clicks. This is early software. Please try it and [tell us what breaks](https://github.com/maxgraf96/ee-macos/issues).
 
 ## What works
 
-| | In 0.7 |
+| | In 0.8 |
 |---|---|
 | Intro movies, menus, options | Works |
 | Random-map games against the computer | Works. The simulation matches Windows tick for tick (see [How we know it's right](#how-we-know-its-right)) |
 | Scenario Editor | Works. The random maps it generates match Windows' byte for byte |
 | Saved games | Works. Saves move between Mac and Windows in both directions |
 | Music and sound | Works. All 8 DirectMusic tracks and the Miles sound effects play. The reverb is approximate |
-| Graphics | Direct3D 7 on Metal: about 110 fps at 1920×1080 on an M4 Max |
+| Graphics | Direct3D 7 on Metal, at up to 120 fps |
 | LAN games with Windows (GOG) players | Works. The Mac can host or join |
 | LAN games Mac↔Mac | Expected to work, not yet tested with two Macs |
 | Internet games over ZeroTier | Expected to work, not yet tested end to end |
@@ -32,7 +32,7 @@ There's no Wine, no Rosetta and no emulator. On first start, the app takes your 
 
 **Steps:**
 1. **Download the installer from GOG.** Go to Account → Games → Empire Earth Gold → *Download offline backup game installers* → Windows, English. Today that is one 667 MB file, `setup_empire_earth_gold_2.0.0.2974_gog_v3_(78415).exe`. You don't need Windows to use it: the app unpacks it itself.
-2. **Install the app.** Download `EmpireEarth-0.7.dmg` from [Releases](https://codeberg.org/maxgraf/ee-macos/releases), open it and drag **EmpireEarth** onto **Applications**.
+2. **Install the app.** Download `EmpireEarth-0.8.1.dmg` from [Releases](https://github.com/maxgraf96/ee-macos/releases), open it and drag **EmpireEarth** onto **Applications**.
 3. **Approve it once.** The app isn't notarized by Apple, because that needs a paid developer account, so macOS blocks it the first time. Click **Done**, then go to System Settings → Privacy & Security and click **Open Anyway**. You only do this once.
 4. **Give it your installer.** The app checks every game file against GOG's release, then builds the game for your Mac. This takes 2–3 minutes on a recent Mac and up to about 10 on a base M1. It happens once; after that the app starts straight into the game.
 5. **For multiplayer, click Allow** when macOS asks whether EmpireEarth may find devices on your local network.
@@ -41,7 +41,7 @@ The full guide, with troubleshooting, where your files live and how to uninstall
 
 The app also accepts an installed `Empire Earth Gold` folder, or a Wine, CrossOver or Whisky copy of it. It only reads your files and writes only to `~/Library/Application Support/EmpireEarth/`. It connects to nothing on the internet.
 
-SHA-256 of `EmpireEarth-0.7.dmg`: `264c9c3ea35129b29b313b960267b69cc24e241a62f5e63a7d2e71a8aafb396a`
+Each release lists the SHA-256 of its files in `SHA256SUMS`.
 
 ### Multiplayer
 
@@ -100,14 +100,14 @@ These checks catch bugs no playtest would. For example, the Mac's autosave once 
 | M2 | The game boots natively to the main menu; menus and options work | Done ([phase3.md](docs/phase3.md)) |
 | M3 | Single-player parity with Windows | Done for random maps and saves; campaigns not yet verified ([phase4.md](docs/phase4.md)) |
 | M4 | Mac↔Windows LAN games without out-of-sync | Done on a home network; ZeroTier and Mac↔Mac still to test ([phase5.md](docs/phase5.md)) |
-| M5 | An app anyone with the GOG game can install | Release 0.7 ([phase6.md](docs/phase6.md)). Before 1.0: a licence for this repository, FFmpeg's LGPL source offer, and notarization if *Open Anyway* proves too much friction |
+| M5 | An app anyone with the GOG game can install | Done: release 0.7 passed on a clean Mac ([phase6.md](docs/phase6.md)); 0.8 is the performance release ([performance.md](docs/reference/performance.md)). The app stays ad-hoc signed: no notarization |
 | Next | Modernisation | Replace translated functions with readable C++, each checked against the original. First targets: widescreen and HiDPI UI, camera zoom, a native renderer. Perhaps later *The Art of Conquest* |
 
 ## Get involved
 
 Two kinds of help are most useful right now.
 
-**Play it and report.** Reports are especially welcome from base M1/M2 Macs, macOS 13–14, games with three or more players and long late-game battles. [Open an issue](https://codeberg.org/maxgraf/ee-macos/issues) and attach `game.log` and `launcher.log` from `~/Library/Application Support/EmpireEarth/Logs/`.
+**Play it and report.** Reports are especially welcome from base M1/M2 Macs, macOS 13–14, games with three or more players and long late-game battles. [Open an issue](https://github.com/maxgraf96/ee-macos/issues) and attach `game.log` and `launcher.log` from `~/Library/Application Support/EmpireEarth/Logs/`.
 
 **Test what hasn't been tested:** Mac↔Mac games, games over ZeroTier, the campaigns, and 4–8-player LAN games.
 
@@ -128,7 +128,7 @@ Two rules for contributions:
 You need an Apple Silicon Mac, the Xcode Command Line Tools, [uv](https://docs.astral.sh/uv/), LLVM clang and lld (`brew install llvm lld`) and your own GOG copy of the game. Ghidra is only needed to regenerate the function database.
 
 ```sh
-git clone --recurse-submodules https://codeberg.org/maxgraf/ee-macos.git
+git clone --recurse-submodules https://github.com/maxgraf96/ee-macos.git
 cd ee-macos
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r kit/requirements-dev.txt
@@ -149,7 +149,7 @@ The game's network ports are fixed (UDP 33334, TCP 33335 and TCP 33336), so don'
 
 | Path | Contents |
 |---|---|
-| `kit/` | our [recomp-kit](https://github.com/veritr1x/recomp-kit) fork (submodule, branch `ee`): translator, runtime, hosts |
+| `kit/` | [our fork](https://github.com/maxgraf96/recomp-kit/tree/ee) of [recomp-kit](https://github.com/veritr1x/recomp-kit) (submodule, branch `ee`): translator, runtime, hosts |
 | `game.toml`, `globals.toml` | the kit's game configuration: module hashes, the base map, translation inputs, curated symbols |
 | `app/` | the Mac launcher with its first-run window, the game host's entry point, the DMG's Read Me |
 | `db/` | the function database (names, addresses, sizes), GOG's file hashes, the Win32 import inventory, verified community symbols |
@@ -178,7 +178,9 @@ The game's network ports are fixed (UDP 33334, TCP 33335 and TCP 33336), so don'
 
 ## Licence
 
-This repository doesn't have a licence yet; one will be chosen before 1.0. The kit fork is MIT, like upstream recomp-kit. The third-party components in the app carry their own licences, listed in `THIRD_PARTY_NOTICES.txt`.
+This repository is under the [MIT licence](LICENSE). The kit fork is MIT too, like upstream recomp-kit. The licence covers this project's own code and documentation, never *Empire Earth* itself (see the disclaimer below).
+
+The third-party components in the app carry their own licences, listed in its `THIRD_PARTY_NOTICES.txt`. FFmpeg, which plays the game's Bink movies, is LGPL-2.1: its libraries are dynamically linked and replaceable, and every release carries the exact FFmpeg source they were built from.
 
 ## Disclaimer
 

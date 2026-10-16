@@ -193,7 +193,7 @@ From `spikes/ee-recomp/` (ignored):
 git clone https://github.com/veritr1x/recomp-kit.git kit && git -C kit checkout eb32cc42623e0e9e868b9d27423a57d5a5cba56b
 brew install ghidra lld
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r kit/requirements-dev.txt
-GD="/Users/max/Code/neoee-macos/original/gog/Empire Earth"
+GD="original/gog/Empire Earth"           # in this repository's checkout
 mkdir -p original/stage && ln -sfn "$GD" original/gog && ln -sfn "$GD/Data" original/stage/Data
 ln -sfn "$GD/Low-Level Engine.dll" "original/stage/Low-Level Engine.dll"
 .venv/bin/python -I tools/rebase.py "$GD/sxlrt233.dll" original/stage/sxlrt233.dll 0x00400000

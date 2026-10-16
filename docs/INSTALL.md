@@ -145,4 +145,4 @@ Nothing is written outside this folder. The only change inside the app itself is
 2. Drag **EmpireEarth** from Applications to the Bin.
 3. Drag the folder `~/Library/Application Support/EmpireEarth` to the Bin. **This deletes your saved games**, so keep `Data/Saved Games` if you want them.
 
-macOS may also have kept `~/Library/Saved Application State/dev.neoee.empireearth.savedState`, which you can delete too. Nothing else is installed: no login items, no system files, no helpers.
+macOS may also have kept `~/Library/Saved Application State/io.github.maxgraf96.empireearth.savedState` (`dev.neoee.empireearth.savedState` from 0.8 and earlier), which you can delete too. Nothing else is installed: no login items, no system files, no helpers.

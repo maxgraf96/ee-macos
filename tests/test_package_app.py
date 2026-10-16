@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -160,6 +161,7 @@ def test_info_plist():
     assert plist["CFBundleIconFile"] == "AppIcon"
     assert "local network" in plist["NSLocalNetworkUsageDescription"]
     assert plist["CFBundleShortVersionString"] == package_app.VERSION
+    assert plist["CFBundleIdentifier"] == "io.github.maxgraf96.empireearth"  # game.toml's
     # every build its own: the commit count, then the build's minute
     assert plist["CFBundleVersion"] == "7.2610151730"
 
@@ -175,13 +177,25 @@ def test_the_release_copies_and_sums(tmp_path):
     out.mkdir()
     (out / "EmpireEarth.dmg").write_bytes(b"dmg")
     (out / "EmpireEarth.zip").write_bytes(b"zip")
+    (out / "ffmpeg-7.1.1.tar.xz").write_bytes(b"src")
     dest = tmp_path / "release"
-    copies = package_app.release([out / "EmpireEarth.dmg", out / "EmpireEarth.zip"], dest)
+    copies = package_app.release([out / "EmpireEarth.dmg", out / "EmpireEarth.zip"], dest,
+                                 [out / "ffmpeg-7.1.1.tar.xz"])
     v = package_app.VERSION
-    assert [c.name for c in copies] == ["EmpireEarth-%s.dmg" % v, "EmpireEarth-%s.zip" % v]
+    assert [c.name for c in copies] == ["EmpireEarth-%s.dmg" % v, "EmpireEarth-%s.zip" % v, "ffmpeg-7.1.1.tar.xz"]
     assert (out / "EmpireEarth.dmg").exists() and (out / "EmpireEarth.zip").exists()  # copied, not moved
-    assert (dest / "SHA256SUMS").read_text() == "%s  EmpireEarth-%s.dmg\n%s  EmpireEarth-%s.zip\n" % (
-        hashlib.sha256(b"dmg").hexdigest(), v, hashlib.sha256(b"zip").hexdigest(), v)
+    assert (dest / "SHA256SUMS").read_text() == "%s  EmpireEarth-%s.dmg\n%s  EmpireEarth-%s.zip\n%s  %s\n" % (
+        hashlib.sha256(b"dmg").hexdigest(), v, hashlib.sha256(b"zip").hexdigest(), v,
+        hashlib.sha256(b"src").hexdigest(), "ffmpeg-7.1.1.tar.xz")
+
+
+def test_the_ffmpeg_source_released_is_the_one_the_notice_names():
+    """The release carries the archive the kit's CMake pins (LGPL-2.1), and the
+    notice in the app names that same archive and digest."""
+    name, digest = package_app.ffmpeg_pin(KIT)
+    assert re.fullmatch(r"ffmpeg-[0-9.]+\.tar\.xz", name) and re.fullmatch(r"[0-9a-f]{64}", digest)
+    notice = (KIT / "third_party/ffmpeg/NOTICE.md").read_text()
+    assert "https://ffmpeg.org/releases/" + name in notice and digest in notice
 
 
 def test_the_read_me_in_the_dmg():
@@ -218,7 +232,7 @@ def clean_app(tmp_path, launcher, python_script):
     (app / "Contents/MacOS").mkdir(parents=True)
     shutil.copy2(launcher, app / "Contents/MacOS/EmpireEarth")
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
-        "CFBundleExecutable": "EmpireEarth", "CFBundleIdentifier": "dev.neoee.empireearth.test",
+        "CFBundleExecutable": "EmpireEarth", "CFBundleIdentifier": "io.github.maxgraf96.empireearth.test",
         "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.7", "CFBundleVersion": "1.1"}))
     py = app / "Contents/Resources/toolchain/python/bin/python3"
     py.parent.mkdir(parents=True)
