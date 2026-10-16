@@ -46,11 +46,12 @@ from game_ports import game_ports_lock  # noqa: E402
 
 LOAD_SCRIPT = ROOT / "tests/menus/simparity-load.script"
 MAP_SCRIPT = ROOT / "tests/menus/simparity.script"
-PLAYER_APP = "EmpireEarth.app/Contents/MacOS"
+PLAYER_APP = "/Applications/EmpireEarth.app/Contents/MacOS"  # the player's own install
 HKCU = "HKEY_CURRENT_USER\\Software\\SSSI\\Empire Earth"
 # The click that starts the load in each scenario, as the script logs it.
 LOAD_CLICK = {LOAD_SCRIPT: "click (511, 728)", MAP_SCRIPT: "click (644, 730)"}
 START_EPOCH = [0.0]  # the wall clock when the game started (the log's t = 0)
+UPTIME_OFFSET = [0.0]  # the wall clock minus CLOCK_UPTIME_RAW, then
 
 
 def set_registry(user, ptps, extra):
@@ -92,21 +93,21 @@ wait 3000
 # buildings keep coming into view (the stutter players see when more comes on screen).
 PAN = """wait 20000
 key RIGHT down
-wait 6000
+wait %(hold)d
 key RIGHT up
 key DOWN down
-wait 6000
+wait %(hold)d
 key DOWN up
 key LEFT down
-wait 6000
+wait %(hold)d
 key LEFT up
 key UP down
-wait 6000
+wait %(hold)d
 key UP up
 """
 
 
-def scenario(path, minutes, out, app=None, pan=0):
+def scenario(path, minutes, out, app=None, pan=0, hold=6000):
     text = path.read_text()
     if app:
         # The windowed host: the movies play first; the in-game test pixel is the
@@ -116,7 +117,8 @@ def scenario(path, minutes, out, app=None, pan=0):
         body = re.sub(r"^wait pixel .*$", "wait 5000", body, flags=re.M)
         text = APP_PREFIX + body
     text, n = re.subn(r"^wait \d+(\s+# simparity: duration.*)$",
-                      lambda m: PAN * pan + "wait %d%s" % (int(minutes * 60000), m.group(1)), text,
+                      lambda m: (PAN % {"hold": hold}) * pan + "wait %d%s" % (int(minutes * 60000),
+                                                                             m.group(1)), text,
                       flags=re.M)
     if n != 1:
         sys.exit("%s has no '# simparity: duration' wait" % path.name)
@@ -130,9 +132,8 @@ def scenario(path, minutes, out, app=None, pan=0):
 
 
 def player_running():
-    """The player's own app, wherever it is installed; a checkout's build/ is an agent's."""
-    found = subprocess.run(["pgrep", "-fl", PLAYER_APP], capture_output=True, text=True).stdout
-    return any("/build/" not in line for line in found.splitlines() if line.strip())
+    """The player's own app (a checkout's build/player app is an agent's run)."""
+    return subprocess.run(["pgrep", "-f", PLAYER_APP], capture_output=True).returncode == 0
 
 
 def wait_for_player():
@@ -192,6 +193,10 @@ def summarize(lines, perf, out, click):
                         windows.append(round((game[j][1] - game[i][1]) / (game[j][0] - game[i][0]), 1))
                     i = j
                 summary["pt_per_s_10s"] = windows
+    # The log's t = 0 on the wall clock, and CLOCK_UPTIME_RAW's offset from it (the
+    # scheduler's timeline is on that clock): tools/perf/late_frames.py lines them up.
+    summary["start_epoch"] = START_EPOCH[0]
+    summary["uptime_offset"] = UPTIME_OFFSET[0]
     (out / "summary.json").write_text(json.dumps(summary, indent=1))
     return summary
 
@@ -259,6 +264,9 @@ def main():
     p.add_argument("--pan", type=int, default=0, metavar="N",
                    help="after 20 s in game, sweep the camera N times (right, down, left, up; 24 s each), "
                         "then --minutes more")
+    p.add_argument("--pan-hold", type=int, default=6000, metavar="MS",
+                   help="how long each arrow key is held in a sweep (a scripted run reads frames back "
+                        "only in a wait's last second, so long holds keep the sweep clean)")
     p.add_argument("--width", type=int, default=800)
     p.add_argument("--height", type=int, default=600)
     p.add_argument("--sample", action="append", default=[], metavar="AT:SECONDS",
@@ -282,7 +290,8 @@ def main():
             saved.mkdir(parents=True, exist_ok=True)
             shutil.copy(a.load, saved / a.load.name)
         source = LOAD_SCRIPT if a.load else MAP_SCRIPT
-        script = scenario(source, a.minutes, a.out, (a.width, a.height) if a.app else None, a.pan)
+        script = scenario(source, a.minutes, a.out, (a.width, a.height) if a.app else None, a.pan,
+                          a.pan_hold)
         mods = tmp / "ee-mods"
         shutil.copytree(ROOT / "build/recomp/ee-mods", mods)
         perf = a.out / "perf.csv"
@@ -291,7 +300,7 @@ def main():
         for item in a.env:
             k, _, v = item.partition("=")
             env[k] = v
-        seconds = int(600 + a.minutes * 60 + a.pan * 44)
+        seconds = int(600 + a.minutes * 60 + a.pan * (20 + 4 * a.pan_hold / 1000.0))
         if a.app:
             exe = next(p for p in sorted((a.app / "Contents/MacOS").iterdir()) if os.access(p, os.X_OK))
             command = [str(exe)]
@@ -315,6 +324,7 @@ def main():
         with game_ports_lock("perf run (%s)" % ROOT, timeout=4 * 3600):
             start = time.monotonic()
             START_EPOCH[0] = time.time()
+            UPTIME_OFFSET[0] = time.time() - time.clock_gettime(time.CLOCK_UPTIME_RAW)
             proc = subprocess.Popen(prefix + command, cwd=ROOT, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, env=env)
             lines = []
@@ -322,6 +332,17 @@ def main():
                 reader = threading.Thread(target=stamp, args=(proc.stdout, log, start, lines), daemon=True)
                 reader.start()
                 samplers = []
+
+                def game_pid():
+                    pid = str(proc.pid)
+                    # nice -> env -> timeout -> the game: find the game itself.
+                    for _ in range(4):
+                        kids = subprocess.run(["pgrep", "-P", pid], capture_output=True,
+                                              text=True).stdout.split()
+                        if not kids:
+                            break
+                        pid = kids[0]
+                    return pid
                 for item in a.sample:
                     at, _, dur = item.partition(":")
 
@@ -330,15 +351,7 @@ def main():
                         if delay > 0:
                             time.sleep(delay)
                         if proc.poll() is None:
-                            pid = str(proc.pid)
-                            # nice -> env -> timeout -> the game: find the game itself.
-                            for _ in range(4):
-                                kids = subprocess.run(["pgrep", "-P", pid], capture_output=True,
-                                                      text=True).stdout.split()
-                                if not kids:
-                                    break
-                                pid = kids[0]
-                            subprocess.run(["sample", pid, str(dur), "-mayDie", "-file",
+                            subprocess.run(["sample", game_pid(), str(dur), "-mayDie", "-file",
                                             str(a.out / ("sample-%d.txt" % int(at)))],
                                            capture_output=True)
                     t = threading.Thread(target=take, daemon=True)
