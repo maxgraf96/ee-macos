@@ -71,13 +71,13 @@ def same_picture(a, b, pointer=48, tolerance=24):
 
 # A held arrow key at the keyboard scenario's settings (legion's parity game,
 # nothing selected, the default zoom): how fast Windows moves the camera's
-# look-at point, in its units a second (legion 0080, docs/reference/
-# performance.md "Input and frame rate"), and how close the Mac has to come
-# over one second: Windows' 485 main-loop passes a second (legion.md's in-game
-# census; app/ee_input.cpp) times one step at the scenario's start, 0.050.
-# The Mac's first step of a press is one step and its last pass falls partly
-# outside the second, so headless (18 passes a second) comes out 10-15 % short.
-WINDOWS_SCROLL_PER_S = 485 * 0.050
+# look-at point, in its units a second (legion 0080: about 603 steps a second,
+# one per main-loop pass; Down held 2 s moved it 61.5; docs/reference/
+# performance.md "Input and frame rate"), and how close the Mac has to come over
+# one second. The Mac's first step of a press is one step and its last pass
+# falls partly outside the second, so headless (18 passes a second) comes out
+# 10-15 % short.
+WINDOWS_SCROLL_PER_S = 30.5
 SCROLL_TOLERANCE = 0.25
 # EEUIESelectClosestAircraft (A, B, D, F) looks its "none" sound up twice when
 # the player has no aircraft (EXE 0x5d925d and 0x5d9268, return addresses).

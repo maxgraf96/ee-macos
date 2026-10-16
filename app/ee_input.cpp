@@ -47,10 +47,10 @@ constexpr uint32_t kCameraZoom = 0x0051f2f3;        // camera (thiscall): zoom t
 constexpr uint32_t kCameraZoomFromKey = 0x005c925d; // ... its return address in kKeyZoom
 constexpr uint32_t kZoomState = 0x00918db0;         // camera +0xe0: the zoom, 0 (in) to 1 (out)
 
-// The main loop's passes a second on Windows, in game: legion's census of the
-// main thread (docs/reference/legion.md: its message pump, 485 a second);
-// legion request 0080 counts 0x661889 itself.
-constexpr double kWindowsPassesPerSecond = 485.0;
+// The main loop's passes a second on Windows, in game: legion 0080 counted
+// 0x661889 at 616 a second idle, and 592-615 scroll steps a second (one per
+// pass) over four 2 s holds of an arrow key.
+constexpr double kWindowsPassesPerSecond = 603.0;
 // A pass this much later than the last one is a stall, not a held key's
 // motion: at most this much of it moves the camera.
 constexpr double kLongestStepMs = 100.0;
