@@ -11,15 +11,15 @@ background (RECOMP_SCRIPT_BACKGROUND: the window is never raised and keeps its
 DirectInput devices) and silent, with a fresh profile, under the game-ports
 lock. It runs twice:
 
-  - a fresh profile: game.toml's frame_limit, 60. The guest's presents a
+  - a fresh profile: game.toml's frame_limit (120). The guest's presents a
     second at 800x600 (the app's end-of-run report: "800x600 32bpp: N guest
-    presents; S s at this mode") must be at most 61, and at least 30; and the
+    presents; S s at this mode") must be at most the limit + 1, and at least 30; and the
     camera must move evenly (tools/input/evenness.py --check: no more than
     2 % of frames still, the per-frame move's p5 at least half its median and
     p95 at most 1.5 times it, the speed within 15 % of Windows' 30.5 a
     second). --no-evenness reports it without failing;
   - "original" (host.display/frame_limit 0 in the profile): the display's own
-    rate and the evenness, reported (more than 61 on a ProMotion display).
+    rate and the evenness, reported.
 
 Both report, from the input probe (mods/inputprobe, RECOMP_EE_INPUT_PROBE),
 the main loop's passes a second and the frames rendered a second over the
@@ -42,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -145,12 +146,14 @@ def main():
         print("the player's own app is running; waiting", flush=True)
         time.sleep(30)
     failures = 0
-    for name, settings, limit in (("limit-default", None, 61.0),
+    frame_limit = tomllib.loads((ROOT / "game.toml").read_text())["settings"]["frame_limit"]
+    for name, settings, limit in (("limit-default", None, frame_limit + 1.0),
                                   ("limit-original", {"host.display/frame_limit": 0}, None)):
         r = run(args.app, name, settings, args.keep)
         if limit is not None and r["rate"] is not None:
             if r["rate"] > limit:
-                r["problems"].append("%.1f presents a second at 800x600, the limit is 60" % r["rate"])
+                r["problems"].append("%.1f presents a second at 800x600, the limit is %d"
+                                    % (r["rate"], frame_limit))
             if r["rate"] < 30:
                 r["problems"].append("%.1f presents a second at 800x600" % r["rate"])
         if limit is not None and not args.no_evenness:

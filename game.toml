@@ -173,11 +173,14 @@ rows = ["window", "frame_limit", "performance_overlay"]
 # page opens with Command-comma instead (kit [settings] key).
 key = "none"
 # What a fresh profile starts with (the player changes both on the settings
-# page; F11 cycles the overlay). 60 frames a second, as a Windows PC's 60 Hz
-# display shows the game, rather than a ProMotion display's 120: the render
-# thread's wait hands the rest of each frame to the game's other threads
-# (docs/reference/performance.md, "Input and frame rate"). No frame-time graph.
-frame_limit = 60
+# page; F11 cycles the overlay). At most 120 frames a second: a ProMotion
+# display's full rate, which the scheduler (P7-A) now keeps smooth, and the
+# user preferred it to 60 in the 2026-10-16 playtest. The limit holds every
+# Flip, also the unsynced ones EE makes with "Wait for VSync" off, so the
+# render thread's wait still hands the rest of each frame to the game's other
+# threads (docs/reference/performance.md, "Input and frame rate"). No
+# frame-time graph.
+frame_limit = 120
 performance_overlay = "off"
 
 [controls]

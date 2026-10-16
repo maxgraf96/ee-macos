@@ -542,3 +542,12 @@ Other pairs (different maps, §1.2, other workstreams' runs in parallel) gave 2.
 - **`mods/inputprobe`** (ee-macos): a mod plugin, loaded only with `RECOMP_EE_INPUT_PROBE=FILE` (`app/ee_standins.cpp` points `RECOMP_MODS_DIR` at `build/recomp/ee-mods`; in the app set `RECOMP_MODS_DIR` too). One CSV row per main-loop pass (`U`), keyboard scroll step (`S`, with the camera), zoom key (`Z`), aircraft hotkey (`A`), sound lookup (`N`, id and caller), keyboard or IME message to the game window (`M`), rendered frame (`R`, with the camera's look-at point) and, once a second, the physics ticks run (`P`), each with host milliseconds. It only reads.
 - **`tools/input/evenness.py PROBE.csv [--check] [--windows-speed 30.5]`**: the camera's evenness per held key (§1.4).
 - **`windows/frida/input_probe.js`**: the Windows twin (legion 0080): the same EXE functions counted per 100 ms, `SESoundManager::Play`, the window's key messages, the camera every 50 ms.
+
+## After the playtest (2026-10-16)
+The user played a build with P7-A, P7-B and P7-C combined: a Huge random map, then their late-game save. Map loading, arrow-key panning, command responsiveness and big battles were all reported fixed; A/D's alarm is the original hotkey (remapped with Karabiner on the user's side).
+
+Two changes followed:
+- **The default Frame limit is 120,** not 60. The user found 120 comfortable once the scheduler kept it smooth.
+- **The limit now holds unsynced Flips** (kit `ddraw7`, `frame_pacing.h` `paced_limit_delay`). The user's profile has *Wait for VSync* = 0, so EE flips with `DDFLIP_NOVSYNC`, and the cap only lengthened vsync waits: the overlay showed "CAP 60" at 94.5 fps. An unsynced present now waits for the limit's own deadline (1/limit apart on average, no catch-up burst).
+
+A reading of 30–45 fps at the Mac's native resolution did not recur once the agents' test runs had stopped. Our test games compete for CPU with the player's game, so stop them before playtests (`port-operations` memory).
