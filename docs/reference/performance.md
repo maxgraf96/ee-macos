@@ -18,6 +18,7 @@ The Windows reference (legion 0070/0075, the same save, Core Ultra 9 275HX, 1920
 | A Huge map takes 20 s to generate (P7-B) | `PaintTiles` takes and drops the engine's `TSCriticalSection` per tile; every `LeaveCriticalSection` reached a checkpoint that gave the 1 ms-old baton to the render thread, which drew a loading-screen frame | Leaving a critical section gives the baton up only to a waiter of a higher priority; the game's own `ABOVE_NORMAL` for its loader is honoured (§A.3) | `PaintTiles` 20.1 s → 0.57 s in the app (Windows 0.14 s) (§A.4.3) |
 | A command took about 3 s to show its yellow marker; the Mac "plays catch-up" | Not measured in a LAN game (§A.5). The simulation ticks inside 1 ms slices between the renderer's; handoffs at 35-40 µs, ten times that on a busy Mac; mouse presses that reached the game up to 1.7 s late when the host was loaded [measured, §A.2]; in a LAN game the host waits for the slowest machine's CT acknowledgements (lansession.md §8 item 4) [inferred] | The simulation (`TIME_CRITICAL`) runs its ticks whole; handoffs cost 6 µs whatever the host's load; guest threads at QoS user-interactive (§A.3) | a press reaches the game in 1.7-2.5 ms on average, 6 ms at worst (§A.4.1) |
 | Big battles bring it almost to a halt | Not measured: no save of a battle in view. The same causes as above; in single player the Mac also ticks 3-5 times as often as Windows (§A.7) | As above | - |
+| The run thread uses a quarter to half a core while the game is idle (P7-B's profile) | SDL waits only in whole milliseconds, so it came straight back from the fraction of one a `Sleep(1)` leaves, and the scheduler handed it the rest again and again: a spin on AppKit's event loop | The runtime sleeps that fraction on the thread's condition variable; the SDL host waits it on the run loop, which input ends (§A.8) | the run thread 22-47% → 2% of a core in the idle game; the process's energy estimate 4.6 → 2.0 W (§A.8) |
 | An audio sink gap of 1,477 ms | Not the scheduler: the gap is between two pulls of the host's audio device (kit `host/audio/sdl_sink.cpp`), 3 late pulls in 81 minutes and none starved, at the display-mode changes [measured, the user's log] | - | - |
 
 ### A.1 The scheduler as it was [static]
@@ -160,14 +161,58 @@ In the 20:57 save in single player the game chose 73-124 PTs a second on the Mac
 - **(b) Multiplayer.** Every CT carries the host's PTs per second and PTs to perform (`NEMCommunicationsTick`, netcode.md §5.1), and every machine runs them (simparity.md §4.1); a client's response carries no tick time ("avg PT time, always 0", netcode.md §5.1). So a Mac client in a Windows-hosted game ticks at the host's ~23 a second, and only a Mac host chooses its own, higher, rate [static, documented].
 - **(c) The stutter.** In single player, yes: 15-21% of the core goes to ticks where Windows' rate would need about 5%, and the simulation held the baton for 46-61% of the late intervals while panning (§A.4.2). In a Windows-hosted LAN game the host's rate applies and the simulation's share is small.
 
-### A.8 Left to do
+### A.8 The run thread's wait: idle CPU and energy [measured]
+
+P7-B's profiles of the idle game had the run (main) thread using 26-40% of a core while it waited for the baton. The time was in `sched_checkpoint_at` → SDL (`SDL_GetWindowFlags`, `CFRunLoopRunSpecific`, mach port insert/extract traps): off the baton, but a busy wait. Kit `feat/sched-idle`, ee-macos `phase7/sched-idle`.
+
+**The cause [static, measured].** With nothing runnable, the baton holder waits until the earliest deadline. On the windowed host the run thread hands that wait to SDL (kit `host_set_idle_waiter` → `idle_wait` → `SDL_WaitEventTimeout`), so input can end it. SDL waits only in whole milliseconds. The game's threads loop on `Sleep(1)`, so the earliest deadline is nearly always less than a millisecond away and SDL came back at once. The scheduler found the deadline not yet due and asked again. Each pass was one turn of AppKit's run loop plus the window state and the controls, and that is P7-B's profile. Kit `runtime_tests` with an SDL-shaped waiter counts 106,860 calls for 20 `Sleep(1)` calls. The event pump does not run at every checkpoint. The clock's tick runs `pump()` at most once a millisecond. A baton wait polls once each time the run thread gives the baton up, then waits on its condition variable for up to 2 ms. `sample` hides the spin: it suspends the process every millisecond, and in the sampled 5 s the run thread fell from 47% to 5% of a core, so the run-thread figures below come from the kernel's per-thread times.
+
+**The fix.** The runtime no longer hands a sub-millisecond remainder back to the host; it sleeps it on the thread's condition variable. The SDL host waits that fraction itself on the run loop (`os_wait_run_loop`: `CFRunLoopRunInMode`, which input and posted events end, 0.05 ms after a post in a standalone test), so input in that fraction is taken at once. Not done: rate-limiting the pump to once every 2 ms (`RECOMP_HOST_POLL_MS`, tried and dropped). It saved under a point of the run thread's core in the idle game and added 1.3 ms to the mean click latency.
+
+**Measured.** `tools/perf/idle_cpu.py` (these runs were made with its scratch predecessor: the same script and counters): the main menu for 40 s, then the 20:57 save loaded, 20 s to settle and 60 s left alone. 1920×1200, behind other windows, silent, at the 60 fps limit. The PT rate is pinned at 124: left to itself the game tunes it from its tick time, which moved between 25 and 124 within one run of either build. CPU is user plus system time. The energy figure is the kernel's estimate for the process (`proc_pid_rusage` `ri_energy_nj`), not a power meter. **Before** is P7-C's app (kit b835958, ee-macos 747c097). **After** is this change. Four interleaved pairs were made while the Mac was otherwise quiet. Three of them used this change's first version, which also limited the pump to every 2 ms; the final one is the same within a point. The energy rows are from the one pair measured with it, the final change.
+
+| idle late game (124 PT/s, 60 fps) | before | after |
+|---|---:|---:|
+| whole process, % of a core | 75.0-77.4 | **63.4-65.1** |
+| the run thread | 21.6-29.4 (47.2 in one more run) | **1.9-2.4** |
+| simulation + renderer | 38-42 | 49-53 |
+| energy (the kernel's estimate) | 4.6 W | **2.0 W** |
+| the cores' mean clock; instructions retired a second | 4.19 GHz; 11.0 G | 3.56 GHz; 6.1 G |
+| frames sealed a second | 59.8 | 59.7 |
+
+| main menu (60 fps) | before | after |
+|---|---:|---:|
+| whole process, % of a core | 59.6-63.4 | 58.9-62.2 |
+| the run thread | 11.1-14.5 | **6.1-7.4** |
+| energy (the kernel's estimate) | 173 mW | **87 mW** |
+| cycles on performance cores; instructions a second | 19%; 1.84 G | 6%; 1.27 G |
+
+- **The run thread no longer spins:** about 2% of a core in the idle game. What it still does is its own loop and the event pump.
+- **The process's CPU time falls by less than the run thread's,** and at the menu not at all. The game's own threads take longer, because the cores run slower without the spin: 3.6 GHz instead of 4.2 in the game [inferred: the spin kept the performance cluster at its top clock]. The work done is the same: the same PTs, the same 60 frames, and 45% fewer instructions in the game. The energy estimate halves in both phases.
+- What is left in the game is the simulation and the renderer, about 50% of a core at 124 PTs and 60 frames a second, plus 1,400-1,900 interrupt wake-ups a second. A thousand of those are the preemption ticker (§A.9).
+- Runs made while the user's own jobs loaded the Mac (load average 6-12, the cores at 1.8-2.4 GHz) moved by more than the change and are left out of the tables. The before app could not hold 60 frames in one of them. In the one made at the game's own PT rate, the process fell from 96% to 83% of a core and the run thread from 8.8% to 2.8%.
+
+**Clicks and panning are unchanged** (`heavy.py` and `pan.script` from §A.4, the PT rate pinned at 124 as above). That rate is heavier than the 73-112 the game chose in §A.4, so every number here is higher than there.
+
+| | before | after |
+|---|---:|---:|
+| mouse press → the game's first read: mean (max), two runs each | 7.1 (61), 3.7 (47) ms | 4.0 (25), 3.6 (19) ms |
+| energy during the click run | 3.1, 3.3 W | 2.0, 2.1 W |
+| panning: late frames (> 20 ms); holds passing `evenness.py --check` | 17.7%; 5 of 8 | 15.4%; 4 of 8 |
+| panning: per-frame move ÷ even, worst p5 / p95; still frames | 0.59 / 1.47; 0% | 0.56 / 1.36; 0% |
+
+At the game's own PT rate, the clicks came out at 1.2 ms on average before and 2.9-4.5 ms after. In those runs the game chose 73 PT/s for the before build and 115-124 for the after builds, and the latency follows the simulation's share of the core. Pinned, the two builds are the same within the run-to-run spread. One version of this change, with the pump limited to every 2 ms, panned at the game's own rate with 3.4% late frames and 7 of 8 holds passing, against 3.2% and 8 of 8 before. The final build's own run at that rate was made under one of the loaded periods above and is to be repeated.
+
+### A.9 Left to do
 
 - **The LAN check** (§A.5): host on legion, the Mac joining, the 20:57 save's state or a long game; watch legion's lag indicator, the Mac's CT acknowledgements and the command delay.
 - **A big battle in view**, Windows and Mac: legion's 0070 play phase looked at open sea. The same per-thread CPU (`windows/frida/thread_cpu.js`) and the Mac's trace in a save with a battle on screen would say whether §A.6 is ever needed.
 - **Windows' tick wait** (§A.7 a): a probe of the simulation's critical-section waits inside a tick on legion.
 - **Multimedia timers fire only from the message pump.** The simulation's pacing timer is a `timeSetEvent` in event mode (engine 0x1005ebc0: `TIME_CALLBACK_EVENT_SET`, periodic), and the kit signals it in `host_pump_timers`, which runs only inside `PeekMessage`/`GetMessage`; a late pump also moves the next due time (`next_due = now + period`). An event-mode timer needs no guest thread, so the scheduler could fire it at its due time like a wait's deadline, as Windows' timer thread does. Not done: in this save the simulation kept up regardless.
 - **Long shims hold the baton**: `_AIL_set_named_sample_file` 128 ms during the load (main thread), `GetDC` on the render thread 3-15 ms. Hot paths, P7-B's.
-- **Firewall prompts.** macOS asks again for every rebuilt ad-hoc-signed binary that opens a port; a developer `ee_boot` signed with a stable self-signed identity would keep the approval across builds.
+- **Firewall prompts.** macOS asks again for every rebuilt ad-hoc-signed binary that opens a port; a developer `ee_boot` signed with a stable self-signed identity would keep the approval across builds. The app opens the game's ports (UDP 33334, TCP 33335) at the main menu, in single player too.
+- **The preemption ticker wakes a thousand times a second** (kit `sched_ticker_main`), when nothing runs too: 0.4% of a core, but a wake-up every millisecond in an idle game (§A.8). It could park while the holder waits with nothing runnable, and while there is only one guest thread.
+- **The panning run at the game's own PT rate on the final build** (§A.8), on a quiet Mac.
 
 ---
 
