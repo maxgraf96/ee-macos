@@ -355,3 +355,33 @@ So a save carries the game between platforms both ways, and the translated load 
   - `RECOMP_EE_SIMPARITY_AUTOSAVE` logs the counter;
   - a kit diagnostic that printed thread-message posts and retrievals (`[msgq]`, behind `RECOMP_DIAG_THREAD_MESSAGES`) was used and reverted. It would need re-adding.
 
+
+## 11. The sort by angle: a crash in the original game, kept inside its array (2026-10-16)
+
+### 11.1 The crash [measured]
+The user's 29-minute single-player game (release 0.8) ended with no dialog: `guest memory fault … access to guest 64553b7a`, guest thread 12 (`RTSPhysics::Main`, the simulation), EIP 0x63b9f5 in **0x63b8d2**. The autosave two minutes earlier, replayed with nobody at the controls for 8 game minutes, did not crash and never called the routine.
+
+### 11.2 The mechanism [static, measured]
+- **0x63b8d2** is the partition of an MSVC introsort instantiation (**0x63a355**: insertion sort at 16 or fewer, else the introsort 0x63ab78, an insertion sort of the first 16 and an unguarded insertion 0x63ba38 of each later element; a heap sort when `ideal`, n at the start and halved at every partition, reaches 0).
+- It sorts pointers to objects by their angle around a centre object: **0x62d5a4** = the engine's `UMArcTan2` of the positions' difference (`+0x1c`, `+0x20`), wrapped into [0, 2π), a float in ST(0). The caller is **0x630466**, from `EEUnitClass` virtual slot 49 (0x620207, shared by all 31 unit classes): a unit that overlaps others sorts them by angle to find a gap to step into, then moves there.
+- **The comparator is not irreflexive.** As compiled, the first angle is spilled to a float and the second compared in ST(0) at 53 bits: `less(a, b) = angle(b) > (double)(float)angle(a)`. When an angle rounds down to float, `a < a`, and objects at the same angle each compare less than the other. Angles in the lower half-plane come out of the `+ 2π` as non-float values, so about half of them round down.
+- **With 17 or more objects at one such angle,** for example a crowd stacked on one point, the partition's scans and the unguarded insertion lose the element that should stop them. They run past the array and dereference whatever lies beyond it, which on the user's Mac was `64553b5a`, at `+0x20`. A scan of the executable's 36,889 listings for partitions with a float-spilled comparator found only 0x63b8d2.
+- **Windows does the same:** the arithmetic is Windows' bit for bit at the simulation's CW 0x027f (ADR-002), so Windows runs off the array at the same moment. What saves or crashes it is whatever happens to lie next to the array in its heap.
+
+### 11.3 The fix: `app/ee_sort.cpp`, `app/ee_sort_sim.h`
+- The hook takes 0x63a355's slot in the executable's hook table. It computes each element's angle once with 0x62d5a4 itself (pure: positions in, `UMArcTan2` out), with the registers and the x87 state put back afterwards. Then it replays the algorithm on indices, comparison for comparison (`ee_sort_sim.h`).
+- **If no loop would leave the array,** the original translation runs untouched. The result is the game's own, and a lockstep game with Windows players stays in step.
+- **If one would,** the hook writes the elements in order of their float angle, ties kept in order, then returns. It logs `[ee] sort: a N-element sort by angle … would have run off its array; sorted inside it`.
+- **A sort it cannot replay** (a heap-sort fallback, an angle not exactly a double, a rounding mode other than nearest) runs the original, as before.
+- `RECOMP_EE_ORIGINAL_SORT=1` turns the hook off. `RECOMP_EE_SORT_CHECK=1` compares every original result with the replay's prediction and prints the counts at exit.
+
+### 11.4 Proof [measured]
+- `tests/test_sort.py` (`tests/sort/sim_test.cpp`): float-exact angles, distinct and tied, sort and stay inside the array, for n = 0…300. Ties that round down escape at n ≥ 17 and stay inside at n ≤ 16 (the guarded insertion sort). Ties that round up are consistent. The bounded order is sorted and stable.
+- **In the game,** `RECOMP_EE_SORT_SELFTEST=1 tools/simparity/run.py --minutes 1` calls the sort through its entry once, at the simulation thread's first world update (0x547aad), on objects made for the test:
+  - **40 at distinct angles:** the original ran, and its result equals the replay's prediction.
+  - **40 stacked at a point whose angle rounds down:** the hook kept them inside the array.
+  - **12 stacked:** the original ran, and its result equals the prediction.
+
+  The game then ran on to PT 10,492.
+- **The same with `RECOMP_EE_ORIGINAL_SORT=1`:** the stacked objects crash the original in 0x63b8d2 at EIP 0x63b9f5, guest thread 12, reading `+0x20` of the word before the array. That is the user's crash.
+- The user's autosave with `RECOMP_EE_SORT_CHECK=1`, 8 game minutes with nobody at the controls: no sort by angle at all. The routine needs a crowd.

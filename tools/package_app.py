@@ -72,7 +72,7 @@ HOST = "EmpireEarthHost"
 MIN_MACOS = "13.0"
 # CFBundleShortVersionString. CFBundleVersion is <commits>.<UTC yymmddHHMM>
 # of the build, so every build has its own.
-VERSION = "0.8.1"
+VERSION = "0.8.2"
 BUNDLE_ID = tomllib.loads((ROOT / "game.toml").read_text())["game"]["bundle_id"]
 README = ROOT / "app/ReadMeFirst.txt"
 
