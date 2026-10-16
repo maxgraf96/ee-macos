@@ -30,3 +30,17 @@ if(APPLE AND COMMAND pop_add_plugin)
     add_dependencies(ee_boot ee_inputprobe)
   endif()
 endif()
+
+# The performance probe (P7-B, docs/reference/performance.md): a mod plugin
+# with no hooks, in build/recomp/ee-mods/perfprobe/. Loaded when
+# RECOMP_MODS_DIR names that root and RECOMP_EE_PERF_TRACE is set.
+if(APPLE AND COMMAND pop_add_plugin)
+  pop_add_plugin(ee_perfprobe SOURCE ${CMAKE_CURRENT_LIST_DIR}/perfprobe/perfprobe.c
+                 OUTPUT_DIR ${POP_OUT}/ee-mods/perfprobe OUTPUT_NAME perfprobe
+                 WARNINGS ${POP_WARN_HOST} OPTIONS -g)
+  configure_file(${CMAKE_CURRENT_LIST_DIR}/perfprobe/mod.toml
+                 ${POP_OUT}/ee-mods/perfprobe/mod.toml COPYONLY)
+  if(TARGET ee_boot)
+    add_dependencies(ee_boot ee_perfprobe)
+  endif()
+endif()
