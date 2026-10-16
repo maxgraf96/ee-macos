@@ -15,7 +15,8 @@
 #               milestones and scripted input (ee_main.cpp --script, the
 #               menu test). docs/reference/boot.md, docs/reference/menus.md.
 set(EE_STANDIN_SOURCES ${CMAKE_CURRENT_LIST_DIR}/ee_standins.cpp
-                       ${CMAKE_CURRENT_LIST_DIR}/ee_assertions.cpp)
+                       ${CMAKE_CURRENT_LIST_DIR}/ee_assertions.cpp
+                       ${CMAKE_CURRENT_LIST_DIR}/ee_sched.cpp)
 
 if(APPLE AND POP_HAVE_GEN AND NOT POP_TRANSLATE STREQUAL "STUB" AND TARGET recomp_gen_h_milesmix)
   # The kit's input state and scripted input (host/input_script.h) with the
