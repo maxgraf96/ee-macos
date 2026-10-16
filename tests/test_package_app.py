@@ -159,7 +159,7 @@ def test_info_plist():
     assert plist["LSArchitecturePriority"] == ["arm64"]
     assert plist["CFBundleIconFile"] == "AppIcon"
     assert "local network" in plist["NSLocalNetworkUsageDescription"]
-    assert plist["CFBundleShortVersionString"] == package_app.VERSION == "0.7"
+    assert plist["CFBundleShortVersionString"] == package_app.VERSION
     # every build its own: the commit count, then the build's minute
     assert plist["CFBundleVersion"] == "7.2610151730"
 
@@ -177,10 +177,11 @@ def test_the_release_copies_and_sums(tmp_path):
     (out / "EmpireEarth.zip").write_bytes(b"zip")
     dest = tmp_path / "release"
     copies = package_app.release([out / "EmpireEarth.dmg", out / "EmpireEarth.zip"], dest)
-    assert [c.name for c in copies] == ["EmpireEarth-0.7.dmg", "EmpireEarth-0.7.zip"]
+    v = package_app.VERSION
+    assert [c.name for c in copies] == ["EmpireEarth-%s.dmg" % v, "EmpireEarth-%s.zip" % v]
     assert (out / "EmpireEarth.dmg").exists() and (out / "EmpireEarth.zip").exists()  # copied, not moved
-    assert (dest / "SHA256SUMS").read_text() == "%s  EmpireEarth-0.7.dmg\n%s  EmpireEarth-0.7.zip\n" % (
-        hashlib.sha256(b"dmg").hexdigest(), hashlib.sha256(b"zip").hexdigest())
+    assert (dest / "SHA256SUMS").read_text() == "%s  EmpireEarth-%s.dmg\n%s  EmpireEarth-%s.zip\n" % (
+        hashlib.sha256(b"dmg").hexdigest(), v, hashlib.sha256(b"zip").hexdigest(), v)
 
 
 def test_the_read_me_in_the_dmg():

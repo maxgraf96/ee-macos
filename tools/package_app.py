@@ -68,7 +68,7 @@ HOST = "EmpireEarthHost"
 MIN_MACOS = "13.0"
 # CFBundleShortVersionString. CFBundleVersion is <commits>.<UTC yymmddHHMM>
 # of the build, so every build has its own.
-VERSION = "0.7"
+VERSION = "0.8"
 README = ROOT / "app/ReadMeFirst.txt"
 
 # This repository's part of the first run (firstrun.md §6), relative to ROOT.
