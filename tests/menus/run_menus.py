@@ -31,6 +31,7 @@ import concurrent.futures
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -68,6 +69,90 @@ def same_picture(a, b, pointer=48, tolerance=24):
     return "%d pixels in %s" % (len(xs), box)
 
 
+# A held arrow key at the keyboard scenario's settings (legion's parity game,
+# nothing selected, the default zoom): how fast Windows moves the camera's
+# look-at point, in its units a second (legion 0080: about 603 steps a second,
+# one per main-loop pass; Down held 2 s moved it 61.5; docs/reference/
+# performance.md "Input and frame rate"), and how close the Mac has to come over
+# one second. The Mac's first step of a press is one step and its last pass
+# falls partly outside the second, so headless (18 passes a second) comes out
+# 10-15 % short.
+WINDOWS_SCROLL_PER_S = 30.5
+SCROLL_TOLERANCE = 0.25
+# EEUIESelectClosestAircraft (A, B, D, F) looks its "none" sound up twice when
+# the player has no aircraft (EXE 0x5d925d and 0x5d9268, return addresses).
+AIRCRAFT_NONE_SOUND = {"3c2"}
+AIRCRAFT_CALLERS = {"005d925d", "005d9268"}
+
+
+def check_keyboard(out, probe):
+    """The keyboard scenario's checks: a held arrow key moves the camera as far
+    as on Windows, and each W/A/S/D press is one key message, one character and
+    no more than Windows' sounds."""
+    import math
+    problems = []
+    peeks = [tuple(int(w, 16) for w in m) for m in
+             re.findall(r"^\[script\] line \d+: peek 00918d48: (\w+) (\w+)$", out, re.M)]
+    if len(peeks) != 4:
+        return ["the camera was peeked %d times, not 4" % len(peeks)]
+    f32 = lambda bits: struct.unpack("<f", struct.pack("<I", bits))[0]
+    camera = [(f32(x), f32(y)) for x, y in peeks]
+    for label, a, b in (("Up", camera[0], camera[1]), ("Down", camera[2], camera[3])):
+        distance = math.hypot(b[0] - a[0], b[1] - a[1])
+        print("     keyboard: %s held 1.0 s moved the camera %.3f" % (label, distance))
+        if WINDOWS_SCROLL_PER_S and abs(distance / WINDOWS_SCROLL_PER_S - 1) > SCROLL_TOLERANCE:
+            problems.append("%s held for 1 s moved the camera %.3f, Windows %.3f" %
+                            (label, distance, WINDOWS_SCROLL_PER_S))
+        if distance <= 0:
+            problems.append("%s held for 1 s did not move the camera" % label)
+    zooms = [f32(int(z, 16)) for z in
+             re.findall(r"^\[script\] line \d+: peek 00918db0: (\w+)$", out, re.M)]
+    if len(zooms) != 3:
+        problems.append("the zoom was peeked %d times, not 3" % len(zooms))
+    else:
+        print("     keyboard: ] then [ held 0.2 s each: zoom %.3f -> %.3f -> %.3f" % tuple(zooms))
+        if not (zooms[1] < zooms[0] and zooms[2] > zooms[1]) or not all(0 <= z <= 1 for z in zooms):
+            problems.append("] and [ did not zoom in and back out within 0..1: %s" %
+                            ", ".join("%.3f" % z for z in zooms))
+    if not probe.is_file():
+        return problems + ["no input probe (%s)" % probe.name]
+    rows = [line.strip().split(",") for line in probe.read_text().splitlines()
+            if line and not line.startswith("#")]
+    # Each press, by its WM_KEYDOWN, and what happened from a little before it
+    # (the game's DirectInput poll can fire the hotkey before the window
+    # message is dispatched) to a second after it. The presses are 1.5 s apart.
+    downs = [r for r in rows if r[0] == "M" and r[2] == "100" and r[3] in ("57", "41", "53", "44")]
+    keys = [chr(int(r[3], 16)) for r in downs]
+    if keys != list("WASDWASD"):
+        problems.append("the key presses the game saw: %s, not WASDWASD" % "".join(keys))
+        return problems
+    for n, (down, key) in enumerate(zip(downs, keys)):
+        t = float(down[1])
+        span = [r for r in rows if t - 400 <= float(r[1]) < t + 1000]
+        how = "tapped" if n < 4 else "typed"
+        chars = [r for r in span if r[0] == "M" and r[2] == "102"]
+        keydowns = [r for r in span if r[0] == "M" and r[2] == "100"]
+        if len(keydowns) != 1 or len(chars) != 1:
+            problems.append("%s %s: %d WM_KEYDOWN and %d WM_CHAR, not one of each" %
+                            (key, how, len(keydowns), len(chars)))
+        fires = sum(1 for r in span if r[0] == "A")
+        sounds = [r for r in span if r[0] == "N" and r[3] in AIRCRAFT_CALLERS]
+        others = [r for r in span if r[0] == "N" and r[2] != "ffffffff" and r[3] not in
+                  AIRCRAFT_CALLERS]
+        want = 1 if key in "AD" else 0
+        if fires != want or len(sounds) != 2 * want or any(r[2] not in AIRCRAFT_NONE_SOUND
+                                                           for r in sounds):
+            problems.append("%s %s: %d aircraft hotkey fires and sounds %s, Windows 1 and 3c2 for "
+                            "A and D, nothing for W and S" %
+                            (key, how, fires, [r[2] for r in sounds]))
+        # Whatever else the game looked up meanwhile (the world's own sounds)
+        # is not the key's; the same sound again and again would be.
+        repeated = sorted({r[2] for r in others if sum(o[2] == r[2] for o in others) > 4})
+        if repeated:
+            problems.append("%s %s: sounds looked up again and again: %s" % (key, how, repeated))
+    return problems
+
+
 def run(name, script, seconds, keep_user):
     """Runs one scenario; returns (name, problems, log path, dumps)."""
     user = Path(tempfile.mkdtemp(prefix="ee-menus-%s-" % name))
@@ -84,8 +169,10 @@ def run(name, script, seconds, keep_user):
         seed_user.main(["--user", str(user)] + seed)
         env = dict(os.environ, RECOMP_STRICT="1")
         # `# menus: env NAME=VALUE` lines: what the scenario runs with
-        # (RECOMP_EE_FORCE_SEED, the parity run's map).
-        env.update(re.findall(r"^# menus: env (\w+)=(\S*)", script.read_text(), re.M))
+        # (RECOMP_EE_FORCE_SEED, the parity run's map); {out} is the
+        # scenario's output directory.
+        env.update((k, v.replace("{out}", str(out_dir)))
+                   for k, v in re.findall(r"^# menus: env (\w+)=(\S*)", script.read_text(), re.M))
         result = subprocess.run([str(ROOT / "build/recomp/ee_boot"), "--user", str(user),
                                  "--seconds", str(seconds), "--script", str(script),
                                  "--script-out", str(out_dir)],
@@ -144,6 +231,8 @@ def run(name, script, seconds, keep_user):
                 problems.append("no 800x600 in-game frames: %s" % [(d[0], d[1], d[2]) for d in game])
             elif len({d[3] for d in game}) < 2:
                 problems.append("the game's frames never changed while it ran")
+        if name == "keyboard":
+            problems += check_keyboard(out, out_dir / "probe.csv")
         return name, problems, log, dumps
     finally:
         if not keep_user:

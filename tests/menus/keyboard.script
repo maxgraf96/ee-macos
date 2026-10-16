@@ -1,0 +1,99 @@
+# The keyboard in game (P7-C, docs/reference/performance.md "Input and frame
+# rate"): legion's in-game parity game (random-map.script: seed 4242,
+# 800x600x32, Renaissance), nothing selected, the pointer in the middle of
+# the map so the edge does not scroll. Then:
+#   - Up held for 1.0 s, then Down (back): the camera's look-at point
+#     (0x918d48, 0x918d4c) before and after each, peeked; run_menus.py
+#     compares the distance with Windows' camera speed (legion 0080). A
+#     second is short of the map's edge at Windows' speed; Right reaches it;
+#   - ] held for 0.2 s, then [: the zoom (0x918db0) goes in and back out,
+#     within 0..1;
+#   - W, A, S and D tapped, then typed (the key and its character as text, as
+#     the windowed app delivers a real keyboard's): the input probe
+#     (mods/inputprobe, RECOMP_EE_INPUT_PROBE) says which window messages,
+#     hotkeys and sounds each made. Windows: A and D are "select the closest
+#     aircraft" and play its "none" sound (0x3c2) once per press; W and S do
+#     nothing with nothing selected.
+# menus: alone (Start Game opens the game server: one at a time)
+# menus: env RECOMP_EE_FORCE_SEED=4242
+# menus: env RECOMP_EE_INPUT_PROBE={out}/probe.csv
+# menus: seed --width 800 --height 600 --player-name Unknown1634
+timeout 400000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+moveby 1 1
+wait 300
+
+click 511 268                 # Single Player
+wait change within 15000
+wait 1000
+click 748 145                 # Play Random Map
+wait change within 20000
+wait 1500
+click 644 730                 # Start Game
+wait size 800 600 within 60000
+wait 15000                    # "Choose Civilization" or the game (random-map.script)
+click 400 520
+wait 2000
+click 400 520
+wait pixel 300 560 556666 tol 24 within 120000
+wait 5000
+move 400 300
+wait 1000
+dump in-game
+
+log hold Up
+peek 0x00918d48 2
+key UP down
+wait 1000
+key UP up
+peek 0x00918d48 2
+wait 1000
+log hold Down
+peek 0x00918d48 2
+key DOWN down
+wait 1000
+key DOWN up
+peek 0x00918d48 2
+wait 1000
+log zoom
+peek 0x00918db0 1             # the zoom, 0 in to 1 out: a game starts out at 1
+key RBRACKET down             # ] zooms in, [ out, a step per pass like the arrows
+wait 200
+key RBRACKET up
+peek 0x00918db0 1
+wait 1000
+key LBRACKET down
+wait 200
+key LBRACKET up
+peek 0x00918db0 1
+wait 1000
+dump scrolled
+
+log tap W
+key W
+wait 1500
+log tap A
+key A
+wait 1500
+log tap S
+key S
+wait 1500
+log tap D
+key D
+wait 1500
+log type w
+type w
+wait 1500
+log type a
+type a
+wait 1500
+log type s
+type s
+wait 1500
+log type d
+type d
+wait 1500
+log done
+quit

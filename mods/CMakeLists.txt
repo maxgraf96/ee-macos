@@ -19,4 +19,14 @@ if(APPLE AND COMMAND pop_add_plugin)
   if(TARGET ee_boot)
     add_dependencies(ee_boot ee_simparity)
   endif()
+  # The keyboard, sound and frame-rate probe (P7-C, docs/reference/
+  # performance.md): RECOMP_EE_INPUT_PROBE=FILE loads it the same way.
+  pop_add_plugin(ee_inputprobe SOURCE ${CMAKE_CURRENT_LIST_DIR}/inputprobe/inputprobe.c
+                 OUTPUT_DIR ${POP_OUT}/ee-mods/inputprobe OUTPUT_NAME inputprobe
+                 WARNINGS ${POP_WARN_HOST} OPTIONS -g)
+  configure_file(${CMAKE_CURRENT_LIST_DIR}/inputprobe/mod.toml
+                 ${POP_OUT}/ee-mods/inputprobe/mod.toml COPYONLY)
+  if(TARGET ee_boot)
+    add_dependencies(ee_boot ee_inputprobe)
+  endif()
 endif()

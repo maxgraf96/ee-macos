@@ -10,6 +10,9 @@
                                                    # a game, headless (tests/menus/, docs/reference/menus.md)
     .venv/bin/python tools/test.py --lobby [SCENARIO...] # the Multiplayer lobby (WONAPI's GDI window over
                                                    # the game's frame), headless (tests/lobby/, docs/reference/lobby.md)
+    .venv/bin/python tools/test.py --app-frames    # the windowed app's frame limit on Metal, in the
+                                                   # background: the default 60 and "original"
+                                                   # (tests/menus/run_app.py, docs/reference/performance.md)
     .venv/bin/python tools/test.py --simparity [OPTIONS]  # the single-player checksum stream, run
                                                    # twice on the Mac; both must agree, every
                                                    # autosave must run and succeed, and the first
@@ -46,6 +49,9 @@ def main(argv):
     if "--menus" in argv:
         argv = [a for a in argv if a != "--menus"]
         return subprocess.call([sys.executable, str(kitpath.ROOT / "tests/menus/run_menus.py")] + argv)
+    if "--app-frames" in argv:
+        argv = [a for a in argv if a != "--app-frames"]
+        return subprocess.call([sys.executable, str(kitpath.ROOT / "tests/menus/run_app.py")] + argv)
     if "--lobby" in argv:
         argv = [a for a in argv if a != "--lobby"]
         return subprocess.call([sys.executable, str(kitpath.ROOT / "tests/lobby/run_lobby.py")] + argv)

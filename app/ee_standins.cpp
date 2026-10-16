@@ -13,7 +13,9 @@
 //   - The checksum-stream oracle (P4-C): RECOMP_EE_CHECKSUM_TRACE=FILE loads
 //     the simparity mod (mods/simparity/) from the ee-mods/ directory beside
 //     the executable, unless RECOMP_MODS_DIR names another mod root.
-//     docs/reference/simparity.md.
+//     docs/reference/simparity.md. RECOMP_EE_INPUT_PROBE=FILE does the same
+//     for the keyboard, sound and frame-rate probe (mods/inputprobe/,
+//     docs/reference/performance.md).
 //
 // Nothing else is a stand-in now: Miles (mss32) and DirectMusic are the kit's
 // (Phase 4), and so is destroying a thread's windows when it ends (P3-E).
@@ -29,7 +31,8 @@ bool g_registry_defaulted = false;
 
 __attribute__((constructor)) void ee_standins_init() {
     const char *trace = getenv("RECOMP_EE_CHECKSUM_TRACE");
-    if (trace && *trace && !getenv("RECOMP_MODS_DIR")) {
+    const char *probe = getenv("RECOMP_EE_INPUT_PROBE");
+    if (((trace && *trace) || (probe && *probe)) && !getenv("RECOMP_MODS_DIR")) {
         char exe[4096];
         if (os_exe_path(exe, sizeof exe) == 0) {
             std::string dir(exe);

@@ -98,7 +98,7 @@ The window says what happened and what to do. The usual cases:
 - **The mouse:** click in the window to capture it. Hold **Escape** to release it.
 - **The intro movies:** press **Escape** to skip them.
 - **Quitting:** ⌘Q, or Exit Game in the menu.
-- **Settings:** F10 is the game's own menu, as on Windows. The app's settings (window, performance overlay) open with **⌘,** (Command-comma); **F11** shows or hides the frame rate.
+- **Settings:** F10 is the game's own menu, as on Windows. The app's settings (window, frame limit, performance overlay) open with **⌘,** (Command-comma). The game runs at up to **60 frames a second**, as on a Windows PC's 60 Hz screen, even on a 120 Hz display; the Frame limit row also offers 40, 120 and "original" (the display's own rate). **F11** shows the frame rate (counters, then a graph, then off); it starts hidden.
 - **One copy at a time:** the game uses fixed network ports (33334–33336) for every game, single player included. If another copy of Empire Earth is running on this Mac (this app, a Wine copy, CrossOver), or another program holds those ports, the app says so when it starts: close the other one first. Started anyway, the game stops as soon as you start a game (Play Random Map, the Scenario Editor, a LAN game).
 - **Multiplayer:** the game's own LAN play, with other Macs and with Windows players who have the GOG game (§5.1). For games over the internet, everyone joins a VPN that passes the game's LAN broadcasts, such as ZeroTier, which is free for Mac and Windows. The game list is the only way to join with GOG copies (§5.1 step 6). **Tailscale does not work for Empire Earth:** it passes no broadcasts, so the list stays empty, and Direct Connect cannot replace the list.
 
