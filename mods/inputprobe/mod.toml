@@ -1,0 +1,13 @@
+# The keyboard, sound and frame-rate probe (P7-C): docs/reference/performance.md,
+# "Input and frame rate". Loaded only when RECOMP_EE_INPUT_PROBE is set
+# (app/ee_standins.cpp points RECOMP_MODS_DIR at build/recomp/ee-mods then).
+# It only reads guest memory.
+id = "ee.inputprobe"
+name = "Keyboard, sound and frame-rate probe"
+version = "1.0.0"
+api = 1
+game = "957e35d75ba80309d094cbfb7367f7c6d61c5fd19fc5f7ca3f2e1cf636a065ab"
+affects_simulation = false
+
+[plugin]
+path = "inputprobe.dylib"

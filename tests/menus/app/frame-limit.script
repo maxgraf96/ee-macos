@@ -1,0 +1,31 @@
+# The windowed app's frame rate in game (run_app.py; Metal; not part of
+# --menus, which is headless): Escape through the intro movies, Single Player,
+# Play Random Map, Start Game with legion's parity settings (800x600x32), then
+# 40 seconds of the game (or of "Choose Civilization", which the render thread
+# draws the same way) with nobody at the controls, then quit. run_app.py reads
+# the app's own frame stats: the guest's presents a second at 800x600.
+# See ../settings.script for the pointer.
+timeout 400000
+pointer f32 [0x9197a8]+4 [0x9197a8]+8
+hold 250
+wait frames 30
+key ESCAPE
+wait 2500
+key ESCAPE
+wait 2500
+key ESCAPE
+wait size 1024 768 within 180000
+wait 3000
+moveby 1 1
+wait 300
+click 511 268                 # Single Player
+wait change within 15000
+wait 1000
+click 748 145                 # Play Random Map
+wait change within 20000
+wait 1500
+click 644 730                 # Start Game
+wait size 800 600 within 60000
+wait 40000
+dump app-frame-limit
+quit

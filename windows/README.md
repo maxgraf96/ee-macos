@@ -20,6 +20,7 @@ are tracked here; `deploy.sh` copies them from the git-ignored `original/gog/`.
 | `frida/fpu_hooks.js` | in game | `_controlfp`/`_control87`, engine `UM{Get,Set}FloatingPoint*`, thread creation, `LoadLibrary*`, D3D9 `CreateDevice` flags |
 | `frida/iat_census.js` | in game | API census: IAT stubs on every external import, counts per function × thread × CW |
 | `frida/sync_hooks.js` | in game | `ESChecksum*`/`ESVerify` call counts per thread × CW, `GetTotalChecksum` stream (0 calls in single player) |
+| `frida/input_probe.js` | in game | keyboard and hotkey fires, `SESoundManager::Play`, the window's key messages, main-loop passes and frames per 100 ms, the camera (docs/reference/performance.md) |
 | `frida/summarize.py` | Mac or legion | capture directory → Markdown tables |
 | `vm/` | Mac → legion | EE-VM: unattended Windows 11 VM in VMware, the second peer for LAN captures (`vm/README.md`) |
 
