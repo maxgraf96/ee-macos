@@ -207,6 +207,8 @@ Main-loop passes a second are `U` rows of the input probe (§5), frames `R` rows
 | Mac app, 1920×1200, **the user's save** (`AutoSave 20h.57m.31s`) | none | one | 83 (220) | 25.6 | **11.1** |
 | … the same save | 60 | scaled at 485 a second | 135 (157) | 51.0 | 24.1 |
 | … the same save | 60 | scaled at 603 a second (this change) | 159 (207) | 54.7 | **30.1–30.3** |
+| … the same save, with P7-A's scheduler (kit `ee` e84d11f) | 60 | scaled at 603 | 344–357 (225–301) | 58 | **30.1–30.4** |
+| Mac app, 800×600, a fresh game, with P7-A's scheduler | 60 | scaled at 603 | 783 (613–627) | 60 | 30.1–30.3 |
 
 One step at the parity game's start (zoom 1.0, speed 0.17) moves the look-at point 0.050: (1.0 + 0.5) × (0.17 + 0.5) × 0.05. In the user's own game, at the user's resolution, the 0.7 app moved the camera a third as far as Windows (9.1–11.1 against 30.5); the loop's rate is whatever time the render thread leaves the main thread, so it varied from run to run by a factor of two [measured]. Scaled, the distance in a second is the same at 18 passes a second (headless) and at 157 (the app) [measured].
 
@@ -221,7 +223,10 @@ The rate is not the whole of it: the user, watching the app, saw the camera move
 
 | Mac app run | Limit | Steps | Passes/s while held | Frames/s | Speed | Per-frame move p5 / median / p95 | Even p5 / p95 | Still frames |
 |---|---|---|---|---|---|---|---|---|
-| 800×600, a fresh game (`--app-frames`, this change) | 60 | scaled at 603 | 443–491 | 59–60 | **29.9–30.2** | 0.45 / 0.51 / 0.55 | 0.95 / 1.04–1.06 | 0 % |
+| 800×600, a fresh game (`--app-frames`), **with P7-A's scheduler** | 60 | scaled at 603 | 613–627 | 60 | **30.1–30.3** | 0.47 / 0.50 / 0.54 | 0.96 / 1.04–1.05 | 0 % |
+| the same, "original", with P7-A's scheduler | none | scaled at 603 | 517–530 | 119–120 | 30.2–30.3 | 0.21 / 0.25 / 0.29 | 0.88 / 1.10 | 0 % |
+| **the user's save, 1920×1200, with P7-A's scheduler** (two runs) | 60 | scaled at 603 | 225–301 | 57–59 | **30.1–30.4** | 0.27–0.41 / 0.50–0.51 / 0.67–0.78 | 0.56–0.94 / 1.07–1.30 | **0 %** |
+| 800×600, a fresh game (`--app-frames`, this change) | 60 | scaled at 603 | 443–491 | 59–60 | 29.9–30.2 | 0.45 / 0.51 / 0.55 | 0.95 / 1.04–1.06 | 0 % |
 | the same, "original" | none | scaled at 603 | 362–403 | 107–117 | 30.3 | 0.20 / 0.26 / 0.31–0.50 | 0.90 / 1.10 | 0 % |
 | 800×600, a fresh game | 60 | scaled at 485 | 507–517 | 60 | 24.2–24.4 | 0.37 / 0.41 / 0.44 | 0.96 / 1.05 | 0 % |
 | the same | none | scaled at 485 | 376–452 | 118–120 | 24.0–24.3 | 0.15 / 0.20 / 0.25 | 0.85 / 1.13 | 0 % |
@@ -230,7 +235,7 @@ The rate is not the whole of it: the user, watching the app, saw the camera move
 | the user's save, 1920×1200 | 60 | scaled at 485 | 188–195 | 58–59 | 24.3 | 0.21–0.31 / 0.41 / 0.53–0.64 | 0.50–0.73 / 1.38–1.39 | 1.0–1.9 % |
 | the same (0.7) | none | one per pass | 184–191 | 61 | 9.1–9.5 | 0.05 / 0.15 / 0.25–0.28 | 0.31 / 1.60–1.63 | 0.9–3.6 % |
 
-In a light game the 60 fps limit and scaled steps give motion even to ±5 % frame to frame. In the user's game the main loop gets three to four passes per frame, at uneven times: the per-frame move ranged from 0.8 to 1.2 of even in one run (passing the check) and from 0.5 to 1.4 in another, with up to one frame in 50 that did not move (other workstreams' runs shared the machine). That is the burstiness the user saw, and it varies with what else runs. Scaled steps cannot do better than the passes they get; even motion there needs the main thread to run more often, between frames (P7-A's scheduler). `tools/test.py --app-frames` checks it at the 60 fps default (at most 2 % still frames, the per-frame move's p5 at least half its median and p95 at most 1.5 times it, the speed within 15 % of Windows'), and `tools/input/evenness.py --check` applies the same to any probe, so it serves the scheduler work as its acceptance test.
+In a light game the 60 fps limit and scaled steps give motion even to ±5 % frame to frame. In the user's game the main loop gets three to four passes per frame, at uneven times: the per-frame move ranged from 0.8 to 1.2 of even in one run (passing the check) and from 0.5 to 1.4 in another, with up to one frame in 50 that did not move (other workstreams' runs shared the machine). That is the burstiness the user saw, and it varies with what else runs. With P7-A's scheduler merged (kit `ee` e84d11f) the main loop makes 225–300 passes a second during the hold in the user's save, no frame stands still, the speed is Windows' (30.1–30.4), and three of the four holds pass `--check` (the fourth's p95 is 1.53 of its median, against 1.5): what is left is three to five passes a frame at uneven times, and in a light game the loop runs at Windows' rate (613–627 a second) and the motion is even to ±5 %. Scaled steps cannot do better than the passes they get; even motion there needs the main thread to run more often, between frames (P7-A's scheduler). `tools/test.py --app-frames` checks it at the 60 fps default (at most 2 % still frames, the per-frame move's p5 at least half its median and p95 at most 1.5 times it, the speed within 15 % of Windows'), and `tools/input/evenness.py --check` applies the same to any probe, so it serves the scheduler work as its acceptance test.
 
 ### 2. W, A, S and D with nothing selected
 
@@ -254,6 +259,9 @@ In a light game the 60 fps limit and scaled steps give motion even to ±5 % fram
 | 60 | 60 | 480 | 94 s (1.5 cores) |
 | no limit, another game | 80 | 303 | 2.2 cores over 10 s in game |
 | 60, the same game type | 60 | 439 | 1.8 cores |
+| 60, with P7-A's scheduler (`--app-frames`) | 60 | 783 | 29 s for the whole run (against 66–88 s before it) |
+| no limit, with P7-A's scheduler | 120 | 592 | 35 s |
+| the user's save, 1920×1200, 60, with P7-A's scheduler | 58 | 344–357 | 0.9 cores in game (2.1 before it) |
 
 Other pairs (different maps, §1.2, other workstreams' runs in parallel) gave 2.1 against 2.0 cores at 64 against 60 frames a second, and the user's save at 1920×1200 1.3 cores at 26 frames a second against 2.1 at 51: what the render thread no longer spends, the main thread's busier loop and the scheduler take (P7-A's section). The limit's point is the loop's time and a steady 60; the CPU saved is up to a fifth.
 
@@ -267,7 +275,7 @@ Other pairs (different maps, §1.2, other workstreams' runs in parallel) gave 2.
 
 | Test | What |
 |---|---|
-| `tools/test.py --menus keyboard` (`tests/menus/keyboard.script`, headless) | Legion's parity game, nothing selected: Up and then Down held 1.0 s each, the camera's look-at point peeked before and after: `run_menus.py` wants Windows' 30.5 within 25 % (27.4 both ways headless; one step per pass gave 1.0). `]` and `[` held 0.2 s: the zoom goes in and back out, within 0..1. W, A, S and D tapped, then typed: through the input probe, one `WM_KEYDOWN` and one `WM_CHAR` per press, one aircraft fire and the alarm's two lookups for A and D, nothing for W and S, no sound looked up again and again |
+| `tools/test.py --menus keyboard` (`tests/menus/keyboard.script`, headless) | Legion's parity game, nothing selected: Up and then Down held 1.0 s each, the camera's look-at point peeked before and after: `run_menus.py` wants Windows' 30.5 within 25 % (27.4 both ways headless, 30.3 with P7-A's scheduler; one step per pass gave 1.0). `]` and `[` held 0.2 s: the zoom goes in and back out, within 0..1. W, A, S and D tapped, then typed: through the input probe, one `WM_KEYDOWN` and one `WM_CHAR` per press, one aircraft fire and the alarm's two lookups for A and D, nothing for W and S, no sound looked up again and again |
 | `tools/test.py --app-frames` (`tests/menus/run_app.py`, the app on Metal in the background) | The app's own frame stats in game: at most 61 presents a second with the default limit, the display's rate with "original"; the main loop's passes and the CPU time for both; Up and Down held 2 s each, and at the default limit the camera's evenness (§1.4) must pass `evenness.py --check` |
 | kit `host_tests` | `paced_refresh_delay`: frames on refresh boundaries, averaging the limit at 120, 144, 100 and 60 Hz, never closer than one refresh, no burst after a late frame; the key transition journal |
 | kit `dx_tests` | a key tapped between two polls is a down and an up record, and still nothing with no journal |
