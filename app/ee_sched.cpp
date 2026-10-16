@@ -45,14 +45,20 @@ const Role kRoles[] = {
     {0x10052d3f, "net client Receive"},
 };
 
+// "EXE+ce947", "engine+55d2e": short enough for the trace's name column.
 std::string where(uint32_t a) {
     char buf[96];
     const LoaderModule *m = loader_module_containing(a);
-    if (m)
-        snprintf(buf, sizeof buf, "%s+%x", m->base == loader_image_base() ? "EXE" : m->name.c_str(),
-                 a - m->base);
-    else
+    if (!m) {
         snprintf(buf, sizeof buf, "%08x", a);
+        return buf;
+    }
+    std::string name = m->base == loader_image_base() ? "EXE" : m->name;
+    if (name == "Low-Level Engine.dll")
+        name = "engine";
+    else if (name.size() > 4 && name.compare(name.size() - 4, 4, ".dll") == 0)
+        name.resize(name.size() - 4);
+    snprintf(buf, sizeof buf, "%s+%x", name.c_str(), a - m->base);
     return buf;
 }
 
@@ -64,7 +70,7 @@ const char *name_thread(uint32_t start, uint32_t param) {
     for (const Role &r : kRoles)
         if (r.body == body)
             return r.name;
-    out = (body == start ? "start " : "TSThread ") + where(body);
+    out = (body == start ? "start " : "TS ") + where(body);
     return out.c_str();
 }
 
