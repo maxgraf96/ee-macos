@@ -73,8 +73,11 @@ def same_picture(a, b, pointer=48, tolerance=24):
 # nothing selected, the default zoom): how fast Windows moves the camera's
 # look-at point, in its units a second (legion 0080, docs/reference/
 # performance.md "Input and frame rate"), and how close the Mac has to come
-# over one second.
-WINDOWS_SCROLL_PER_S = None
+# over one second: Windows' 485 main-loop passes a second (legion.md's in-game
+# census; app/ee_input.cpp) times one step at the scenario's start, 0.050.
+# The Mac's first step of a press is one step and its last pass falls partly
+# outside the second, so headless (18 passes a second) comes out 10-15 % short.
+WINDOWS_SCROLL_PER_S = 485 * 0.050
 SCROLL_TOLERANCE = 0.25
 # EEUIESelectClosestAircraft (A, B, D, F) looks its "none" sound up twice when
 # the player has no aircraft (EXE 0x5d925d and 0x5d9268, return addresses).
@@ -102,6 +105,15 @@ def check_keyboard(out, probe):
                             (label, distance, WINDOWS_SCROLL_PER_S))
         if distance <= 0:
             problems.append("%s held for 1 s did not move the camera" % label)
+    zooms = [f32(int(z, 16)) for z in
+             re.findall(r"^\[script\] line \d+: peek 00918db0: (\w+)$", out, re.M)]
+    if len(zooms) != 3:
+        problems.append("the zoom was peeked %d times, not 3" % len(zooms))
+    else:
+        print("     keyboard: ] then [ held 0.2 s each: zoom %.3f -> %.3f -> %.3f" % tuple(zooms))
+        if not (zooms[1] < zooms[0] and zooms[2] > zooms[1]) or not all(0 <= z <= 1 for z in zooms):
+            problems.append("] and [ did not zoom in and back out within 0..1: %s" %
+                            ", ".join("%.3f" % z for z in zooms))
     if not probe.is_file():
         return problems + ["no input probe (%s)" % probe.name]
     rows = [line.strip().split(",") for line in probe.read_text().splitlines()

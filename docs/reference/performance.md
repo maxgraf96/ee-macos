@@ -168,3 +168,95 @@ In the 20:57 save in single player the game chose 73-124 PTs a second on the Mac
 - **Multimedia timers fire only from the message pump.** The simulation's pacing timer is a `timeSetEvent` in event mode (engine 0x1005ebc0: `TIME_CALLBACK_EVENT_SET`, periodic), and the kit signals it in `host_pump_timers`, which runs only inside `PeekMessage`/`GetMessage`; a late pump also moves the next due time (`next_due = now + period`). An event-mode timer needs no guest thread, so the scheduler could fire it at its due time like a wait's deadline, as Windows' timer thread does. Not done: in this save the simulation kept up regardless.
 - **Long shims hold the baton**: `_AIL_set_named_sample_file` 128 ms during the load (main thread), `GetDC` on the render thread 3-15 ms. Hot paths, P7-B's.
 - **Firewall prompts.** macOS asks again for every rebuilt ad-hoc-signed binary that opens a port; a developer `ee_boot` signed with a stable self-signed identity would keep the approval across builds.
+
+---
+
+## Input and frame rate (P7-C)
+
+The user reported three things after last night's games: W, A, S or D pressed in game with nothing selected made "weird sounds"; a held arrow key scrolled the camera only a tiny amount compared with Windows; and the app ran at the display's 120 Hz (74 fps on average in the log) where 60 is plenty.
+
+| Report | Cause | Fix |
+|---|---|---|
+| Held arrow keys scroll slowly | One fixed camera step per pass of the main thread's loop (§1.1). On Windows the loop makes about 485 passes a second; in the app it made about 240 at 800×600 uncapped, and fewer in a big game, because the render thread held the cooperative baton for most of each 120 Hz frame | The 60 fps cap gives the main thread its passes back (480 a second); each step of a held key is also scaled by the time since its previous step, so the speed is Windows' at any loop rate (`app/ee_input.cpp`) |
+| W/A/S/D sounds | A, B, D and F without modifiers are "select the closest aircraft" (`EEUIESelectClosestAircraft`); with no aircraft it plays sound 0x3c2, once per press. W and S do nothing. The Mac does the same as Windows (§2) | None needed for the sounds. A quick tap of any hotkey was lost when the game polled DirectInput less often than the key was held: the kit's keyboard buffer now replays every key transition |
+| 120 fps | The kit's Frame limit only paced games whose frame clock it hooks; Empire Earth paces itself by `Flip` and the vertical blank, so it presented at the display's rate | The limit now holds a `Flip` or `Present` that waits for the vertical blank; Empire Earth's default is 60 (`game.toml [settings] frame_limit`) |
+| The "RPF … DROP" graph | A desktop host's default overlay is the graph, and every profile saved it | `game.toml [settings] performance_overlay = "off"`; an overlay nobody chose follows the default (§3.2) |
+
+### 1. Held arrow keys
+
+#### 1.1 How Empire Earth scrolls by keyboard [static]
+
+- `RegisterInGameHotkeys` (EXE 0x64c8b0) binds Up, Down, Left and Right (DIK 0xc8, 0xd0, 0xcb, 0xcd) to `EEUIEKeyboardScroll` (vtable 0x8348fc, fire 0x5c9070) as the hotkey's **continuous** event, and `[` / `]` (0x1a, 0x1b) to `EEUIEHotKeyZoom` (0x5c913c) the same way. The events in `UIForm::AddHotKey(key, mod1, mod2, mod3, just pressed, pressed, just released, double pressed, group, bool)`: A and D take the first slot (once per press), the arrows the second (every update while held), F10's options the third.
+- `UIHotKey::FireEvents` (engine 0x10075547) fires the continuous event whenever the key's entity reads down (`ISKey::GetValue`, bit 0 of the key's transition counter that `ISKeyboard::Refresh` keeps from `GetDeviceData`).
+- Who calls it: the main thread's loop (EXE 0x6603c4) drains its `TSThread` messages, then calls 0x661889: `gISKeyboard->Refresh`, `gISMouse->Refresh`, the cursor, then `UIManager::UpdateUI` (vtable +0x28), which reaches the hotkeys. The pass ends in `Sleep(1)`. So **the camera moves one step per pass**, and the speed is set by how often the loop runs.
+- One step: `(zoom + 0.5) × (scroll speed + 0.5) × 0.05` (zoom at 0x918db0, 0 in to 1 out; the speed at 0x9193ac, 0.17 from the registry's Side Scroll Speed 200), passed to the camera (0x918cd0) at 0x51e2e6, which scales it again by `zoom + 0.5` and turns it into the view's axes. At the parity game's start (zoomed fully out, 1.0) one step moves the camera's look-at point (0x918d48, 0x918d4c) 0.050 [measured].
+- The edge of the screen scrolls by elapsed time instead (0x4050fc multiplies by a time field), which is why only the keys were slow.
+
+#### 1.2 Measured
+
+Main-loop passes a second are `U` rows of the input probe (§5), frames `R` rows; "one step" is the 0.7 behaviour (`RECOMP_EE_ORIGINAL_KEY_SCROLL=1`), "scaled" this change.
+
+| Run | Limit | Steps | Passes/s idle (holding a key) | Frames/s | A held arrow key: camera distance in 1 s |
+|---|---|---|---|---|---|
+| Windows: legion's census (legion.md, graphics.md §11.3) | – | one per pass | 485 (message pump) | 79–83 | 485 × 0.050 ≈ 24 [inferred]; legion 0080 measures it |
+| Mac headless, parity game (`ee_boot`, software renderer) | none | one | 20 | 18 | 1.0 |
+| … the same, `tests/menus/keyboard.script` | none | scaled | 18 | 17 | Up 21.0, Down 21.9 |
+| Mac app, 800×600, a fresh game | none | one | 240 | 117 | – |
+| … the same game type | 60 | one | 480 | 60 | – |
+| Mac app, 800×600, three more fresh games | none / 60 / 60 | one / one / scaled | 353 (371–405) / 402 (464–499) / 506 (497–504) | 63.6 / 60.0 / 59.7 | (each reached the map's edge within the 2 s hold) |
+| Mac app, 1920×1200, **the user's save** (`AutoSave 20h.57m.31s`) | none | one | 83 (220) | 25.6 | **11.1** |
+| … the same save | 60 | scaled | 135 (157) | 51.0 | **24.1** |
+
+One step at the parity game's start (zoom 1.0, speed 0.17) moves the look-at point 0.050: (1.0 + 0.5) × (0.17 + 0.5) × 0.05. In the user's own game, at the user's resolution, the 0.7 app moved the camera less than half as far as Windows, and less still with the frame rate lower; the loop's rate is whatever time the render thread leaves the main thread, so it varied from run to run by a factor of two [measured]. Scaled, the distance in a second is the same at 18 passes a second (headless) and at 157 (the app) [measured].
+
+#### 1.3 The fix
+
+- **The 60 fps limit (§3)** is most of it: the render thread waits for its next 60 Hz slot in the scheduler, the main thread runs through that wait, and the loop's passes go from about 240 to about 480 a second, Windows' rate.
+- **Scaled steps** (`app/ee_input.cpp`, every Empire Earth host): before each step of a held key the hook measures the time since that key's previous step and multiplies the step at its one call site (0x51e2e6 from 0x5c9131; the zoom at 0x51f2f3 from 0x5c9258) by that time in Windows passes (485 a second). A key held for a second moves the camera as far as on Windows however often the loop runs, and a loop at Windows' rate scales by one. The first step of a press is one step; a gap over 100 ms counts as 100 ms, so a stall does not jump the camera. `RECOMP_EE_ORIGINAL_KEY_SCROLL=1` turns it off. The camera is local: no simulation state, nothing on the network (`tools/test.py --simparity` agrees with Windows as before).
+
+### 2. W, A, S and D with nothing selected
+
+- **Static.** With no modifier, A, B, D and F fire `EEUIESelectClosestAircraft` (0x5d9090) with types 1, 0, 3, 2; it walks the player's units for an aircraft of that kind and, with none, looks sound 0x3c2 up (0x405a58) and plays it through `SESoundManager::Play`. Alt+A/S/D/G set unit stances; Ctrl+letters select unit groups. Plain W and S are not bound. Text typed in game reaches the game as `WM_CHAR` (`UIManager::UpdateTranslatedKey`), which does nothing with no text field focused.
+- **Mac [measured, headless and app].** Each tap of A or D: one `WM_KEYDOWN`, one `WM_CHAR`, one aircraft fire and sound 0x3c2 looked up twice (by 0x5d925d and 0x5d9268) and played once: `AIL_start_sample` at volume 127, centred, 22,050 Hz. Sound 0x3c2 is **`sounds\hotkeyalarm.wav`** in `data.ssa`: 1,093 bytes of 8-bit PCM, 50 ms, peak 0.98 of full scale (the mixer's trace, `RECOMP_HOST_TRACE_AUDIO`, says "1093 bytes ... peak 0.977"; the archive's entry is the only one that size). The app's own mix (`RECOMP_HOST_AUDIO_CAPTURE`, music and ambient sounds off) has the whole 50 ms tick at each press and nothing else: no discontinuity, no repeat. W and S: the messages and nothing else. The windowed app's typing path (the key, then the character as input-method text) gives one `WM_CHAR` per press, not two. DirectInput has one down and one up record per press; a held key's autorepeat is not a transition, and the hotkey fires once per press (`D` held 1.5 s: one alarm). So of the four suspects, none: no key arrives twice (a), autorepeat floods nothing (b), the scan codes are right (A 0x1e, D 0x20, W 0x11, S 0x1f) (c), and the mixer plays the sample whole (d).
+- **Windows.** The same executable and the same hotkey table, so the same alarm for A and D with no aircraft [static]. Legion's measurement of W/A/S/D with nothing selected (loopback audio, the probe's `play` events) is request 0080, parked while the user was at the laptop.
+- **What changed.** Nothing in the sounds. But the probe showed the kit's DirectInput keyboard losing a press: it built its buffer by comparing the key states at each poll, and Empire Earth polls once per main-loop pass, so a key pressed and released between two passes (a quick tap, or a typed character) never reached the game. Windows' buffer has both records. The kit now keeps every key transition and replays them (kit CHANGELOG).
+
+### 3. The frame rate
+
+#### 3.1 The 60 fps limit
+
+- Empire Earth flips with `Flip(NULL, DDFLIP_DONOTWAIT)`, without `DDFLIP_NOVSYNC` (graphics.md §11; the registry's Wait for VSync is 1). The kit returns from such a `Flip` at the presenter's next refresh, so the game presented up to 120 frames a second on a ProMotion display. The settings page's Frame limit only paced games whose frame clock the kit hooks (Populous).
+- **Kit:** a `Flip` without `DDFLIP_NOVSYNC`, or a DXGI `Present` with a sync interval, now also keeps to the Frame limit (`host/frame_pacing.h` `paced_refresh_delay`, called from `host_present_refresh_delay`): it waits for the first refresh at least 1/limit after the previous frame's, on a deadline that advances by 1/limit, so 60 on a 120 Hz display is every other refresh, and a late frame starts a new phase rather than catching up. The wait is the scheduler's (`guest_sleep_ms`): the game's other threads run through it.
+- **Empire Earth:** `game.toml [settings]` lists the Frame limit row and makes 60 the default (`frame_limit = 60`); the player chooses 40, 60, 120 or "original" (the display's rate) on the settings page (⌘,).
+- **The animation clock is untouched.** The game's simulation and animations run on its own clocks (`TMGetTime`, the PTs the communications tick schedules), not on frames: 42.9 PTs a second at 80 frames a second, 42.8 at 60 (the probe's `P` rows over 20 s) [measured].
+
+| Mac app, 800×600, a fresh game | Frames/s in game | Main-loop passes/s in game | CPU, the whole 63 s run (user + system) |
+|---|---|---|---|
+| no limit (the display's 120 Hz) | 117 | 240 | 122 s (1.9 cores) |
+| 60 | 60 | 480 | 94 s (1.5 cores) |
+| no limit, another game | 80 | 303 | 2.2 cores over 10 s in game |
+| 60, the same game type | 60 | 439 | 1.8 cores |
+
+Other pairs (different maps, §1.2, other workstreams' runs in parallel) gave 2.1 against 2.0 cores at 64 against 60 frames a second, and the user's save at 1920×1200 1.3 cores at 26 frames a second against 2.1 at 51: what the render thread no longer spends, the main thread's busier loop and the scheduler take (P7-A's section). The limit's point is the loop's time and a steady 60; the CPU saved is up to a fifth.
+
+#### 3.2 The performance overlay
+
+- A desktop host's default is the frame-time graph (`platform_ui_default_overlay()` 2). `game.toml [settings] performance_overlay = "off"` makes a fresh profile start without it; **F11** cycles counters, graph, off.
+- The kit saves every declared setting, defaults included, so the user's profile held the graph as if chosen. The kit now marks a choice made on the settings page or with F11 (`host.display/overlay_chosen`), and an unmarked graph follows the default: the user's profile loses the graph once.
+- `frame_limit` needs no such care: profiles saved the windowed host's default, 60, all along.
+
+### 4. Tests
+
+| Test | What |
+|---|---|
+| `tools/test.py --menus keyboard` (`tests/menus/keyboard.script`, headless) | Legion's parity game, nothing selected: Up and then Down held 1.0 s each, the camera's look-at point peeked before and after: `run_menus.py` wants Windows' distance, 485 passes × 0.050 = 24.3, within 25 % (21.0–23.3 headless over three runs; one step per pass gave 1.0). `]` and `[` held 0.2 s: the zoom goes in and back out, within 0..1. W, A, S and D tapped, then typed: through the input probe, one `WM_KEYDOWN` and one `WM_CHAR` per press, one aircraft fire and the alarm's two lookups for A and D, nothing for W and S, no sound looked up again and again |
+| `tools/test.py --app-frames` (`tests/menus/run_app.py`, the app on Metal in the background) | The app's own frame stats in game: at most 61 presents a second with the default limit, the display's rate with "original"; the main loop's passes and the CPU time for both |
+| kit `host_tests` | `paced_refresh_delay`: frames on refresh boundaries, averaging the limit at 120, 144, 100 and 60 Hz, never closer than one refresh, no burst after a late frame; the key transition journal |
+| kit `dx_tests` | a key tapped between two polls is a down and an up record, and still nothing with no journal |
+| kit `mods_tests` (`display_game_defaults_and_overlay_choice`) | the game's defaults for a fresh profile; an unchosen graph follows "off", a chosen one stays |
+| kit `tests/test_game_config.py` | `[settings] frame_limit` and `performance_overlay` |
+
+### 5. Tools
+
+- **`mods/inputprobe`** (ee-macos): a mod plugin, loaded only with `RECOMP_EE_INPUT_PROBE=FILE` (`app/ee_standins.cpp` points `RECOMP_MODS_DIR` at `build/recomp/ee-mods`; in the app set `RECOMP_MODS_DIR` too). One CSV row per main-loop pass (`U`), keyboard scroll step (`S`, with the camera), zoom key (`Z`), aircraft hotkey (`A`), sound lookup (`N`, id and caller), keyboard or IME message to the game window (`M`), rendered frame (`R`) and, once a second, the physics ticks run (`P`), each with host milliseconds. It only reads.
+- **`windows/frida/input_probe.js`**: the Windows twin (legion 0080): the same EXE functions counted per 100 ms, `SESoundManager::Play`, the window's key messages, the camera every 50 ms.

@@ -38,17 +38,18 @@
 
 namespace {
 
-constexpr uint32_t kUiStep = 0x00661889;     // one pass of the main loop: Refresh, then the UI
-constexpr uint32_t kKeyScroll = 0x005c9070;  // EEUIEKeyboardScroll::Fire, ECX+0xc the direction
-constexpr uint32_t kKeyZoom = 0x005c913c;    // EEUIEHotKeyZoom::Fire, ECX+0xc out (0) or in (1)
+constexpr uint32_t kUiStep = 0x00661889;    // one pass of the main loop: Refresh, then the UI
+constexpr uint32_t kKeyScroll = 0x005c9070; // EEUIEKeyboardScroll::Fire, ECX+0xc the direction
+constexpr uint32_t kKeyZoom = 0x005c913c; // EEUIEHotKeyZoom::Fire, ECX+0xc in (0, ]) or out (1, [)
 constexpr uint32_t kCameraMove = 0x0051e2e6; // camera (thiscall): move by (float, float), RET 8
 constexpr uint32_t kCameraMoveFromKey = 0x005c9136; // ... its return address in kKeyScroll
 constexpr uint32_t kCameraZoom = 0x0051f2f3;        // camera (thiscall): zoom to (float), RET 4
 constexpr uint32_t kCameraZoomFromKey = 0x005c925d; // ... its return address in kKeyZoom
 constexpr uint32_t kZoomState = 0x00918db0;         // camera +0xe0: the zoom, 0 (in) to 1 (out)
 
-// The main loop's passes a second on Windows, in game with nothing selected
-// (legion 0080).
+// The main loop's passes a second on Windows, in game: legion's census of the
+// main thread (docs/reference/legion.md: its message pump, 485 a second);
+// legion request 0080 counts 0x661889 itself.
 constexpr double kWindowsPassesPerSecond = 485.0;
 // A pass this much later than the last one is a stall, not a held key's
 // motion: at most this much of it moves the camera.

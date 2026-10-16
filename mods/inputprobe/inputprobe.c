@@ -25,6 +25,8 @@
  *   M,ms,msg,wparam,lparam  a keyboard or IME message reaching the game window
  *                           (WndProc 0x6622dd)
  *   R,ms                    a rendered frame (RTSGraphics::Render, 0x51015d)
+ *   P,ms,pt                 once a second: the physics ticks the world has run
+ *                           (EEPhysics at 0x919774, +0xb4), the game's own clock
  */
 #include "pop_mod_api.h"
 
@@ -42,7 +44,9 @@ POP_MOD_DECLARE_ABI();
 #define VA_SOUND_BY_ID 0x00405a58u
 #define VA_WNDPROC 0x006622ddu
 #define VA_RENDER 0x0051015du
-#define VA_CAMERA_X 0x00918d48u /* the camera (0x918cd0) +0x78/+0x7c: the look-at point */
+#define VA_CAMERA_X 0x00918d48u  /* the camera (0x918cd0) +0x78/+0x7c: the look-at point */
+#define VA_WORLD_PTR 0x00919774u /* EEPhysics * */
+#define W_PT 0xb4u               /* PTs executed */
 
 static FILE *g_out;
 static double g_t0;
@@ -70,9 +74,19 @@ static float rdf(const PopModApi *api, uint32_t a) {
     return v.f;
 }
 
+static double g_last_pt_row = -1000;
+
 static void on_ui(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv, void *user) {
-    (void)api, (void)cpu, (void)inv, (void)user;
-    fprintf(g_out, "U,%.1f\n", ms());
+    (void)cpu, (void)inv, (void)user;
+    const double t = ms();
+    fprintf(g_out, "U,%.1f\n", t);
+    if (t - g_last_pt_row >= 1000) {
+        const uint32_t world = rd(api, VA_WORLD_PTR);
+        if (world) {
+            fprintf(g_out, "P,%.1f,%u\n", t, rd(api, world + W_PT));
+            g_last_pt_row = t;
+        }
+    }
 }
 static void on_scroll(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv, void *user) {
     (void)inv, (void)user;
