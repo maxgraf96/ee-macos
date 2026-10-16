@@ -41,6 +41,9 @@ globals = "globals.toml"
 # EE has no audited animation counter; a sentinel in the unmapped arena.
 animation_counter = 0x00f00100
 volatile_reads = []
+# Flags are computed only where an instruction can read them (kit translate.py
+# "program flag liveness"; docs/reference/performance.md).
+flag_liveness = "program"
 entry_points = []
 
 # ---------------------------------------------------------------- base map --

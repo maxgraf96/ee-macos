@@ -1,0 +1,12 @@
+# The performance probe (P7-B): docs/reference/performance.md. Loaded only when
+# RECOMP_EE_PERF_TRACE is set and RECOMP_MODS_DIR names a root holding it. It
+# installs no hook and changes nothing: a host thread reads the PT counter.
+id = "ee.perfprobe"
+name = "Performance probe"
+version = "1.0.0"
+api = 1
+game = "957e35d75ba80309d094cbfb7367f7c6d61c5fd19fc5f7ca3f2e1cf636a065ab"
+affects_simulation = false
+
+[plugin]
+path = "perfprobe.dylib"
