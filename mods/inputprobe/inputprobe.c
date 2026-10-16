@@ -24,7 +24,9 @@
  *                           SESoundManager::Play of a game sound)
  *   M,ms,msg,wparam,lparam  a keyboard or IME message reaching the game window
  *                           (WndProc 0x6622dd)
- *   R,ms                    a rendered frame (RTSGraphics::Render, 0x51015d)
+ *   R,ms,x,y                a rendered frame (RTSGraphics::Render, 0x51015d) and
+ *                           the camera's look-at point it starts from: how far
+ *                           the camera moved per frame (tools/input/evenness.py)
  *   P,ms,pt                 once a second: the physics ticks the world has run
  *                           (EEPhysics at 0x919774, +0xb4), the game's own clock
  */
@@ -115,8 +117,8 @@ static void on_wndproc(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation 
                 rd(api, cpu->esp + 16));
 }
 static void on_render(const PopModApi *api, pop_cpu_v1 *cpu, PopHookInvocation *inv, void *user) {
-    (void)api, (void)cpu, (void)inv, (void)user;
-    fprintf(g_out, "R,%.1f\n", ms());
+    (void)cpu, (void)inv, (void)user;
+    fprintf(g_out, "R,%.1f,%.5f,%.5f\n", ms(), rdf(api, VA_CAMERA_X), rdf(api, VA_CAMERA_X + 4));
 }
 
 /* No game view: the snapshot the kit takes for Populous's entity table means

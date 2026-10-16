@@ -1,10 +1,12 @@
-# The windowed app's frame rate in game (run_app.py; Metal; not part of
-# --menus, which is headless): Escape through the intro movies, Single Player,
-# Play Random Map, Start Game with legion's parity settings (800x600x32), then
-# 40 seconds of the game (or of "Choose Civilization", which the render thread
-# draws the same way) with nobody at the controls, then quit. run_app.py reads
-# the app's own frame stats: the guest's presents a second at 800x600.
-# See ../settings.script for the pointer.
+# The windowed app in game (run_app.py; Metal; not part of --menus, which is
+# headless): Escape through the intro movies, Single Player, Play Random Map,
+# Start Game with legion's parity settings (800x600x32; run_app.py turns on
+# custom civilizations, so no "Choose Civilization" comes first), then the
+# game with nobody at the controls: 10 seconds still, then Up held for 2 s and
+# Down for 2 s with the pointer in the middle of the map (no edge scrolling).
+# run_app.py reads the app's own frame stats (the guest's presents a second at
+# 800x600) and, from the input probe, how evenly the camera moved from frame
+# to frame (tools/input/evenness.py). See ../settings.script for the pointer.
 timeout 400000
 pointer f32 [0x9197a8]+4 [0x9197a8]+8
 hold 250
@@ -26,6 +28,21 @@ wait change within 20000
 wait 1500
 click 644 730                 # Start Game
 wait size 800 600 within 60000
-wait 40000
+wait 2500
+mark
+wait change 0.5 within 240000 # the loading screen gives way to the game
+wait 5000
+move 400 300
+wait 10000
+log hold Up
+key UP down
+wait 2000
+key UP up
+wait 1000
+log hold Down
+key DOWN down
+wait 2000
+key DOWN up
+wait 1000
 dump app-frame-limit
 quit
