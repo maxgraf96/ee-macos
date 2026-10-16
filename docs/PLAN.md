@@ -1,6 +1,6 @@
 # Empire Earth → native macOS (Apple Silicon): port plan
 
-Status: **v0.5** · 2026-10-15 · owner: Max
+Status: **v0.6** · 2026-10-16 · owner: Max
 Background research: [`research/neoee.md`](research/neoee.md), [`research/strategies.md`](research/strategies.md).
 
 ---
@@ -544,6 +544,13 @@ Details: [phase5.md](phase5.md), [lansession.md](reference/lansession.md).
 **Status 2026-10-15:** **the shareable `EmpireEarth.app` exists** (P6-B1–B3 merged, [phase6.md](phase6.md), [INSTALL.md](INSTALL.md)). It is 191 MB (DMG 78 MB) and holds nothing game-derived. It bundles a 76 MB clang+lld and a trimmed Python. Its first run imports the player's GOG files, then translates and compiles them in about 2–3 min on an M4 Max, with no developer tools. GOG's real offline installer (Inno Setup 5.6.2, one 667 MB file) imports and builds in 154 s. **Release 0.7** (P6-D) clears the download quarantine from the app's own files after the one *Open Anyway*, and asks to be moved out of App Translocation; `EmpireEarth-0.7.dmg` is ready for the first test on a never-Xcode Mac ([clean-mac-test.md](reference/clean-mac-test.md)). Open: that test, this repository's licence.
 
 **Status 2026-10-15, evening: M5 in substance.** Release 0.7 passed on the user's **clean Mac**: no Xcode, Homebrew or repository there. It imported from GOG's offline installer (Inno Setup 5.6.2), and a **30-minute LAN game played well**. Open: a licence for this repository, FFmpeg's LGPL source offer, notarization if friends find *Open Anyway* too much friction, and ZeroTier end to end ([phase6.md](phase6.md), [clean-mac-test.md](reference/clean-mac-test.md) §9).
+
+**Status 2026-10-16: release 0.8, the performance release.** After a night of LAN games with friends (stutter, slow panning, slow loading, 3-second command delay), three workstreams fixed it ([performance.md](reference/performance.md)):
+- **P7-A:** the kit's guest scheduler follows Windows' single-processor rules, critical sections keep the baton, and translated code has preemption points. Huge-map generation went from 22.6 s to about 1–2 s, against 0.35 s on Windows.
+- **P7-B:** the hot paths: a dispatch cache, flag liveness and direct surface transfers.
+- **P7-C:** arrow-key scrolling at Windows' speed, every key transition kept, and the Frame limit; the default is 120 and it holds unsynced Flips.
+
+The user's playtest reported loading, panning, responsiveness and big battles fixed. A/D's alarm is the original game's hotkey.
 
 - App bundle + first-run importer: GOG offline installer (Inno) or game folder → hash check → translate + compile (one-time, cached).
 - **Bundled LLVM toolchain** (D10, §5.8): freestanding build, lld link, ad-hoc signing, cached output.
