@@ -171,6 +171,216 @@ In the 20:57 save in single player the game chose 73-124 PTs a second on the Mac
 
 ---
 
+## Hot paths and loading (P7-B)
+
+What costs CPU in a heavy scene and while a map loads, and how much of it can go without changing a simulation value. Kit `feat/hotpaths`, ee-macos `phase7/hotpaths`. Everything is measured on top of P7-A's scheduler and P7-C's 60 fps default.
+
+- **base** is kit `ee` b835958 with only P7-B's measuring changes (§B.3 item 3).
+- **new** is `feat/hotpaths`.
+- **Windows** is legion's unmodified game (0075: Core Ultra 9 275HX, RTX 5070 Ti, 1920×1080 windowed through GOG's wrapper, `windows/frida/perf_probe.js`; `analysis/perf/legion-0075/`).
+
+| Report | Cause | Fix | base → new [measured] |
+|---|---|---|---|
+| The camera stutters when more objects come into view | The simulation's ticks and the render thread share one core (P7-A). Both run translated code, which spent 42% of the simulation's time and a sixth of the renderer's in dispatch. When the camera brings more into view, the game also reads back the back buffer about 7 times a second (`GetDC`, `Lock`); each readback waits for the GPU with the baton held, 2.3 ms | Dispatch cache and program flag liveness (§B.3 items 1-2). Readbacks into guest memory directly, and the GPU drawing a frame's passes as they are recorded (items 4-5) | Red bars over the four 12-s sweeps of the user's save: **57-59 → 12-15**, 1.36 s → 0.30-0.36 s of late frames. Worst frame 69-71 → 38-47 ms. At the same tick rate: 73 → 17 (124 PT/s), 76 → 22 (44 PT/s) |
+| A Huge map loads 4 times slower than on Windows (after P7-A) | The generator's own CPU: dispatch was 41% of the loader thread's work | Dispatch cache, program flag liveness | `CreateRandomMap` 1.21-1.37 → **0.91-1.02 s** (Windows 0.35); click to the first PT 6.8-6.9 → **5.3 s** (Windows 4.9) |
+| Big battles bring it almost to a halt | Not measured: no save with a battle in view. The simulation's CPU per tick. The PT-rate tuner also raises the rate from 44 to 124 a second once a tick takes 2 ms (§B.5), so a heavier game ticks 2.8 times as often | Dispatch cache, program flag liveness | Simulation time per PT at 124 PT/s **2.00 → 1.36 ms** (−32%), at 44 PT/s 2.55 → 1.82 ms. In the user's save the game now picks 44 PT/s where base picked 124 for half the time: the simulation's share of the core 18% → **7.5%** |
+| Generally less smooth | The sum of the above. Our scripted runs also read every presented frame back from the GPU: a quarter of the render thread (a test-harness cost, not the player's) | §B.3 item 3 | at the display's 120 Hz ("original"), refreshes missed in the sweeps 6.7% → **0.4-0.7%** |
+
+### B.1 How it was measured
+
+**Scenes**, made with `tools/perf/run.py`. Every run holds `tools/game_ports.py`'s lock and is silent. Base and new run alternately, with other workstreams' runs and builds on the same machine.
+
+- **Late save.** The user's autosave `AutoSave 2026.10.15 - 20h.57m.31s` (`analysis/perf/saves/`) is loaded in single player in the windowed app on Metal at 1920×1200, behind other windows (`RECOMP_SCRIPT_BACKGROUND`), with the bundles a player's first run builds.
+  - **Sweeps:** 20 s in game, then the camera crosses the map with the arrow keys held 12 s each: Right, Down, Left, Up (`--pan 1 --pan-hold 12000`).
+  - `--ptps 124` / `--ptps 44` pin the PT rate (registry Min = Max), so both builds tick equally often.
+- **Huge map.** Single Player → Play Random Map with `Game Options\Map Size` = 4, in the same app.
+
+**Instruments:**
+
+- **`mods/perfprobe/`:** a mod with no hooks. A host thread reads the PT counter, the PT rate and the game time every 250 ms (`RECOMP_EE_PERF_TRACE`).
+- **Kit renderer switches (dx/README.md):**
+  - `RECOMP_D3D7_STATS=1`: per 5 s, draws, passes, uploads and readbacks per frame and their cost; the script's own readbacks are counted apart.
+  - `RECOMP_D3D7_FRAME_LOG`: every present on the wall clock.
+  - `RECOMP_D3D7_TRANSFER_LOG=1`: every readback with what asked for it, and every upload with what wrote the surface.
+- **P7-A's `RECOMP_SCHED_TRACE`**, with `_LONG_MS=8` and `_TIMELINE`. The timeline's writer costs 9% of a core on its own thread.
+- **macOS `sample`,** read by `tools/perf/sample_report.py`: per thread, waiting against working, and the working part by leaf, by translated function and by area.
+- **`tools/perf/late_frames.py`:** per held key, the intervals between the game's presents, how many exceed a threshold, and who held the baton meanwhile.
+
+**The red bars.**
+
+- **What a bar is.** The performance overlay's red bar is a new frame shown more than 1.2 frame budgets after the one before (kit `host/performance_overlay.cpp`, `frame_pacing.h`): **more than 20 ms** at the 60 fps default. It is a late frame, not a dropped one.
+- **Where it is counted.** A window behind others is throttled by macOS, so here the intervals are counted where the game makes its frames, between two presents.
+- **What is left out.** The last 1.3 s of each hold: the script reads frames back from the GPU in a wait's last second.
+- **At the display's 120 Hz** ("original" on the settings page, before P7-C's limit), a frame over 12.5 ms has missed a refresh.
+
+### B.2 Where the time went: base [measured]
+
+- **The late save, idle** (30-s profile, the display's rate; shares of a core):
+
+  | Thread | Busy | What it does |
+  |---|---|---|
+  | simulation (`RTSPhysics::Main`) | 21% | translated code 10.7 points; **dispatch 9.0 points**, 42% of its work (`recomp_module_is_call_return` 6.4, `recomp_module_call` 2.3) |
+  | render | 8% | translated code 3.2, renderer 1.4, dispatch 1.4, imports 1.2 |
+  | main (the run thread) | 26% | its wait for the baton: the host's event pump (`sched_checkpoint_at` → SDL, `CFRunLoopRunSpecific`). Off the baton, but a busy wait (P7-A's) |
+
+  Dispatch is the runtime asking, at every `RET` and every indirect call, which module holds an address and whether it is a `CALL` continuation. It did this by binary search over tables of up to 142,174 addresses. In the player host every module is registered, the image included, so that covered every return and every virtual call. The statically linked `ee_boot` had a cache for calls but searched on every `RET`.
+- **The translated code is flat.** No function on the simulation thread reaches 1%: first the engine's `UMCos`/`UMArcTan2` (0x1007df28, 0x1007debb), then object updates. No x87 slow path is taken (ADR-002's fast path holds).
+  - Block flag liveness stores **0.57 flag values per guest instruction** in the executable: 812,684 stores in 1.43 M instructions, 145,585 of them parity [static].
+- **Sweeps.** The game asks for about 7 readbacks a second (0.12 a frame), all of them `GetDC` of the 1920×1200 back buffer (caps 1000601c), so that GDI can draw on it. [measured: `RECOMP_D3D7_TRANSFER_LOG` over a run's game, 448 readbacks, every one for `GetDC` and followed by the back buffer's upload. The only other uploads were small textures written through `Lock`, mostly 64×64.]
+  - Each waited 2.2-2.3 ms with the baton held. The renderer had sent the frame's draws to the GPU at the present or at the readback, so the readback waited for the whole scene to be drawn.
+  - The `ReleaseDC` then uploaded the 9 MB again (1.1 MB per frame on average).
+  - A 1920×1200 copy and wait take 0.45 ms with no other work queued (a scratch benchmark). The rest is the frame's GPU work.
+- **The Huge map** (10-s profile from the click; the loader thread, EXE 0x4ce947): busy 3.8 s of the 10. Of that, dispatch was 41% (1.55 s), translated code 37%, P7-A's scheduler 12%, imports 8%.
+- **`_AIL_set_named_sample_file`.** P7-A's 113-128 ms hold happens once, at the main menu 7 s after start: Miles decodes the menu's MP3 theme. In game the music is DirectMusic (`Data/Music/*.sgt`), and no other long Miles hold appeared in any run. So it is a one-off before a game, and was not changed.
+
+### B.3 What changed
+
+Kit `feat/hotpaths` (CHANGELOG):
+
+1. **A dispatch cache** (`runtime/cpu.cpp`).
+   - `recomp_module_lookup`, `recomp_module_is_call_return` and `recomp_module_call` ask a direct-mapped cache of 64K one-word entries before the binary searches.
+   - `recomp_return` (x86.h, in every translated `RET`) asks once, through `recomp_call_return_any`, which covers the image's own table too.
+   - An entry packs the address, the module, the entry index and both continuation bits into one 64-bit word, so a racing reader sees an old entry or a new one.
+   - Registering a module empties the cache.
+2. **Program flag liveness** (`tools/recomp/translate.py`). Opt-in per game: `[translate] flag_liveness = "program"`, which EE's `game.toml` sets.
+   - A flag is computed only where some instruction can read it.
+   - Each body's branches, loops and jump tables are followed.
+   - What each entry reads at its entry is solved over the module (a worklist fixpoint, 4 s of the executable's translation), so a direct `CALL` keeps what its callee reads, or passes through to its `RET`.
+   - **Every transfer it cannot follow keeps all six flags, as block liveness does:** a `RET`, an indirect `CALL` or `JMP`, an import, a jump table's default arm, a target that is no entry, an instruction it does not know.
+   - Executable: 812,684 flag stores → 484,018 (−40%); parity 145,585 → 74,797; the DLLs alike.
+3. **Scripted input skips frames it does not look at** (`host/input_script.cpp`). During a plain `wait` with more than a second to go, `wants_pixels()` is false and the windowed host stops reading every presented frame back from the GPU. Also the renderer's statistics and frame log. Base has this item too, so both read back the same frames.
+4. **32-bit surfaces between guest memory and the GPU without a conversion** (`dx/ddraw7.cpp`). A BGRA readback writes the surface's rows into guest memory, and the upload hands guest memory to the backend, which sets an opaque surface's alpha in its one packing pass. That removes six passes over 9 MB and two 9 MB allocations per back-buffer `GetDC` at 1920×1200. The Metal device keeps its readback staging buffer.
+5. **The GPU draws a frame's passes as they are recorded** (`host/d3d7_render.cpp`, `host/gpu/metal/metal_device.mm`).
+   - Once a command buffer holds 8 draws, a new pass commits it, so a readback after the scene waits only for what is left.
+   - Metal's readback of a private texture waits once, for its own copy.
+   - Together with item 4: a readback 2.2-2.3 ms → **1.5 ms**.
+   - Also `RECOMP_D3D7_TRANSFER_LOG`.
+
+ee-macos `phase7/hotpaths`:
+
+- `game.toml`: `flag_liveness = "program"`.
+- `tools/perf/` (`run.py`, `sample_report.py`, `late_frames.py`).
+- `mods/perfprobe/`.
+- `windows/frida/perf_probe.js` (legion 0075).
+
+**Looked at and left alone, because it costs little [measured]:**
+
+- the Metal backend's per-call locking and per-draw state: under 1% of the render thread at 50-180 draws a frame;
+- pipeline creation: cached, under 0.2 ms each;
+- texture creation: 56 textures in a game's first 5 s, 2 ms in all;
+- the file overlay: absent from every profile;
+- the x87 layer.
+
+### B.4 Before and after [measured]
+
+**The user's save, the four sweeps at the 60 fps default** (2,560 frames each run; kit `ee` b835958 and ee `main` 8a8fb8c):
+
+| | base | new |
+|---|---|---|
+| red bars (> 20 ms), the game's own PT rate, two runs | 57, 59 (1.36, 1.37 s in all) | **15, 12** (0.36, 0.30 s) |
+| … over 25 ms | 5, 6 | 3, 3 |
+| frame interval p50 / p95 / p99 / max | 16.7 / 19.1 / 21.9 / 69-71 ms | 16.7 / 18.4 / 19.6 / 38-47 ms |
+| the PT rate the game picked | 124 half the time, 44 the rest | 44 (100 now and then) |
+| red bars at a pinned 124 PT/s | 73 (1.70 s) | **17** (0.40 s) |
+| red bars at a pinned 44 PT/s | 76 (1.79 s) | **22** (0.50 s) |
+| the simulation's share of the core (its baton time): own rate / 124 / 44 | 18.3% / 24.7% / 10.9% | **7.4%** / 16.7% / 7.8% |
+| … per PT, at 124 / 44 PT/s | 2.00 / 2.55 ms | **1.36 / 1.82 ms** |
+| the renderer's share (124 / 44) | 13.1% / 11.9% | 9.5% / 9.0% |
+| a readback of the back buffer | 2.2-2.3 ms | 1.5 ms |
+| baton during the red bars | simulation 27-37%, render 18-23% | simulation 28-36%, render 10-12% |
+
+Most of each red bar is the frame limiter's own sleep, when nobody holds the baton. 48 of base's 57 red bars and 12 of new's 15 were 20-23 ms long.
+
+**At the display's 120 Hz** ("original"; on kit `ee` e84d11f, before P7-C's limit; new as of `feat/hotpaths`' item 4 in the first pair and with item 5 in the others):
+
+| | base | new |
+|---|---|---|
+| refreshes missed (> 12.5 ms), the game's rate, two runs | 6.7%, 6.7% | **0.4%, 0.7%** |
+| … at a pinned 124 PT/s, two runs | 6.3%, 8.9% | 1.7%, 0.4% |
+| … at a pinned 44 PT/s | 5.1% | 0.45% |
+| red bars (> 20 ms), the game's rate | 7, 11 | 3, 4 |
+
+**Loading:**
+
+| | Windows | base | new |
+|---|---|---|---|
+| Huge map: `CreateRandomMap` (the game's own timing) ² | 0.35 s | 1.21, 1.37 s | **0.91, 0.93, 1.02 s** |
+| … of which `PaintTiles` | 0.14 s | 0.43, 0.44 s | **0.30, 0.30, 0.33 s** |
+| … click on *Start Game* to the first PT ¹ | 4.9 s | 6.77, 6.89 s | **5.28, 5.31 s** |
+| the user's save: click on *Load* to the first PT ¹ | 4.2 s ("Game loaded" 2.2 s) | 1.6-2.0 s | **1.35-1.41 s** |
+
+¹ The PT counter starts 4-5 s after the click on Windows even for a random map, so these rows compare only roughly; the game's own timings above them compare exactly.
+² The map rows are from kit `ee` e84d11f (P7-A, before P7-C's limit), except new's third run (b835958, 60 fps limit). The batch on b835958 was stopped for the user's playtest before the other map runs. Release 0.7 took 20.1 s in `PaintTiles` and 22.6 s in `CreateRandomMap` (P7-A §A.4.3).
+
+**Windows**, for scale: the simulation thread uses 12-13 ms of CPU a second at 22.9 PT/s, and the render thread half a core at 100 frames a second, on other cores (legion 0075, P7-A's introduction).
+
+### B.5 The PT rate the game picks [static, measured]
+
+In single player, and on a LAN host, the server sets the PT rate from the simulation's measured tick time (`NESynchronousServer::TuneForSlowCPU`, engine 0x10055099; simparity.md §4.1) [static]:
+
+- It takes the largest of the clients' average tick times (0x1004f3a9), a 16-bit count of milliseconds. In practice that is the host's own: remote clients report 0 (netcode.md §5.1).
+- A 0 counts as 1.
+- It computes `1000 / (ms × 100 / 30)`, converts it with `_ftol`, and **keeps only the low byte** (`MOV CL,AL` at 0x100550e6).
+- It then clamps to `[Min, Max] PTs per Second` (registry; 124 here).
+
+| measured tick | 1000 / (ms × 3.33) | the byte | PT/s |
+|---|---:|---:|---:|
+| 0 or 1 ms | 300 | 44 | **44** |
+| 2 ms | 150 | 150 | **124** (the cap) |
+| 3 ms | 100 | 100 | 100 |
+| 4 ms | 75 | 75 | 75 |
+| 13 ms (Windows' late save) | 23 | 23 | 23 |
+
+[measured: P7-A's `# ee: ... measured PT time +0xd8` rows. In 21 of the 22 ten-second windows of two idle runs, 1 ms went with 44 PT/s and 2 ms with 124.]
+
+**So a faster machine ticks less often than a 2-ms one, and a heavier game ticks more often.**
+
+- Base's ticks measured 2 ms about half the time in the user's save, so it ran 124 PT/s.
+- New's measure 1 ms, so it runs 44. That is most of the drop in the simulation's share (18% → 7.4%), and the pinned rows in §B.4 separate it from the CPU per tick.
+- A battle that pushes the tick back over 2 ms nearly triples the rate.
+- On Windows the measured tick includes waits (P7-A §A.7 a): 13 ms in this save gives 23 PT/s. A fresh Huge map gives 44 there too (legion 0075: 42.9 PT/s).
+- In a Windows-hosted LAN game the host's rate applies to the Mac.
+
+This is the game's own arithmetic, and the port keeps it. Every machine in a game uses the host's rate, so it is no sync question.
+
+### B.6 Exactness [measured]
+
+Nothing here may change a simulation value (ADR-002; the LAN game with Windows peers depends on it).
+
+- **The dispatch cache** memoizes pure functions of tables that do not change once a module is registered, and registration empties it. `loader_tests` checks 400,000 addresses against the binary searches (each looked up twice, a miss and a hit), half of them after a second module registered.
+- **Program flag liveness** drops only flag stores that no instruction can read.
+  - Within a body it is an ordinary backward dataflow over the instructions' real successors.
+  - At every transfer it cannot follow, all six flags stay live, which is block liveness's own rule.
+  - At a direct `CALL` the callee's entry live-in applies. The callee's `RET`s keep all six, so a flag it passes through unwritten is live at its entry, and the caller still computes it.
+  - `test_flag_liveness.py` (kit portable suite) checks the analysis on synthetic bodies: branches, a carry chain in a loop, callees that read, pass or set flags, tail jumps into alternate entries, jump tables, indirect transfers.
+  - It also runs five branchy functions translated this way 200 times each against Unicorn: registers, the defined flags at the `RET` and memory agree.
+- **The 32-bit surface path** puts the same bytes in guest memory and on the GPU. `d3d7_tests` "32-bit surfaces without a conversion" checks, on the reference backend:
+  - the readback, byte for byte;
+  - an X8R8G8B8 surface written with alpha 0 reaching the renderer opaque, while guest memory keeps the guest's bytes;
+  - an A8R8G8B8 texture keeping its alpha.
+- **Committing per pass** changes only when the GPU starts. One queue runs the command buffers in order, and Metal orders their uses of each texture.
+  - `d3d7_gpu_tests`' new scene "passes after many draws" (passes that read each other's output, more draws than the threshold) matches the reference renderer exactly.
+  - Every other scene's result is the same as before the change.
+- **The gates**, on the final build (kit `feat/hotpaths` on `ee` b835958, ee `phase7/hotpaths` on `main` 8a8fb8c):
+  - **`tools/test.py --simparity`** (its default scenario): the two Mac games agree on all 7,077 PTs. Against legion's `win-as-1` they agree to PT 5616 and differ from 5617, after the second autosave landed one CT apart (4817 on the Mac, 4803 on Windows): the result 0.7 and P7-A had (simparity.md §9.3). The first save, loaded, agrees with Windows' load of the Mac's save (`win-load-mac-2423`) on all 4,799 common PTs. Every autosave was written.
+  - **The M1 replay** (`tools/m1/run_matrix.py --cases A06,C05,S00b --no-fetch --build both`): 27 of 27 packs pass, on bundles and linked builds.
+  - **`--boot`** (11 milestones, 14 threads, render at CW 007f, clean exit), **`--menus`** (6 of 6) and **`--lobby`** (2 of 2) pass. ee-macos's `tools/test.py`: 142 passed. Its one failure, `test_translation_inputs_are_the_function_db_exports`, is the worktree's `analysis` symlink resolving to the main checkout.
+  - **The kit's suites:** `tools/test.py` (507 passed), `--native` (42 of 43; `runtime_tests`' two `SetTimer` checks across a clock wrap fail on `ee` as before, P7-A §A.5), `check_repo`, `check_game_literals`, `format.py`.
+
+### B.7 Left to do
+
+- **The back buffer's `GetDC`.** About 7 a second while the camera shows more, each now 1.5 ms of GPU wait and a 9 MB upload. GDI could draw on a layer the GPU composites instead, reading the frame back only for an operation that reads the destination. Exact, but it touches every GDI writer (runtime/gdi32).
+- **A cap on a Mac host's PT rate** (§B.5). The game's own `Max PTs per Second` (registry, options+0x560) is the knob. A cap of 44 would hold a Mac host near 44 ticks a second however heavy the battle, as legion's fresh games run. Every peer takes the rate from the host's CTs. It is a game-settings decision for the main session, not a hot path.
+- **A big battle in view**, Mac and Windows, as in P7-A §A.8.
+- **What the generated code still costs.**
+  - The guest registers live in memory (`c->r[]`). A guest store goes through `g_mem` as bytes, which may alias them, so the compiler reloads registers after every store.
+  - Every store also tests two globals (`g_watch_len`, `g_dirty_count`).
+  - Each is a change to every translated function, to be weighed against P7-A's preemption points there.
+- **Flags across calls.** A convention that no flag crosses a `CALL` or `RET` would drop most of the rest. The translator's study (`translate.py --check-flags`) finds 5 call sites of 142,174 in the executable that would read one, all reached through an indirect tail jump it cannot follow. Not taken: program liveness makes no such assumption.
+- **The run thread's wait** (§B.2): 26-40% of a core in its event pump while it waits for the baton (P7-A's).
+
+---
+
 ## Input and frame rate (P7-C)
 
 The user reported three things after last night's games: W, A, S or D pressed in game with nothing selected made "weird sounds"; a held arrow key scrolled the camera only a tiny amount compared with Windows; and the app ran at the display's 120 Hz (74 fps on average in the log) where 60 is plenty.
