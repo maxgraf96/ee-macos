@@ -1,3 +1,5 @@
+![Empire Earth running natively on a Mac: a Prehistoric Age town center and its citizens on a random map](docs/images/header.webp)
+
 # Empire Earth for Apple Silicon
 
 **Play the original *Empire Earth* (2001) natively on an Apple Silicon Mac, including LAN games against friends on Windows.**
@@ -186,7 +188,7 @@ The third-party components in the app carry their own licences, listed in its `T
 
 **This is an unofficial fan project.** It is not affiliated with, endorsed by or supported by Rebellion, Sierra, Stainless Steel Studios, GOG or Apple. *Empire Earth* and all related names and marks belong to their respective owners, and are used here only to identify the game this project works with.
 
-**This project contains no part of *Empire Earth*.** Neither this repository nor the app includes any of the game's code, data or assets, and no translated game code. To use it, you need your own legitimately purchased copy of *Empire Earth Gold* from GOG. The app reads that copy and builds the translated game on your own Mac. Do not share your imported game files or the built game, and do not use this project with copies you don't own.
+**This project contains no part of *Empire Earth*.** Apart from the screenshot at the top of this page, which shows the game running through this port, neither this repository nor the app includes any of the game's code, data or assets, and no translated game code. To use it, you need your own legitimately purchased copy of *Empire Earth Gold* from GOG. The app reads that copy and builds the translated game on your own Mac. Do not share your imported game files or the built game, and do not use this project with copies you don't own.
 
 **No warranty.** This software is provided "as is", without warranty of any kind, express or implied, including the warranties of merchantability, fitness for a particular purpose and non-infringement. It is pre-1.0 software: it may crash, lose saved games or behave differently from the original game. You use it at your own risk. In no event shall the authors or contributors be liable for any claim, damages or other liability arising from its use. Keep a copy of your saved games.
 
