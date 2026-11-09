@@ -2,7 +2,7 @@
 
 This app runs **your own copy of Empire Earth Gold from GOG** natively on an Apple Silicon Mac. It contains none of the game. The first time you open it, it copies your GOG files, checks them and builds the game for your Mac, which takes a few minutes. After that it starts straight into the game.
 
-This guide is for **version 0.7** (`EmpireEarth-0.7.dmg`). The disk image has a short **Read Me First.txt** with the same steps.
+This guide is for **version 0.8.3** (`EmpireEarth-0.8.3.dmg`). The disk image has a short **Read Me First.txt** with the same steps.
 
 ## What you need
 
@@ -26,8 +26,8 @@ Your files are only read, never changed.
 
 ## 2. Install the app
 
-- **From `EmpireEarth-0.7.dmg`:** open it and drag **EmpireEarth** onto **Applications**. Then eject the disk image.
-- **From `EmpireEarth-0.7.zip`:** open it, then drag the **EmpireEarth** app into your Applications folder.
+- **From `EmpireEarth-0.8.3.dmg`:** open it and drag **EmpireEarth** onto **Applications**. Then eject the disk image.
+- **From `EmpireEarth-0.8.3.zip`:** open it, then drag the **EmpireEarth** app into your Applications folder.
 
 **Open it from Applications.** Opened straight from the disk image or from Downloads, macOS runs it from a temporary, read-only place (App Translocation). The app then says **“Please drag EmpireEarth into your Applications folder first, then open it from there.”** and offers:
 - **Move to Applications:** it copies itself there (replacing an older copy) and opens from there;
@@ -95,10 +95,10 @@ The window says what happened and what to do. The usual cases:
 
 ## 5. Playing
 
-- **The mouse:** click in the window to capture it. Hold **Escape** to release it.
-- **The intro movies:** press **Escape** to skip them.
+- **The mouse:** click in the window to capture it. Hold **Escape** to give it back to macOS, so the window controls, the menu bar and the fullscreen button can be used; release Escape to capture it again.
+- **The intro movies:** press **any key** once for each of the three movies to skip them (Escape works too).
 - **Quitting:** ⌘Q, or Exit Game in the menu.
-- **Settings:** F10 is the game's own menu, as on Windows. The app's settings (window, frame limit, performance overlay) open with **⌘,** (Command-comma). The game runs at up to **120 frames a second** (a 120 Hz display's full rate; 60 on a 60 Hz one); the Frame limit row also offers 40, 60 and "original" (the display's own rate, uncapped if the game's own *Wait for VSync* is off). **F11** shows the frame rate (counters, then a graph, then off); it starts hidden.
+- **Fullscreen and the app's settings:** press **Control-Command-F** to toggle macOS fullscreen (it works even while the game owns the mouse), or open the app's settings with **⌘,** (Command-comma) to choose **Windowed**, **Borderless** or **Fullscreen** (and the frame limit and performance overlay). F10 is the game's own menu, as on Windows. The window mode is remembered. The game runs at up to **120 frames a second** (a 120 Hz display's full rate; 60 on a 60 Hz one); the Frame limit row also offers 40, 60 and "original" (the display's own rate, uncapped if the game's own *Wait for VSync* is off). **F11** shows the frame rate (counters, then a graph, then off); it starts hidden.
 - **One copy at a time:** the game uses fixed network ports (33334–33336) for every game, single player included. If another copy of Empire Earth is running on this Mac (this app, a Wine copy, CrossOver), or another program holds those ports, the app says so when it starts: close the other one first. Started anyway, the game stops as soon as you start a game (Play Random Map, the Scenario Editor, a LAN game).
 - **Multiplayer:** the game's own LAN play, with other Macs and with Windows players who have the GOG game (§5.1). For games over the internet, everyone joins a VPN that passes the game's LAN broadcasts, such as ZeroTier, which is free for Mac and Windows. The game list is the only way to join with GOG copies (§5.1 step 6). **Tailscale does not work for Empire Earth:** it passes no broadcasts, so the list stays empty, and Direct Connect cannot replace the list.
 

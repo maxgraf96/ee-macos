@@ -1100,6 +1100,12 @@ static NSButton *button(NSString *title, id target, SEL action) {
                       @"minutes. Nothing is changed in the files you choose.",
                       13, NSFontWeightRegular);
 
+    NSTextField *tip = label(@"When the game starts: click in it to capture the mouse; hold "
+                             @"Escape to give the mouse back to macOS. Control-Command-F toggles "
+                             @"fullscreen; Command-comma opens the app settings.",
+                             11, NSFontWeightRegular);
+    tip.textColor = NSColor.secondaryLabelColor;
+
     // Choosing the game.
     NSTextField *ask = label(@"Choose your GOG Empire Earth Gold installer or game folder",
                              13, NSFontWeightSemibold);
@@ -1153,7 +1159,7 @@ static NSButton *button(NSString *title, id target, SEL action) {
     [self.buttons.widthAnchor constraintEqualToConstant:552].active = YES;
 
     NSStackView *all = [NSStackView stackViewWithViews:@[
-        self.headline, self.body, self.choices, self.progressBox, self.errorBox
+        self.headline, self.body, tip, self.choices, self.progressBox, self.errorBox
     ]];
     all.orientation = NSUserInterfaceLayoutOrientationVertical;
     all.alignment = NSLayoutAttributeLeading;
