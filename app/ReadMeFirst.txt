@@ -20,6 +20,11 @@ Apple Silicon (M1 or later) and macOS 13 or later. It contains none of the game.
    "Empire Earth Gold" folder. It then builds the game for your Mac, once:
    about 2 to 5 minutes. After that it starts straight into the game.
 
+   When the game starts, click in it to capture the mouse; hold Escape to
+   give the mouse back to macOS. Control-Command-F toggles fullscreen even
+   while the mouse is captured; Command-comma opens the app's settings
+   (Windowed, Borderless, Fullscreen).
+
 5. Your files are in ~/Library/Application Support/EmpireEarth (in Finder:
    Go > Go to Folder...). To remove everything, quit the game, then move
    EmpireEarth from Applications and that folder to the Bin. The folder holds
